@@ -1,0 +1,27 @@
+[Unit]
+Description=Vela Music
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=vela
+Group=vela
+WorkingDirectory=/opt/vela
+ExecStart=/opt/vela/vela-server
+Environment=VELA_BIND=127.0.0.1:3210
+Environment=VELA_DATA_DIR=/var/lib/vela
+Environment=VELA_WEB_DIR=/opt/vela/web
+EnvironmentFile=-/etc/vela/environment
+StateDirectory=vela
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target

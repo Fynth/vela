@@ -1,0 +1,6 @@
+# Set your own DNS name; enable VELA_COOKIE_SECURE=true before exposing HTTPS.
+# Finish first-run setup through loopback before making this reachable.
+music.example.org {
+    reverse_proxy 127.0.0.1:3210
+    # Do not log cookies, share tokens or import URLs. Access logs are disabled.
+}

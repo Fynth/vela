@@ -1,0 +1,23 @@
+services:
+  vela:
+    build: .
+    ports:
+      - "127.0.0.1:3210:3210"
+    environment:
+      VELA_COOKIE_SECURE: "false"
+      VELA_MAX_FILE_BYTES: "262144000"
+      VELA_MAX_STORAGE_BYTES: "10737418240"
+      RUST_LOG: "vela_server=info,vela_imports=info"
+    volumes:
+      - vela-data:/data
+    restart: unless-stopped
+    init: true
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    mem_limit: 512m
+    cpus: 2
+    stop_grace_period: 60s
+volumes:
+  vela-data:

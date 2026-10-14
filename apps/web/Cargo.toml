@@ -1,0 +1,19 @@
+[package]
+name = "vela-web"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+dioxus.workspace = true
+vela-domain.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+gloo-net = { version = "0.6", features = ["json"] }
+gloo-timers = { version = "0.3", features = ["futures"] }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = ["Window", "Document", "Location", "HtmlElement", "HtmlAudioElement", "HtmlMediaElement", "HtmlInputElement", "File", "FileList", "Blob", "FormData", "Request", "RequestInit", "RequestCredentials", "Response", "Headers", "Storage", "Event", "EventTarget", "CustomEvent", "CustomEventInit", "KeyboardEvent", "Navigator", "MediaSession"] }

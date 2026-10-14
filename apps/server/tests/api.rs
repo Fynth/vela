@@ -1,0 +1,1361 @@
+//! Real TCP/HTTP tests against isolated SQLite and filesystem stores.
+use reqwest::{Client, Method, Response, StatusCode};
+use serde_json::json;
+use vela_core::config::Config;
+use vela_domain::*;
+use vela_server::{AppState, router};
+
+const AUDIO: &[u8] = include_bytes!("../../../crates/media/tests/fixtures/signal.flac");
+const OTHER_AUDIO: &[u8] = include_bytes!("../../../crates/media/tests/fixtures/beacon.mp3");
+struct Actor {
+    cookie: String,
+    csrf: String,
+    user: User,
+}
+struct TestApp {
+    base: String,
+    client: Client,
+    state: AppState,
+    _dir: Option<tempfile::TempDir>,
+    task: tokio::task::JoinHandle<()>,
+    admin: Actor,
+}
+impl Drop for TestApp {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+impl TestApp {
+    async fn new() -> Self {
+        Self::with_file_limit(1024 * 1024).await
+    }
+    async fn with_file_limit(max_file_bytes: u64) -> Self {
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config {
+            bind: "127.0.0.1:0".parse().unwrap(),
+            data_dir: dir.path().into(),
+            web_dir: dir.path().join("web"),
+            cookie_secure: false,
+            max_file_bytes,
+            max_storage_bytes: 20 * 1024 * 1024,
+        };
+        let state = AppState::initialize(config).await.unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let app = router(state.clone());
+        let task = tokio::spawn(async move {
+            axum::serve(
+                listener,
+                app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+            )
+            .await
+            .unwrap()
+        });
+        let client = Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .unwrap();
+        let r = client
+            .post(format!("{base}/api/setup"))
+            .json(&Credentials {
+                username: "admin".into(),
+                password: "fixture password 12345".into(),
+            })
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::OK);
+        let admin = actor(r).await;
+        Self {
+            base,
+            client,
+            state,
+            _dir: Some(dir),
+            task,
+            admin,
+        }
+    }
+    fn request(&self, method: Method, path: &str, actor: &Actor) -> reqwest::RequestBuilder {
+        self.client
+            .request(method, format!("{}{path}", self.base))
+            .header("Cookie", &actor.cookie)
+            .header("X-CSRF-Token", &actor.csrf)
+    }
+    async fn user(&self, name: &str) -> Actor {
+        let c = Credentials {
+            username: name.into(),
+            password: "fixture password 12345".into(),
+        };
+        let r = self
+            .request(Method::POST, "/api/users", &self.admin)
+            .json(&c)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::OK);
+        let r = self
+            .client
+            .post(format!("{}/api/login", self.base))
+            .json(&c)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::OK);
+        actor(r).await
+    }
+    async fn upload(&self, actor: &Actor) -> UploadResult {
+        let form = reqwest::multipart::Form::new().part(
+            "file",
+            reqwest::multipart::Part::bytes(AUDIO.to_vec())
+                .file_name("../../signal.flac")
+                .mime_str("audio/flac")
+                .unwrap(),
+        );
+        let r = self
+            .request(Method::POST, "/api/upload", actor)
+            .multipart(form)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::OK, "{}", r.text().await.unwrap());
+        r.json().await.unwrap()
+    }
+}
+async fn actor(r: Response) -> Actor {
+    let cookie = r.headers()["set-cookie"]
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+    let body: AuthResponse = r.json().await.unwrap();
+    Actor {
+        cookie,
+        csrf: body.csrf_token,
+        user: body.user,
+    }
+}
+#[tokio::test]
+async fn upload_extract_browse_artwork_stream_and_deduplicate() {
+    let app = TestApp::new().await;
+    let u = app.upload(&app.admin).await;
+    assert!(!u.duplicate);
+    assert!(u.track.duration_ms > 0);
+    assert_eq!(u.track.codec.to_lowercase(), "flac");
+    assert!(u.track.artwork_id.is_some());
+    let second = app.upload(&app.admin).await;
+    assert!(second.duplicate);
+    assert_eq!(u.track.id, second.track.id);
+    let r = app
+        .request(Method::GET, "/api/tracks", &app.admin)
+        .send()
+        .await
+        .unwrap();
+    let page: TrackPage = r.json().await.unwrap();
+    assert_eq!(page.items.len(), 1);
+    let r = app
+        .request(
+            Method::GET,
+            &format!("/api/artwork/{}", u.track.artwork_id.unwrap()),
+            &app.admin,
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    assert_eq!(r.headers()["content-type"], "image/jpeg");
+    assert!(r.bytes().await.unwrap().len() > 100);
+    let r = app
+        .request(
+            Method::GET,
+            &format!("/api/tracks/{}/stream", u.track.id),
+            &app.admin,
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    assert_eq!(&r.bytes().await.unwrap()[..], AUDIO);
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM media_assets")
+            .fetch_one(&app.state.pool)
+            .await
+            .unwrap(),
+        1
+    );
+}
+#[tokio::test]
+async fn http_range_suffix_open_head_conditionals_and_unsatisfiable() {
+    let app = TestApp::new().await;
+    let u = app.upload(&app.admin).await;
+    let path = format!("/api/tracks/{}/stream", u.track.id);
+    for (range, start, end) in [
+        ("bytes=0-15", 0, 15),
+        ("bytes=16-", 16, AUDIO.len() - 1),
+        ("bytes=-12", AUDIO.len() - 12, AUDIO.len() - 1),
+    ] {
+        let r = app
+            .request(Method::GET, &path, &app.admin)
+            .header("Range", range)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(
+            r.headers()["content-range"],
+            format!("bytes {start}-{end}/{}", AUDIO.len())
+        );
+        assert_eq!(&r.bytes().await.unwrap()[..], &AUDIO[start..=end]);
+    }
+    let r = app
+        .request(Method::GET, &path, &app.admin)
+        .header("Range", "bytes=99999999-")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::RANGE_NOT_SATISFIABLE);
+    assert_eq!(
+        r.headers()["content-range"],
+        format!("bytes */{}", AUDIO.len())
+    );
+    let r = app
+        .request(Method::HEAD, &path, &app.admin)
+        .header("Range", "bytes=0-15")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    assert_eq!(r.headers()["content-length"], AUDIO.len().to_string());
+    assert_eq!(r.bytes().await.unwrap().len(), 0);
+    let r = app
+        .request(Method::GET, &path, &app.admin)
+        .send()
+        .await
+        .unwrap();
+    let etag = r.headers()["etag"].to_str().unwrap().to_string();
+    drop(r);
+    let r = app
+        .request(Method::GET, &path, &app.admin)
+        .header("If-None-Match", &etag)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::NOT_MODIFIED);
+    let r = app
+        .request(Method::GET, &path, &app.admin)
+        .header("If-None-Match", format!("W/{etag}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::NOT_MODIFIED);
+    let r = app
+        .request(Method::GET, &path, &app.admin)
+        .header("Range", "seconds=0-15")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    let r = app
+        .request(Method::GET, &path, &app.admin)
+        .header("If-Range", "\"old\"")
+        .header("Range", "bytes=0-15")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    let r = app
+        .request(Method::GET, &path, &app.admin)
+        .header("Range", "bytes=0-1,3-4")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+}
+#[tokio::test]
+async fn authentication_csrf_private_catalog_and_artwork_are_enforced() {
+    let app = TestApp::new().await;
+    let u = app.upload(&app.admin).await;
+    let other = app.user("listener").await;
+    let page: TrackPage = app
+        .request(Method::GET, "/api/tracks", &other)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(page.items.is_empty());
+    for path in [
+        format!("/api/tracks/{}/stream", u.track.id),
+        format!("/api/artwork/{}", u.track.artwork_id.unwrap()),
+    ] {
+        assert_eq!(
+            app.request(Method::GET, &path, &other)
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            app.client
+                .get(format!("{}{path}", app.base))
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::UNAUTHORIZED
+        );
+    }
+    let path = format!("/api/tracks/{}/favorite", u.track.id);
+    let r = app
+        .client
+        .post(format!("{}{path}", app.base))
+        .header("Cookie", &app.admin.cookie)
+        .json(&json!({"favorite":true}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::FORBIDDEN);
+    let r = app
+        .request(Method::POST, &path, &app.admin)
+        .header("Origin", "https://evil.example")
+        .json(&json!({"favorite":true}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::FORBIDDEN);
+    let r = app
+        .request(Method::POST, "/api/users", &other)
+        .json(&Credentials {
+            username: "intruder".into(),
+            password: "fixture password 12345".into(),
+        })
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::FORBIDDEN);
+    let r = app
+        .request(Method::POST, "/api/logout", &app.admin)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        app.request(Method::GET, "/api/me", &app.admin)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+}
+#[tokio::test]
+async fn favorites_search_and_shared_media_identity_remain_owner_isolated() {
+    let app = TestApp::new().await;
+    let u = app.upload(&app.admin).await;
+    let other = app.user("listener").await;
+    let other_track = app.upload(&other).await;
+    assert_ne!(u.track.id, other_track.track.id);
+    assert!(!other_track.duplicate);
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM media_assets")
+            .fetch_one(&app.state.pool)
+            .await
+            .unwrap(),
+        1
+    );
+    let r = app
+        .request(
+            Method::POST,
+            &format!("/api/tracks/{}/favorite", u.track.id),
+            &app.admin,
+        )
+        .json(&json!({"favorite":true}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::NO_CONTENT);
+    let page: TrackPage = app
+        .request(Method::GET, "/api/tracks?favorites=true", &app.admin)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(page.items.len(), 1);
+    assert!(page.items[0].favorite);
+    let page: TrackPage = app
+        .request(Method::GET, "/api/tracks?favorites=true", &other)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(page.items.is_empty());
+    for q in ["Signal", "\" OR 1=1 --", "NEAR(\"anything\")"] {
+        let r = app
+            .request(Method::GET, "/api/tracks", &app.admin)
+            .query(&[("q", q)])
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::OK);
+    }
+}
+#[tokio::test]
+async fn collaboration_conflicts_idempotency_reordering_sharing_and_revocation() {
+    let app = TestApp::new().await;
+    let u = app.upload(&app.admin).await;
+    let other = app.user("listener").await;
+    let p: PlaylistSummary = app
+        .request(Method::POST, "/api/playlists", &app.admin)
+        .json(&CreatePlaylist {
+            name: "Evening signals".into(),
+        })
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let path = format!("/api/playlists/{}", p.id);
+    assert_eq!(
+        app.request(Method::GET, &path, &other)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+    let m = PlaylistMutation {
+        revision: 0,
+        mutation_id: uuid::Uuid::new_v4().to_string(),
+        track_id: Some(u.track.id.clone()),
+        item_ids: None,
+    };
+    let added: PlaylistDetail = app
+        .request(Method::POST, &format!("{path}/items"), &app.admin)
+        .json(&m)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(added.playlist.revision, 1);
+    let again: PlaylistDetail = app
+        .request(Method::POST, &format!("{path}/items"), &app.admin)
+        .json(&m)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(again.items.len(), 1);
+    assert_eq!(again.playlist.revision, 1);
+    let r = app
+        .request(Method::POST, &format!("{path}/collaborators"), &app.admin)
+        .json(&CollaboratorRequest {
+            username: "listener".into(),
+            can_edit: true,
+        })
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::NO_CONTENT);
+    let list: Vec<PlaylistCollaborator> = app
+        .request(Method::GET, &format!("{path}/collaborators"), &app.admin)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].username, "listener");
+    assert!(list[0].can_edit);
+    assert_eq!(
+        app.request(Method::GET, &format!("{path}/collaborators"), &other)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+    let detail: PlaylistDetail = app
+        .request(Method::GET, &path, &other)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(detail.playlist.can_edit);
+    assert!(!detail.items[0].can_stream);
+    assert_eq!(
+        app.request(
+            Method::GET,
+            &format!("/api/tracks/{}/stream", u.track.id),
+            &other
+        )
+        .send()
+        .await
+        .unwrap()
+        .status(),
+        StatusCode::NOT_FOUND
+    );
+    let other_track = app.upload(&other).await;
+    let a = PlaylistMutation {
+        revision: 1,
+        mutation_id: uuid::Uuid::new_v4().to_string(),
+        track_id: Some(u.track.id.clone()),
+        item_ids: None,
+    };
+    let b = PlaylistMutation {
+        revision: 1,
+        mutation_id: uuid::Uuid::new_v4().to_string(),
+        track_id: Some(other_track.track.id),
+        item_ids: None,
+    };
+    let (ra, rb) = tokio::join!(
+        app.request(Method::POST, &format!("{path}/items"), &app.admin)
+            .json(&a)
+            .send(),
+        app.request(Method::POST, &format!("{path}/items"), &other)
+            .json(&b)
+            .send()
+    );
+    let codes = [ra.unwrap().status(), rb.unwrap().status()];
+    assert!(codes.contains(&StatusCode::OK));
+    assert!(codes.contains(&StatusCode::CONFLICT));
+    let detail: PlaylistDetail = app
+        .request(Method::GET, &path, &app.admin)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(detail.items.len(), 2);
+    assert_eq!(detail.playlist.revision, 2);
+    let (actor, mut retry) = if codes[0] == StatusCode::CONFLICT {
+        (&app.admin, a)
+    } else {
+        (&other, b)
+    };
+    retry.revision = 2;
+    assert_eq!(
+        app.request(Method::POST, &format!("{path}/items"), actor)
+            .json(&retry)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK
+    );
+    let detail: PlaylistDetail = app
+        .request(Method::GET, &path, &app.admin)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(detail.items.len(), 3);
+    assert_eq!(detail.playlist.revision, 3);
+    let order = PlaylistMutation {
+        revision: 3,
+        mutation_id: uuid::Uuid::new_v4().to_string(),
+        track_id: None,
+        item_ids: Some(detail.items.iter().rev().map(|i| i.id.clone()).collect()),
+    };
+    let reordered: PlaylistDetail = app
+        .request(Method::PUT, &format!("{path}/order"), &other)
+        .json(&order)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(reordered.items[0].id, detail.items[2].id);
+    let share: ShareResponse = app
+        .request(Method::POST, &format!("{path}/shares"), &app.admin)
+        .json(&ShareRequest {
+            expires_in_seconds: 60,
+        })
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let expired = app
+        .state
+        .playlists
+        .share(
+            &app.admin.user,
+            &p.id,
+            ShareRequest {
+                expires_in_seconds: 60,
+            },
+        )
+        .await
+        .unwrap();
+    sqlx::query("UPDATE playlist_shares SET expires_at=0 WHERE id=?")
+        .bind(&expired.id)
+        .execute(&app.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        app.client
+            .get(format!("{}/api/shares/{}", app.base, expired.token))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+    let share_path = format!("/api/shares/{}", share.token);
+    let r = app
+        .client
+        .get(format!("{}{share_path}", app.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    let public: PlaylistDetail = r.json().await.unwrap();
+    assert!(public.items.iter().all(|i| !i.can_stream));
+    let own_ids = detail
+        .items
+        .iter()
+        .filter(|i| i.can_stream)
+        .map(|i| &i.track.id)
+        .collect::<Vec<_>>();
+    assert!(public.items.iter().all(|i| own_ids.contains(&&i.track.id)));
+    let r = app
+        .request(Method::DELETE, &format!("{path}/shares"), &app.admin)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        app.client
+            .get(format!("{}{share_path}", app.base))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+    app.request(
+        Method::DELETE,
+        &format!("{path}/collaborators/{}", other.user.id),
+        &app.admin,
+    )
+    .send()
+    .await
+    .unwrap();
+    assert_eq!(
+        app.request(Method::GET, &path, &other)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+}
+#[tokio::test]
+async fn malicious_imports_and_invalid_uploads_are_rejected() {
+    let app = TestApp::new().await;
+    for url in [
+        "http://127.0.0.1/secret",
+        "http://[::1]/",
+        "http://169.254.169.254/latest/meta-data/",
+        "http://2130706433/",
+        "http://[::ffff:127.0.0.1]/",
+        "http://user:pass@example.org/audio.mp3",
+        "ftp://example.org/audio.mp3",
+        "http://example.org:8080/audio.mp3",
+    ] {
+        let r = app
+            .request(Method::POST, "/api/imports/preview", &app.admin)
+            .json(&ImportRequest { url: url.into() })
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::BAD_REQUEST, "URL {url}");
+        let body: ApiError = r.json().await.unwrap();
+        assert!(!body.error.contains("user:pass"));
+    }
+    let fake = reqwest::multipart::Form::new().part(
+        "file",
+        reqwest::multipart::Part::bytes(b"this is not FLAC".to_vec()).file_name("music.flac"),
+    );
+    let r = app
+        .request(Method::POST, "/api/upload", &app.admin)
+        .multipart(fake)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::BAD_REQUEST);
+    let large = reqwest::multipart::Form::new().part(
+        "file",
+        reqwest::multipart::Part::bytes(vec![0u8; 1024 * 1024 + 1]).file_name("large.flac"),
+    );
+    let r = app
+        .request(Method::POST, "/api/upload", &app.admin)
+        .multipart(large)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    let stats: LibraryStats = app
+        .request(Method::GET, "/api/stats", &app.admin)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(stats.tracks, 0);
+    let mut entries = tokio::fs::read_dir(app.state.config.data_dir.join("staging"))
+        .await
+        .unwrap();
+    while let Some(e) = entries.next_entry().await.unwrap() {
+        assert!(!e.file_name().to_string_lossy().starts_with("upload-"));
+    }
+}
+#[tokio::test]
+async fn login_rate_limit_is_bounded_and_bootstrap_is_single_use() {
+    let app = TestApp::new().await;
+    let c = Credentials {
+        username: "admin".into(),
+        password: "fixture password 12345".into(),
+    };
+    assert_eq!(
+        app.client
+            .post(format!("{}/api/setup", app.base))
+            .json(&c)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::CONFLICT
+    );
+    let bad = Credentials {
+        username: "admin".into(),
+        password: "x".repeat(129),
+    };
+    let mut last = StatusCode::OK;
+    for _ in 0..16 {
+        last = app
+            .client
+            .post(format!("{}/api/login", app.base))
+            .json(&bad)
+            .send()
+            .await
+            .unwrap()
+            .status();
+    }
+    assert_eq!(last, StatusCode::TOO_MANY_REQUESTS);
+}
+#[tokio::test]
+async fn database_and_media_survive_reopen_and_abandoned_uploads_are_cleaned() {
+    let mut app = TestApp::new().await;
+    let u = app.upload(&app.admin).await;
+    tokio::fs::write(
+        app.state
+            .config
+            .data_dir
+            .join("staging/upload-abandoned.part"),
+        b"unfinished",
+    )
+    .await
+    .unwrap();
+    app.task.abort();
+    app.state.pool.close().await;
+    let config = app.state.config.clone();
+    let owner = app.admin.user.id.clone();
+    let _dir = app._dir.take();
+    drop(app);
+    tokio::task::yield_now().await;
+    let reopened = AppState::initialize(config.clone()).await.unwrap();
+    let track = reopened
+        .media
+        .get_track(&owner, &u.track.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(track.id, u.track.id);
+    let asset = reopened
+        .media
+        .asset(&owner, &track.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(tokio::fs::read(asset.path).await.unwrap(), AUDIO);
+    assert!(
+        !config
+            .data_dir
+            .join("staging/upload-abandoned.part")
+            .exists()
+    );
+    assert!(!reopened.auth.needs_setup().await.unwrap());
+}
+
+#[tokio::test]
+async fn backup_restores_real_audio_metadata_accounts_and_sessions() {
+    let app = TestApp::new().await;
+    let uploaded = app.upload(&app.admin).await;
+    let backup_dir = tempfile::tempdir().unwrap();
+    let archive = backup_dir.path().join("backup.tar.gz");
+    let restored = backup_dir.path().join("restored");
+    let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/backup.py");
+    let output = tokio::process::Command::new("python3")
+        .arg(&script)
+        .args(["create", "--data-dir"])
+        .arg(&app.state.config.data_dir)
+        .arg("--output")
+        .arg(&archive)
+        .output()
+        .await
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let output = tokio::process::Command::new("python3")
+        .arg(&script)
+        .args(["restore", "--archive"])
+        .arg(&archive)
+        .arg("--data-dir")
+        .arg(&restored)
+        .output()
+        .await
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let config = Config {
+        data_dir: restored,
+        ..app.state.config.clone()
+    };
+    let restored = AppState::initialize(config).await.unwrap();
+    let track = restored
+        .media
+        .get_track(&app.admin.user.id, &uploaded.track.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(track.title, uploaded.track.title);
+    let asset = restored
+        .media
+        .asset(&app.admin.user.id, &track.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(tokio::fs::read(asset.path).await.unwrap(), AUDIO);
+    let session = restored
+        .auth
+        .session(app.admin.cookie.split_once('=').unwrap().1)
+        .await
+        .unwrap();
+    assert_eq!(session.response.user, app.admin.user);
+}
+
+#[tokio::test]
+async fn data_directory_lock_prevents_competing_recovery() {
+    let app = TestApp::new().await;
+    assert!(
+        AppState::initialize(app.state.config.clone())
+            .await
+            .is_err()
+    );
+    assert!(app.state.media.stats(&app.admin.user.id).await.is_ok());
+}
+
+#[tokio::test]
+async fn viewer_cannot_edit_manage_access_or_play_and_can_leave() {
+    let app = TestApp::new().await;
+    let viewer = app.user("viewer").await;
+    let playlist = app
+        .state
+        .playlists
+        .create(
+            &app.admin.user,
+            CreatePlaylist {
+                name: "Read only".into(),
+            },
+        )
+        .await
+        .unwrap();
+    app.state
+        .playlists
+        .collaborate(
+            &app.admin.user,
+            &playlist.id,
+            CollaboratorRequest {
+                username: "viewer".into(),
+                can_edit: false,
+            },
+        )
+        .await
+        .unwrap();
+    let path = format!("/api/playlists/{}", playlist.id);
+    assert_eq!(
+        app.request(Method::GET, &path, &viewer)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK
+    );
+    let mutation = PlaylistMutation {
+        revision: 0,
+        mutation_id: uuid::Uuid::new_v4().to_string(),
+        track_id: None,
+        item_ids: Some(Vec::new()),
+    };
+    assert_eq!(
+        app.request(Method::PUT, &format!("{path}/order"), &viewer)
+            .json(&mutation)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        app.request(Method::POST, &format!("{path}/collaborators"), &viewer)
+            .json(&CollaboratorRequest {
+                username: "admin".into(),
+                can_edit: true
+            })
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        app.request(Method::POST, &format!("{path}/shares"), &viewer)
+            .json(&ShareRequest {
+                expires_in_seconds: 60
+            })
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        app.request(
+            Method::DELETE,
+            &format!("{path}/collaborators/{}", app.admin.user.id),
+            &viewer
+        )
+        .send()
+        .await
+        .unwrap()
+        .status(),
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        app.request(
+            Method::DELETE,
+            &format!("{path}/collaborators/{}", viewer.user.id),
+            &viewer
+        )
+        .send()
+        .await
+        .unwrap()
+        .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        app.request(Method::GET, &path, &viewer)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        app.request(Method::GET, &path, &app.admin)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK
+    );
+}
+
+#[tokio::test]
+async fn cancelling_large_streams_releases_capacity_while_uploads_continue() {
+    let app = TestApp::with_file_limit(12 * 1024 * 1024).await;
+    let payload_bytes = 10 * 1024 * 1024_u32;
+    let mut wave = Vec::with_capacity(payload_bytes as usize + 44);
+    wave.extend_from_slice(b"RIFF");
+    wave.extend_from_slice(&(payload_bytes + 36).to_le_bytes());
+    wave.extend_from_slice(b"WAVEfmt ");
+    wave.extend_from_slice(&16u32.to_le_bytes());
+    wave.extend_from_slice(&1u16.to_le_bytes());
+    wave.extend_from_slice(&1u16.to_le_bytes());
+    wave.extend_from_slice(&44100u32.to_le_bytes());
+    wave.extend_from_slice(&88200u32.to_le_bytes());
+    wave.extend_from_slice(&2u16.to_le_bytes());
+    wave.extend_from_slice(&16u16.to_le_bytes());
+    wave.extend_from_slice(b"data");
+    wave.extend_from_slice(&payload_bytes.to_le_bytes());
+    wave.resize(payload_bytes as usize + 44, 0);
+    let form = reqwest::multipart::Form::new().part(
+        "file",
+        reqwest::multipart::Part::bytes(wave).file_name("long.wav"),
+    );
+    let r = app
+        .request(Method::POST, "/api/upload", &app.admin)
+        .multipart(form)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    let uploaded: UploadResult = r.json().await.unwrap();
+    let path = format!("/api/tracks/{}/stream", uploaded.track.id);
+    let mut held = Vec::new();
+    for _ in 0..16 {
+        let r = app
+            .request(Method::GET, &path, &app.admin)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::OK);
+        held.push(r);
+    }
+    assert_eq!(
+        app.request(Method::GET, &path, &app.admin)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::TOO_MANY_REQUESTS
+    );
+    let (a, b) = tokio::join!(app.upload(&app.admin), app.upload(&app.admin));
+    assert_eq!(a.track.id, b.track.id);
+    assert!(a.duplicate || b.duplicate);
+    drop(held);
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let r = app
+                .request(Method::GET, &path, &app.admin)
+                .header("Range", "bytes=0-15")
+                .send()
+                .await
+                .unwrap();
+            if r.status() == StatusCode::PARTIAL_CONTENT {
+                assert_eq!(r.bytes().await.unwrap().len(), 16);
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn static_assets_never_serve_arbitrary_database_files() {
+    let app = TestApp::new().await;
+    tokio::fs::create_dir_all(&app.state.config.web_dir)
+        .await
+        .unwrap();
+    tokio::fs::write(
+        app.state.config.web_dir.join("private.db"),
+        b"private fixture bytes",
+    )
+    .await
+    .unwrap();
+    tokio::fs::create_dir_all(app.state.config.web_dir.join("api"))
+        .await
+        .unwrap();
+    tokio::fs::write(
+        app.state.config.web_dir.join("api/private.db"),
+        b"private fixture bytes",
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        app.client
+            .get(format!("{}/api/private.db", app.base))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+    tokio::fs::write(
+        app.state.config.web_dir.join("index.html"),
+        b"<h1>Public asset fixture</h1>",
+    )
+    .await
+    .unwrap();
+    let r = app
+        .client
+        .get(format!("{}/private.db", app.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::NOT_FOUND);
+    assert!(!r.text().await.unwrap().contains("private fixture"));
+    assert_eq!(
+        app.client.get(&app.base).send().await.unwrap().status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        app.client
+            .get(format!("{}/pkg/%2e%2e/private.db", app.base))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+}
+
+#[tokio::test]
+async fn multipart_headers_and_additional_parts_are_rejected_before_publication() {
+    let app = TestApp::new().await;
+    let header = format!(
+        "--boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{}\"\r\n\r\naudio\r\n--boundary--\r\n",
+        "x".repeat(100000)
+    );
+    let response = app
+        .request(Method::POST, "/api/upload", &app.admin)
+        .header("Content-Type", "multipart/form-data; boundary=boundary")
+        .body(header)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    // A preamble cannot trick the guard into ending headers before Multer starts them.
+    let attack = format!(
+        "preamble\r\n\r\nx--boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{}\"\r\n\r\nignored\r\n--boundary--\r\n",
+        "x".repeat(100_000)
+    );
+    let response = app
+        .request(Method::POST, "/api/upload", &app.admin)
+        .header("Content-Type", "multipart/form-data; boundary=boundary")
+        .body(attack)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let mut body=b"--boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"signal.flac\"\r\n\r\n".to_vec();
+    body.extend_from_slice(AUDIO);
+    body.extend_from_slice(b"\r\n--boundary\r\nContent-Disposition: form-data; name=\"other\"\r\n\r\nextra\r\n--boundary--\r\n");
+    let response = app
+        .request(Method::POST, "/api/upload", &app.admin)
+        .header("Content-Type", "multipart/form-data; boundary=boundary")
+        .body(body)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        app.state
+            .media
+            .stats(&app.admin.user.id)
+            .await
+            .unwrap()
+            .tracks,
+        0
+    );
+}
+
+#[tokio::test]
+async fn album_and_artist_http_catalog_is_paginated_private_and_playable() {
+    let app = TestApp::new().await;
+    let first = app.upload(&app.admin).await.track;
+    let second = app
+        .request(Method::POST, "/api/upload", &app.admin)
+        .multipart(reqwest::multipart::Form::new().part(
+            "file",
+            reqwest::multipart::Part::bytes(OTHER_AUDIO.to_vec()).file_name("beacon.mp3"),
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json::<UploadResult>()
+        .await
+        .unwrap()
+        .track;
+    // Fixture MP3 has no date/number; exercise catalog regrouping without rewriting audio.
+    sqlx::query("UPDATE tracks SET year=2026,track_number=2 WHERE id=?")
+        .bind(&second.id)
+        .execute(&app.state.pool)
+        .await
+        .unwrap();
+    let albums: AlbumPage = app
+        .request(Method::GET, "/api/albums?limit=1", &app.admin)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(albums.items.len(), 1);
+    let album = &albums.items[0];
+    assert_eq!(album.title, "Real Fixtures");
+    assert_eq!(album.track_count, 2);
+    assert_eq!(album.year, Some(2026));
+    assert!(albums.next_cursor.is_none());
+    assert!(album.artwork_id.is_some());
+    let page: TrackPage = app
+        .request(
+            Method::GET,
+            &format!("/api/albums/{}/tracks?limit=1", album.id),
+            &app.admin,
+        )
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(page.items.len(), 1);
+    assert_eq!(page.items[0].id, first.id);
+    let next = page.next_cursor.unwrap();
+    let page: TrackPage = app
+        .request(
+            Method::GET,
+            &format!("/api/albums/{}/tracks?limit=1&cursor={next}", album.id),
+            &app.admin,
+        )
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(page.items.len(), 1);
+    assert_eq!(page.items[0].id, second.id);
+    assert!(page.next_cursor.is_none());
+    let artists: ArtistPage = app
+        .request(Method::GET, "/api/artists?limit=1", &app.admin)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(artists.items.len(), 1);
+    assert_eq!(artists.items[0].name, "Vela Test");
+    assert_eq!(artists.items[0].track_count, 2);
+    assert_eq!(artists.items[0].album_count, 1);
+    let artist = &artists.items[0];
+    let page: TrackPage = app
+        .request(
+            Method::GET,
+            &format!("/api/artists/{}/tracks?limit=1", artist.id),
+            &app.admin,
+        )
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(page.items.len(), 1);
+    assert!(page.next_cursor.is_some());
+    assert_eq!(
+        app.request(
+            Method::GET,
+            &format!("/api/tracks/{}/stream", first.id),
+            &app.admin
+        )
+        .send()
+        .await
+        .unwrap()
+        .bytes()
+        .await
+        .unwrap(),
+        AUDIO
+    );
+    let other = app.user("otherlistener").await;
+    for (kind, id) in [
+        ("albums", album.id.as_str()),
+        ("artists", artist.id.as_str()),
+    ] {
+        let response = app
+            .request(Method::GET, &format!("/api/{kind}"), &other)
+            .send()
+            .await
+            .unwrap();
+        assert!(
+            response.json::<serde_json::Value>().await.unwrap()["items"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+        for path in [
+            format!("/api/{kind}/{id}"),
+            format!("/api/{kind}/{id}/tracks"),
+        ] {
+            assert_eq!(
+                app.request(Method::GET, &path, &other)
+                    .send()
+                    .await
+                    .unwrap()
+                    .status(),
+                StatusCode::NOT_FOUND
+            );
+            assert_eq!(
+                app.client
+                    .get(format!("{}{path}", app.base))
+                    .send()
+                    .await
+                    .unwrap()
+                    .status(),
+                StatusCode::UNAUTHORIZED
+            );
+        }
+        for cursor in ["not-a-uuid".to_string(), uuid::Uuid::new_v4().to_string()] {
+            assert_eq!(
+                app.request(
+                    Method::GET,
+                    &format!("/api/{kind}/{id}/tracks?cursor={cursor}"),
+                    &app.admin
+                )
+                .send()
+                .await
+                .unwrap()
+                .status(),
+                StatusCode::BAD_REQUEST
+            );
+        }
+    }
+    let duplicate = app.upload(&app.admin).await;
+    assert!(duplicate.duplicate);
+    let detail: AlbumSummary = app
+        .request(
+            Method::GET,
+            &format!("/api/albums/{}", album.id),
+            &app.admin,
+        )
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(detail.id, album.id);
+    assert_eq!(detail.track_count, 2);
+}

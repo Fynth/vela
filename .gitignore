@@ -1,0 +1,14 @@
+/target/
+/data/
+/dist/
+/.test-data/
+*.db
+*.db-shm
+*.db-wal
+.env
+
+/tests/browser/node_modules/
+/tests/browser/test-results/
+/tests/browser/playwright-report/
+
+__pycache__/

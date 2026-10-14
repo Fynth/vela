@@ -1,0 +1,48 @@
+[workspace]
+resolver = "3"
+members = ["crates/domain", "crates/core", "crates/media", "crates/imports", "apps/server", "apps/web"]
+default-members = ["apps/server"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-or-later"
+rust-version = "1.99"
+
+[workspace.dependencies]
+vela-domain = { path = "crates/domain", version = "0.1.0" }
+vela-core = { path = "crates/core", version = "0.1.0" }
+vela-media = { path = "crates/media", version = "0.1.0" }
+vela-imports = { path = "crates/imports", version = "0.1.0" }
+anyhow = "1"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1.53", features = ["full"] }
+sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
+axum = { version = "0.8.9", features = ["multipart", "macros"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.7.1", features = ["fs", "trace", "set-header", "limit"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4", "serde", "js"] }
+blake3 = "1.8"
+lofty = "0.25.4"
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "webp"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json"] }
+futures-util = "0.3"
+tokio-util = { version = "0.7", features = ["io", "rt"] }
+url = "2"
+rand = "0.8"
+hex = "0.4"
+argon2 = "0.5.3"
+tempfile = "3"
+dioxus = { version = "0.7.10", default-features = false, features = ["macro", "html", "signals", "hooks", "launch", "web", "document"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+
+[profile.dev]
+debug = 0

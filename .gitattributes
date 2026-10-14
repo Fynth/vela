@@ -1,0 +1,2 @@
+# Preserve exact upstream license bytes and source hashes.
+docs/third-party-license-texts/** -whitespace

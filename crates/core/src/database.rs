@@ -1,0 +1,196 @@
+use sqlx::{
+    SqlitePool,
+    sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous},
+};
+use std::{path::Path, time::Duration};
+
+pub async fn open(data_dir: &Path) -> anyhow::Result<SqlitePool> {
+    tokio::fs::create_dir_all(data_dir).await?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        tokio::fs::set_permissions(data_dir, std::fs::Permissions::from_mode(0o700)).await?;
+    }
+    let options = SqliteConnectOptions::new()
+        .filename(data_dir.join("vela.db"))
+        .create_if_missing(true)
+        .foreign_keys(true)
+        .journal_mode(SqliteJournalMode::Wal)
+        .synchronous(SqliteSynchronous::Full)
+        .busy_timeout(Duration::from_secs(10));
+    let pool = SqlitePoolOptions::new()
+        .max_connections(4)
+        .min_connections(1)
+        .acquire_timeout(Duration::from_secs(15))
+        .connect_with(options)
+        .await?;
+    sqlx::migrate!("../../migrations").run(&pool).await?;
+    Ok(pool)
+}
+
+/// Held for the lifetime of one server process; prevents competing startup recovery.
+pub struct DataLock {
+    _file: std::fs::File,
+}
+impl DataLock {
+    pub async fn acquire(data_dir: &Path) -> anyhow::Result<Self> {
+        tokio::fs::create_dir_all(data_dir).await?;
+        let path = data_dir.join(".vela.lock");
+        tokio::task::spawn_blocking(move || {
+            let file = std::fs::OpenOptions::new()
+                .create(true)
+                .truncate(false)
+                .read(true)
+                .write(true)
+                .open(path)?;
+            fs2::FileExt::try_lock_exclusive(&file).map_err(|_| {
+                anyhow::anyhow!("Another Vela process already owns this data directory")
+            })?;
+            Ok(Self { _file: file })
+        })
+        .await?
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[tokio::test]
+    async fn catalog_upgrade_preserves_legacy_tracks_and_builds_private_stable_groups() {
+        use sqlx::Row;
+        let dir = tempfile::tempdir().unwrap();
+        let baseline = tempfile::tempdir().unwrap();
+        tokio::fs::write(
+            baseline.path().join("0001_initial.sql"),
+            include_str!("../../../migrations/0001_initial.sql"),
+        )
+        .await
+        .unwrap();
+        let options = sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(dir.path().join("vela.db"))
+            .create_if_missing(true)
+            .foreign_keys(true);
+        let pool = sqlx::SqlitePool::connect_with(options).await.unwrap();
+        sqlx::migrate::Migrator::new(baseline.path())
+            .await
+            .unwrap()
+            .run(&pool)
+            .await
+            .unwrap();
+        sqlx::raw_sql("INSERT INTO users(id,username,password_hash) VALUES('owner','owner','fixture'),('other','other','fixture'); INSERT INTO media_assets(id,hash,storage_path,content_type,size_bytes) VALUES('asset','hash','media/hash.audio','audio/flac',100);").execute(&pool).await.unwrap();
+        for (id, artist, album_artist, album, year, owner) in [
+            ("one", "Solo", "", "First", 2000, "owner"),
+            ("two", " solo ", "", " first ", 2000, "owner"),
+            ("three", "Solo", "", "First", 2001, "owner"),
+            (
+                "four",
+                "Guest",
+                "Various Artists",
+                "Collection",
+                2000,
+                "owner",
+            ),
+            ("five", "Solo", "", "", 0, "owner"),
+            ("six", "Solo", "", "First", 2000, "other"),
+        ] {
+            // Separate legacy assets allow repeated artist/album tags.
+            sqlx::query("INSERT INTO media_assets(id,hash,storage_path,content_type,size_bytes) VALUES(?,?,?,'audio/flac',100)").bind(id).bind(id).bind(format!("media/{id}.audio")).execute(&pool).await.unwrap();
+            sqlx::query("INSERT INTO tracks(id,owner_id,media_asset_id,title,artist,album_artist,album,year,duration_ms,codec) VALUES(?,?,?,?,?,?,?,?,1000,'FLAC')")
+                .bind(id).bind(owner).bind(id).bind(id).bind(artist).bind(album_artist).bind(album).bind(year).execute(&pool).await.unwrap();
+        }
+        pool.close().await;
+        let pool = super::open(dir.path()).await.unwrap();
+        let rows = sqlx::query("SELECT id,artist_id,album_id FROM tracks ORDER BY id")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(rows.len(), 6);
+        let ids = |id: &str| {
+            let row = rows
+                .iter()
+                .find(|r| r.get::<String, _>("id") == id)
+                .unwrap();
+            (
+                row.get::<String, _>("artist_id"),
+                row.get::<Option<String>, _>("album_id"),
+            )
+        };
+        assert_eq!(ids("one"), ids("two"));
+        assert_ne!(ids("one").1, ids("three").1);
+        assert_ne!(ids("one"), ids("six"));
+        assert!(ids("five").1.is_none());
+        let grouping = ids("one");
+        // Catalog reassociation and initial inserts must leave FTS intact.
+        sqlx::query("INSERT INTO tracks_fts(tracks_fts,rank) VALUES('integrity-check',1)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE tracks SET title='renamed' WHERE id='one'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM tracks_fts WHERE tracks_fts MATCH 'renamed'"
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+            1
+        );
+        assert!(
+            sqlx::query("UPDATE tracks SET album_id=? WHERE id='one'")
+                .bind(ids("six").1)
+                .execute(&pool)
+                .await
+                .is_err()
+        );
+        let artists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM artists")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO media_assets(id,hash,storage_path,content_type,size_bytes) VALUES('new','new','media/new.audio','audio/flac',100)").execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO tracks(id,owner_id,media_asset_id,title,artist,album,year,duration_ms,codec) VALUES('new','owner','new','New song','SOLO','FIRST',2000,1000,'FLAC')").execute(&pool).await.unwrap();
+        let new = sqlx::query("SELECT artist_id,album_id FROM tracks WHERE id='new'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            (
+                new.get::<String, _>("artist_id"),
+                new.get::<Option<String>, _>("album_id")
+            ),
+            grouping
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM artists")
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            artists
+        );
+        sqlx::query("INSERT INTO tracks_fts(tracks_fts,rank) VALUES('integrity-check',1)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool.close().await;
+        super::open(dir.path()).await.unwrap().close().await;
+    }
+    #[tokio::test]
+    async fn migrations_are_repeatable_and_foreign_keys_enforced() {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = super::open(dir.path()).await.unwrap();
+        assert!(
+            sqlx::query("INSERT INTO favorites(user_id,track_id) VALUES('missing','missing')")
+                .execute(&pool)
+                .await
+                .is_err()
+        );
+        let journal: String = sqlx::query_scalar("PRAGMA journal_mode")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(journal, "wal");
+        pool.close().await;
+        super::open(dir.path()).await.unwrap().close().await;
+    }
+}

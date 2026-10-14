@@ -1,0 +1,27 @@
+[package]
+name = "vela-imports"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+vela-domain.workspace = true
+vela-media.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+sqlx.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+reqwest.workspace = true
+futures-util.workspace = true
+tracing.workspace = true
+url.workspace = true
+uuid.workspace = true
+percent-encoding = "2"
+fs2 = "0.4"
+
+[dev-dependencies]
+tempfile.workspace = true
+axum.workspace = true
+blake3.workspace = true
