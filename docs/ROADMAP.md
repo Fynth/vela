@@ -19,7 +19,7 @@ Status meanings: implemented=source exists; verified=checks recorded in PROGRESS
 
 ## Next ordered slices
 
-1. Finish local review package validation and persist evidence; native/WASM and nine browser scenarios now pass. Exclusive data-dir locking, shutdown drain and safe backup/restore already have real regressions; retain crash-safe reconciliation as an outstanding durability item.
+1. Preserve the verified local package checkpoint; native/WASM, nine browser scenarios and extracted native-package startup now pass. Exclusive data-dir locking, shutdown drain and safe backup/restore already have real regressions; retain crash-safe reconciliation as an outstanding durability item.
 2. Authorized read-only scanner roots with durable progress, quotas and safe filesystem boundaries; scanner mutations must preserve owner catalog edits and never rewrite sources. Catalog metadata editing/conflict/search/regroup/original-integrity checks are verified.
 3. Complete local sharing administration: invites with expiry/acceptance, narrow separate stream/download grants, near-real-time revision updates. Keep metadata links view-only by default.
 4. Source adapters: ZIP with zip-slip/bomb limits, administrator-trusted WebDAV and S3 (separate egress policy), Archive.org permitted assets, explicitly licensed catalogs, RSS/episodes as podcast content. Playlist metadata imports require authorized providers, never commercial stream extraction.
