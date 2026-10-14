@@ -41,7 +41,7 @@ def main():
             sections.append(f'\n--- {path.name} ---\n{text}\n')
             found = True
         cache = Path('docs/third-party-license-texts') / (package['name'] + '-' + package['version'])
-        if not found and args.fetch_missing:
+        if not found and args.fetch_missing and not cache.exists():
             repository = re.fullmatch(r'https://github.com/([\w.-]+/[\w.-]+?)(?:\.git)?(?:/tree/[^?#]+)?/?', package.get('repository') or '')
             vcs = root / '.cargo_vcs_info.json'
             if repository and vcs.exists():

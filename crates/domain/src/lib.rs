@@ -84,6 +84,32 @@ pub struct UploadResult {
     pub duplicate: bool,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TrackMetadata {
+    pub track: Track,
+    pub revision: i64,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UpdateTrackMetadata {
+    pub revision: i64,
+    pub title: String,
+    pub artist: String,
+    pub album: String,
+    pub album_artist: String,
+    pub genre: String,
+    #[serde(deserialize_with = "required_nullable")]
+    pub year: Option<i64>,
+    #[serde(deserialize_with = "required_nullable")]
+    pub track_number: Option<i64>,
+    #[serde(deserialize_with = "required_nullable")]
+    pub disc_number: Option<i64>,
+}
+fn required_nullable<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<i64>, D::Error> {
+    Option::<i64>::deserialize(deserializer)
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApiError {
     pub error: String,
 }

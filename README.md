@@ -2,7 +2,7 @@
 
 A Rust-first, self-hosted music cloud with a Dioxus web interface. This is an early implementation under active development, not a finished alternative to established servers.
 
-Upload real audio files, browse albums/artists with embedded metadata and artwork, search, favorite, and stream original files. Album tracks follow disc/track order; large collections use bounded pages. Import supported public HTTP/HTTPS audio download links through the app with durable progress/retry/cancel controls. Create private playlists, grant local accounts viewer/editor access, and share expiring, revocable metadata-only links. Owners can list/revoke collaborators; members can leave. The browser player has seeking, volume, shuffle/repeat, queue controls and account-scoped queue persistence.
+Upload real audio files, browse albums/artists with embedded metadata and artwork, search, favorite, and stream original files. Album tracks follow disc/track order; large collections use bounded pages. Edit your catalog tags in the app with revision protection while keeping original audio files unchanged. Import supported public HTTP/HTTPS audio download links through the app with durable progress/retry/cancel controls. Create private playlists, grant local accounts viewer/editor access, and share expiring, revocable metadata-only links. Owners can list/revoke collaborators; members can leave. The browser player has seeking, volume, shuffle/repeat, queue controls and account-scoped queue persistence.
 
 Normal music uploads and direct URL imports use the web interface. No SSH is needed for those workflows after installation. No catalog content is preloaded.
 

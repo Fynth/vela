@@ -1359,3 +1359,217 @@ async fn album_and_artist_http_catalog_is_paginated_private_and_playable() {
     assert_eq!(detail.id, album.id);
     assert_eq!(detail.track_count, 2);
 }
+
+#[tokio::test]
+async fn metadata_edits_require_owner_csrf_validate_input_and_preserve_original_audio() {
+    let app = TestApp::new().await;
+    let track = app.upload(&app.admin).await.track;
+    let path = format!("/api/tracks/{}/metadata", track.id);
+    let before: TrackMetadata = app
+        .request(Method::GET, &path, &app.admin)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(before.revision, 0);
+    let update = UpdateTrackMetadata {
+        revision: 0,
+        title: "  Ocean signal  ".into(),
+        artist: "Vela Test".into(),
+        album: "Edited album".into(),
+        album_artist: "Vela Test".into(),
+        genre: "Ambient".into(),
+        year: Some(2025),
+        track_number: Some(2),
+        disc_number: Some(1),
+    };
+    assert_eq!(
+        app.client
+            .patch(format!("{}{path}", app.base))
+            .header("Cookie", &app.admin.cookie)
+            .json(&update)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    let listener = app.user("metadatalistener").await;
+    for method in [Method::GET, Method::PATCH] {
+        assert_eq!(
+            app.request(method, &path, &listener)
+                .json(&update)
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::NOT_FOUND
+        );
+    }
+    let changed = app
+        .request(Method::PATCH, &path, &app.admin)
+        .json(&update)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(changed.status(), StatusCode::OK);
+    let changed: TrackMetadata = changed.json().await.unwrap();
+    assert_eq!(changed.revision, 1);
+    assert_eq!(changed.track.title, "Ocean signal");
+    assert_eq!(changed.track.album, "Edited album");
+    assert_eq!(changed.track.codec, before.track.codec);
+    assert_eq!(changed.track.duration_ms, before.track.duration_ms);
+    assert_eq!(changed.track.artwork_id, before.track.artwork_id);
+    assert_eq!(
+        app.request(Method::PATCH, &path, &app.admin)
+            .json(&update)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::CONFLICT
+    );
+    let mut valid = serde_json::to_value(&update).unwrap();
+    valid["revision"] = json!(1);
+    for (field, value) in [
+        ("title", json!("  ")),
+        ("artist", json!("x".repeat(1025))),
+        ("genre", json!("bad\nvalue")),
+        ("year", json!(0)),
+        ("disc_number", json!(-1)),
+        ("track_number", json!(10000)),
+    ] {
+        let mut invalid = valid.clone();
+        invalid[field] = value;
+        assert_eq!(
+            app.request(Method::PATCH, &path, &app.admin)
+                .json(&invalid)
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::BAD_REQUEST,
+            "{field}"
+        );
+    }
+    let mut unknown = valid.clone();
+    unknown["storage_path"] = json!("/etc/passwd");
+    assert_eq!(
+        app.request(Method::PATCH, &path, &app.admin)
+            .json(&unknown)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    let mut missing = valid.clone();
+    missing.as_object_mut().unwrap().remove("year");
+    assert_eq!(
+        app.request(Method::PATCH, &path, &app.admin)
+            .json(&missing)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    valid["title"] = json!("x".repeat(20_000));
+    assert_eq!(
+        app.request(Method::PATCH, &path, &app.admin)
+            .json(&valid)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::PAYLOAD_TOO_LARGE
+    );
+    let searched: TrackPage = app
+        .request(Method::GET, "/api/tracks?q=Ocean", &app.admin)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(searched.items[0].id, track.id);
+    let albums: AlbumPage = app
+        .request(Method::GET, "/api/albums", &app.admin)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(albums.items.len(), 1);
+    assert_eq!(albums.items[0].title, "Edited album");
+    let bytes = app
+        .request(
+            Method::GET,
+            &format!("/api/tracks/{}/stream", track.id),
+            &app.admin,
+        )
+        .send()
+        .await
+        .unwrap()
+        .bytes()
+        .await
+        .unwrap();
+    assert_eq!(bytes, AUDIO);
+    let audit:i64=sqlx::query_scalar("SELECT COUNT(*) FROM audit_events WHERE actor_id=? AND object_id=? AND action='track.metadata_updated'").bind(&app.admin.user.id).bind(&track.id).fetch_one(&app.state.pool).await.unwrap();
+    assert_eq!(audit, 1);
+}
+
+#[tokio::test]
+async fn simultaneous_metadata_edits_conflict_and_do_not_overwrite_each_other() {
+    let app = TestApp::new().await;
+    let track = app.upload(&app.admin).await.track;
+    let path = format!("/api/tracks/{}/metadata", track.id);
+    let edit = UpdateTrackMetadata {
+        revision: 0,
+        title: "One editor".into(),
+        artist: track.artist.clone(),
+        album: track.album.clone(),
+        album_artist: track.album_artist.clone(),
+        genre: track.genre.clone(),
+        year: track.year,
+        track_number: track.track_number,
+        disc_number: track.disc_number,
+    };
+    let mut another = edit.clone();
+    another.title = "Another editor".into();
+    let (first, second) = tokio::join!(
+        app.request(Method::PATCH, &path, &app.admin)
+            .json(&edit)
+            .send(),
+        app.request(Method::PATCH, &path, &app.admin)
+            .json(&another)
+            .send()
+    );
+    let first = first.unwrap();
+    let second = second.unwrap();
+    assert!(matches!(
+        (first.status(), second.status()),
+        (StatusCode::OK, StatusCode::CONFLICT) | (StatusCode::CONFLICT, StatusCode::OK)
+    ));
+    let accepted: TrackMetadata = if first.status() == StatusCode::OK {
+        first
+    } else {
+        second
+    }
+    .json()
+    .await
+    .unwrap();
+    let final_snapshot: TrackMetadata = app
+        .request(Method::GET, &path, &app.admin)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(final_snapshot.revision, 1);
+    assert_eq!(final_snapshot.track, accepted.track);
+}

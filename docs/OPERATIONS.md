@@ -38,3 +38,7 @@ Data layout: vela.db (+WAL/SHM during operation), media/hash.audio, artwork/hash
 ## Local review packages
 
 After a verified clean checkpoint commit, run `scripts/package-release.sh` with the matching wasm-bindgen CLI on PATH (or VELA_WASM_BINDGEN). It rebuilds native/web release artifacts, includes private backup tooling, deployment/docs and dependency notices, archives the exact Git source checkpoint and writes SHA256SUMS under target/releases. It refuses to overwrite existing archives or package uncommitted source. This does not publish a release. Build triples are labelled from the actual native host; no cross-platform validation is inferred. Review metadata-only license notices before external distribution.
+
+Validate a local native archive with `python3 scripts/verify_package.py target/releases/vela-0.1.0-x86_64-unknown-linux-gnu.tar.gz` and `sha256sum -c target/releases/SHA256SUMS`. The verifier extracts only into its own temporary directory, starts a loopback-only server, checks first-run state/bundled HTML/WASM and graceful exit, then removes its fixture. To run manually, extract the native archive into a new directory, enter it and run `./vela-server`; bundled `dist/` is the default web root.
+
+The native host artifact dynamically links libc/libm/libgcc_s; inspection found GLIBC2.34 symbol requirements. This is a minimum ABI requirement, not validation on every Linux distribution. Only the actual x86_64 GNU/Linux build host was tested; other systems/ARM64 need their own builds and runtime validation.

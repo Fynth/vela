@@ -1,9 +1,11 @@
 //! Private catalog access and bounded, content-addressed managed media ingestion.
 mod catalog;
+mod metadata;
 mod range;
 mod validation;
 
 pub use catalog::InvalidCatalogCursor;
+pub use metadata::CatalogMetadataError;
 pub use range::{RangeError, select_range};
 
 use std::{

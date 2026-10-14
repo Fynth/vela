@@ -322,6 +322,12 @@ pub fn router(state: AppState) -> Router {
         .route("/api/tracks/{id}/stream", get(stream))
         .route("/api/artwork/{id}", get(artwork))
         .route("/api/tracks/{id}/favorite", post(favorite))
+        .route(
+            "/api/tracks/{id}/metadata",
+            get(track_metadata)
+                .patch(track_metadata_update)
+                .layer(DefaultBodyLimit::max(16 * 1024)),
+        )
         .route("/api/imports/preview", post(import_preview))
         .route("/api/imports", get(imports).post(import_create))
         .route("/api/imports/{id}/cancel", post(import_cancel))
@@ -465,6 +471,33 @@ async fn tracks(
 }
 async fn stats(State(s): State<AppState>, Auth(auth): Auth) -> Result<Json<LibraryStats>> {
     Ok(Json(s.media.stats(&auth.response.user.id).await?))
+}
+async fn track_metadata(
+    State(s): State<AppState>,
+    Auth(auth): Auth,
+    Path(id): Path<String>,
+) -> Result<Json<TrackMetadata>> {
+    Ok(Json(
+        s.media
+            .metadata(&auth.response.user.id, &id)
+            .await?
+            .ok_or_else(not_found)?,
+    ))
+}
+async fn track_metadata_update(
+    State(s): State<AppState>,
+    WriteAuth(auth): WriteAuth,
+    Path(id): Path<String>,
+    Json(update): Json<UpdateTrackMetadata>,
+) -> Result<Json<TrackMetadata>> {
+    let snapshot = s.media.update_metadata(&auth.response.user.id, &id, update).await.map_err(|error| {
+        match error.downcast_ref::<vela_media::CatalogMetadataError>() {
+            Some(vela_media::CatalogMetadataError::Invalid(message)) => invalid(message),
+            Some(vela_media::CatalogMetadataError::Conflict) => HttpError(StatusCode::CONFLICT, "Metadata changed since you opened the editor. Reload current metadata before saving.".into()),
+            None => error.into(),
+        }
+    })?.ok_or_else(not_found)?;
+    Ok(Json(snapshot))
 }
 #[derive(Deserialize)]
 struct CatalogQuery {

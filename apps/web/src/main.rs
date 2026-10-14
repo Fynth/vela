@@ -1,3 +1,4 @@
+mod metadata;
 use dioxus::prelude::*;
 use gloo_net::http::{Request, Response};
 use gloo_timers::future::TimeoutFuture;
@@ -21,6 +22,7 @@ async fn api<T: DeserializeOwned>(
     let request = match method {
         "POST" => Request::post(path),
         "PUT" => Request::put(path),
+        "PATCH" => Request::patch(path),
         "DELETE" => Request::delete(path),
         _ => Request::get(path),
     };
@@ -197,15 +199,18 @@ fn start_audio(track: &Track, mut error: Signal<String>) {
                 }
             });
         }
-        let info = json!({"title": track.title, "artist": track.artist, "album": track.album, "artwork": track.artwork_id.as_ref().map(|id| vec![json!({"src": format!("/api/artwork/{id}")})]).unwrap_or_default()});
-        if let Ok(detail) = js_sys::JSON::parse(&info.to_string()) {
-            let init = web_sys::CustomEventInit::new();
-            init.set_detail(&detail);
-            if let Ok(event) = web_sys::CustomEvent::new_with_event_init_dict("vela-track", &init)
-                && let Some(document) = web_sys::window().and_then(|w| w.document())
-            {
-                let _ = document.dispatch_event(&event);
-            }
+        update_media_metadata(track);
+    }
+}
+fn update_media_metadata(track: &Track) {
+    let info = json!({"title": track.title, "artist": track.artist, "album": track.album, "artwork": track.artwork_id.as_ref().map(|id| vec![json!({"src": format!("/api/artwork/{id}")})]).unwrap_or_default()});
+    if let Ok(detail) = js_sys::JSON::parse(&info.to_string()) {
+        let init = web_sys::CustomEventInit::new();
+        init.set_detail(&detail);
+        if let Ok(event) = web_sys::CustomEvent::new_with_event_init_dict("vela-track", &init)
+            && let Some(document) = web_sys::window().and_then(|w| w.document())
+        {
+            let _ = document.dispatch_event(&event);
         }
     }
 }
@@ -581,15 +586,16 @@ fn GroupTracks(
     onplay: EventHandler<usize>,
     onfavorite: EventHandler<Track>,
     onqueue: EventHandler<Track>,
+    onedit: EventHandler<Track>,
 ) -> Element {
     rsx! { div { class: "track-table group-track-table", div { class: "track-header", span { "#" } span { "TITLE" } span { "ALBUM" } span { "QUALITY" } span { "TIME" } span { "" } }
         for (at, track) in tracks.iter().cloned().enumerate() {
-            { let favorite = track.clone(); let queued = track.clone();
+            { let favorite = track.clone(); let queued = track.clone(); let edited = track.clone();
             rsx! { div { key: "{track.id}", class: if current_id.as_ref().is_some_and(|id| *id == track.id) { "track-row current" } else { "track-row" },
                 button { class: "track-play", "aria-label": "Play {track.title}", onclick: move |_| onplay.call(at), if current_id.as_ref().is_some_and(|id| *id == track.id) && playing { "♫" } else { "▶" } }
                 button { class: "track-title", onclick: move |_| onplay.call(at), Art { track: track.clone() } div { strong { "{track.title}" } small { "{track.artist}" } } }
                 span { class: "track-album", "{track.album}" } span { class: "quality-tag", "{track.codec}" } span { class: "track-duration", "{seconds(track.duration_ms as f64 / 1000.0)}" }
-                div { class: "track-actions", button { class: if track.favorite { "icon-button favorite selected" } else { "icon-button favorite" }, "aria-label": if track.favorite { "Remove favorite" } else { "Favorite track" }, "aria-pressed": track.favorite, onclick: move |_| onfavorite.call(favorite.clone()), if track.favorite { "♥" } else { "♡" } } button { class: "icon-button", "aria-label": "Add {track.title} to playback queue", onclick: move |_| onqueue.call(queued.clone()), "+" } }
+                div { class: "track-actions", button { class: if track.favorite { "icon-button favorite selected" } else { "icon-button favorite" }, "aria-label": if track.favorite { "Remove favorite" } else { "Favorite track" }, "aria-pressed": track.favorite, onclick: move |_| onfavorite.call(favorite.clone()), if track.favorite { "♥" } else { "♡" } } button { class: "icon-button", "aria-label": "Add {track.title} to playback queue", onclick: move |_| onqueue.call(queued.clone()), "+" } button { class: "icon-button metadata-edit", "aria-label": "Edit metadata for {track.title}", title: "Edit metadata", onclick: move |_| onedit.call(edited.clone()), "✎" } }
             } } }
         }
     } }
@@ -637,6 +643,7 @@ fn App() -> Element {
     };
     let mut stats = use_signal(|| None::<LibraryStats>);
     let mut add_music = use_signal(|| false);
+    let mut editing_track = use_signal(|| None::<Track>);
     let mut uploading = use_signal(|| false);
     let mut upload_status = use_signal(String::new);
     let mut import_url = use_signal(String::new);
@@ -740,6 +747,7 @@ fn App() -> Element {
     });
     use_effect(move || {
         let _session = auth.read().as_ref().map(|s| s.csrf_token.clone());
+        editing_track.set(None);
         clear_catalog(catalog);
         busy.set(false);
         import_busy.set(false);
@@ -991,7 +999,7 @@ fn App() -> Element {
                                 } }
                             else { div { class: "track-table", div { class: "track-header", span { "#" } span { "TITLE" } span { "ALBUM" } span { "QUALITY" } span { "TIME" } span { "" } }
                                     for (at, track) in tracks.read().iter().cloned().enumerate() {
-                                        { let row_track = track.clone(); let favorite_track = track.clone(); let add_track = track.clone();
+                                        { let row_track = track.clone(); let favorite_track = track.clone(); let add_track = track.clone(); let edit_track = track.clone();
                                         rsx! { div { key: "{track.id}", class: if current.as_ref().is_some_and(|t| t.id == track.id) { "track-row current" } else { "track-row" },
                                             button { class: "track-play", "aria-label": "Play {track.title}", onclick: move |_| play_queue(tracks.peek().clone(), at, queue, index, auth, error), if current.as_ref().is_some_and(|t| t.id == track.id) && playing() { "♫" } else { "▶" } }
                                             button { class: "track-title", onclick: move |_| play_queue(tracks.peek().clone(), at, queue, index, auth, error), Art { track: row_track } div { strong { "{track.title}" } small { "{track.artist}" } } }
@@ -1000,6 +1008,7 @@ fn App() -> Element {
                                             span { class: "track-duration", "{seconds(track.duration_ms as f64 / 1000.0)}" }
                                             div { class: "track-actions", button { class: if track.favorite { "icon-button favorite selected" } else { "icon-button favorite" }, title: if track.favorite { "Remove favorite" } else { "Favorite track" }, "aria-label": if track.favorite { "Remove favorite" } else { "Favorite track" }, "aria-pressed": track.favorite, onclick: move |_| { let track = favorite_track.clone(); spawn_authorized(auth, async move { match mutate("POST", &format!("/api/tracks/{}/favorite", track.id), Some(json!({"favorite": !track.favorite})), &token(auth)).await { Ok(()) => { if let Some(value) = tracks.write().iter_mut().find(|t| t.id == track.id) { value.favorite = !track.favorite; } } Err(message) => error.set(message) } }); }, if track.favorite { "♥" } else { "♡" } }
                                                 button { class: "icon-button", title: "Add to playback queue", "aria-label": "Add {track.title} to playback queue", onclick: move |_| { queue.write().push(track.clone()); persist_queue(&queue.peek(), auth); notice.set("Added to your playback queue.".into()); }, "+" }
+                                                button { class: "icon-button metadata-edit", "aria-label": "Edit metadata for {edit_track.title}", title: "Edit metadata", onclick: move |_| editing_track.set(Some(edit_track.clone())), "✎" }
                                                 if !selected_add_playlist().is_empty() { button { class: "icon-button", title: "Add to selected playlist", "aria-label": "Add to selected playlist", onclick: move |_| { let track = add_track.clone(); let id = selected_add_playlist(); spawn_authorized(auth, async move {
                                                     match api::<PlaylistDetail>("GET", &format!("/api/playlists/{id}"), None, "").await {
                                                         Ok(detail) => { match mutate("POST", &format!("/api/playlists/{id}/items"), Some(json!({"revision": detail.playlist.revision, "mutation_id": uuid::Uuid::new_v4().to_string(), "track_id": track.id})), &token(auth)).await { Ok(()) => notice.set("Track added to your playlist.".into()), Err(message) => error.set(message) } }
@@ -1056,6 +1065,7 @@ fn App() -> Element {
                                             });
                                         },
                                         onqueue: move |track: Track| { queue.write().push(track); persist_queue(&queue.peek(), auth); notice.set("Added to your playback queue.".into()); },
+                                        onedit: move |track: Track| editing_track.set(Some(track)),
                                     }
                                     div { class: "pagination", button { class: "button secondary small", onclick: move |_| catalog_tracks(None, catalog), "Back to first page" } span { "Up to 50 tracks per page" } if catalog.track_cursor.read().is_some() { button { class: "button secondary small", onclick: move |_| catalog_tracks(catalog.track_cursor.peek().clone(), catalog), "Next track page →" } } }
                                 }
@@ -1219,6 +1229,26 @@ fn App() -> Element {
                             } }
                         if !queue.read().is_empty() { button { class: "button secondary", onclick: move |_| { let retained = queue.peek().get(*index.peek()).cloned(); queue.set(retained.into_iter().collect()); index.set(0); persist_queue(&queue.peek(), auth); }, "Clear upcoming tracks" } }
                     } }
+                if let Some(editing) = editing_track.read().clone() {
+                    metadata::MetadataEditor { key: "{editing.id}", track_id: editing.id.clone(), auth,
+                        onclose: move |_| editing_track.set(None),
+                        onsaved: move |updated: Track| {
+                            let mut catalog = catalog;
+                            for track in tracks.write().iter_mut().filter(|t| t.id == updated.id) { *track = updated.clone(); }
+                            for track in catalog.tracks.write().iter_mut().filter(|t| t.id == updated.id) { *track = updated.clone(); }
+                            for track in queue.write().iter_mut().filter(|t| t.id == updated.id) { *track = updated.clone(); }
+                            persist_queue(&queue.peek(), auth);
+                            if queue.peek().get(index()).is_some_and(|track| track.id == updated.id) { update_media_metadata(&updated); }
+                            editing_track.set(None);
+                            notice.set("Metadata saved. Your original audio file is unchanged.".into());
+                            if matches!(page.peek().as_str(), "albums" | "artists") { catalog_page(None, catalog); }
+                            if matches!(page.peek().as_str(), "library" | "favorites") {
+                                spawn_authorized(auth, load_library(query(), page() == "favorites", None, library));
+                            }
+                            spawn_authorized(auth, async move { if let Ok(value) = api::<LibraryStats>("GET", "/api/stats", None, "").await { stats.set(Some(value)); } });
+                        }
+                    }
+                }
                 if add_music() { div { class: "modal-backdrop", div { class: "modal", role: "dialog", "aria-modal": "true", "aria-labelledby": "upload-title", div { class: "section-toolbar", span { class: "eyebrow", "MAKE YOURSELF AT HOME" } button { class: "icon-button", "aria-label": "Close upload dialog", disabled: uploading(), onclick: move |_| add_music.set(false), "×" } }
                             if !error().is_empty() { div { class: "alert error", role: "alert", "{error}" } } h2 { id: "upload-title", "Bring your music along" } p { "Choose audio files from your device. Vela reads the tags, saves the artwork, and keeps your originals intact." }
                             label { class: "upload-zone", r#for: "audio-files", span { "↥" } strong { "Choose audio files" } small { "FLAC · MP3 · AAC · Opus · Vorbis · WAV" } input { id: "audio-files", r#type: "file", multiple: true, accept: "audio/*,.flac,.mp3,.m4a,.aac,.ogg,.opus,.wav,.aiff,.aif,.ape,.wv", disabled: uploading() } }

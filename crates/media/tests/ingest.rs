@@ -38,6 +38,12 @@ impl Fixture {
             .execute(&pool)
             .await
             .unwrap();
+        sqlx::raw_sql(include_str!(
+            "../../../migrations/0003_catalog_metadata_revision.sql"
+        ))
+        .execute(&pool)
+        .await
+        .unwrap();
         for user in ["alice", "bob"] {
             sqlx::query("INSERT INTO users(id,username,password_hash) VALUES(?,?,?)")
                 .bind(user)
