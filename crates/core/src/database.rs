@@ -55,6 +55,30 @@ impl DataLock {
 #[cfg(test)]
 mod tests {
     #[tokio::test]
+    async fn embedded_schema_contains_filter_indexes_and_covering_upgrade() {
+        let directory = tempfile::tempdir().unwrap();
+        let pool = super::open(directory.path()).await.unwrap();
+        let applied: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM _sqlx_migrations WHERE version IN (5,6) AND success=1",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(applied, 2, "incremental builds must embed new migrations");
+        let columns = sqlx::query("PRAGMA index_info(tracks_owner_genre_filter)")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        use sqlx::Row;
+        assert!(
+            columns
+                .iter()
+                .any(|row| row.get::<Option<String>, _>("name").as_deref() == Some("genre"))
+        );
+        pool.close().await;
+    }
+
+    #[tokio::test]
     async fn catalog_upgrade_preserves_legacy_tracks_and_builds_private_stable_groups() {
         use sqlx::Row;
         let dir = tempfile::tempdir().unwrap();

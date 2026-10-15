@@ -4,6 +4,7 @@ set -euo pipefail
 export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-2}"
 cd "$(dirname "$0")/.."
 version="$(cargo metadata --locked --no-deps --format-version=1 | python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"]=="vela-server"))')"
+schema_version="$(python3 -c 'from pathlib import Path; print(max(int(p.name.split("_",1)[0]) for p in Path("migrations").glob("*.sql")))')"
 host_triple="$(rustc -vV | sed -n 's/^host: //p')"
 if [[ -n "${CARGO_BUILD_TARGET:-}" && "$CARGO_BUILD_TARGET" != "$host_triple" ]]; then
   echo 'Package on the native build host; cross-target packaging needs separate validation.' >&2
@@ -34,7 +35,7 @@ if [[ -n "$(git status --porcelain)" ]]; then
   exit 1
 fi
 commit="$(git rev-parse HEAD)"
-printf 'version=%s\ntarget=%s\ncommit=%s\n' "$version" "$host_triple" "$commit" > "$package_dir/BUILD.txt"
+printf 'version=%s\ntarget=%s\ncommit=%s\nschema_version=%s\n' "$version" "$host_triple" "$commit" "$schema_version" > "$package_dir/BUILD.txt"
 git archive --format=tar.gz --output="$source_archive" HEAD
 tar -C "$package_dir" -czf "$archive" .
 sha256sum "$archive" "$source_archive" > "target/releases/vela-$version-SHA256SUMS"

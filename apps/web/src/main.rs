@@ -1,3 +1,4 @@
+mod filters;
 mod metadata;
 mod scanner;
 use dioxus::prelude::*;
@@ -95,12 +96,20 @@ fn token(auth: Signal<Option<AuthResponse>>) -> String {
         .unwrap_or_default()
 }
 
+#[derive(Clone, Default, PartialEq, Eq)]
+struct LibraryConditions {
+    query: String,
+    filters: TrackFilters,
+}
+
 #[derive(Clone, Copy)]
 struct LibraryUi {
     tracks: Signal<Vec<Track>>,
     cursor: Signal<Option<String>>,
     loading: Signal<bool>,
     error: Signal<String>,
+    filter_error: Signal<String>,
+    conditions: Signal<LibraryConditions>,
     generation: Signal<u64>,
     auth: Signal<Option<AuthResponse>>,
     page: Signal<String>,
@@ -111,45 +120,79 @@ fn invalidate_library(mut ui: LibraryUi) {
     ui.generation.set(next);
 }
 
-async fn load_library(query: String, favorite: bool, after: Option<String>, mut ui: LibraryUi) {
+async fn load_library(after: Option<String>, ui: LibraryUi) {
+    let conditions = ui.conditions.peek().clone();
+    request_library(conditions, after, ui).await;
+}
+
+async fn request_library(conditions: LibraryConditions, after: Option<String>, mut ui: LibraryUi) {
+    let expected_page = ui.page.peek().clone();
+    if !matches!(expected_page.as_str(), "library" | "favorites") {
+        return;
+    }
     invalidate_library(ui);
     let generation = *ui.generation.peek();
-    let owner = ui
-        .auth
-        .peek()
-        .as_ref()
-        .map(|session| session.user.id.clone());
+    let session = token(ui.auth);
+    if session.is_empty() {
+        return;
+    }
     ui.loading.set(true);
-    let mut url = format!(
-        "/api/tracks?limit=50&favorites={favorite}&q={}",
-        js_sys::encode_uri_component(&query)
-            .as_string()
-            .unwrap_or_default()
-    );
-    if let Some(ref value) = after {
-        url.push_str(&format!(
-            "&cursor={}",
-            js_sys::encode_uri_component(value)
-                .as_string()
-                .unwrap_or_default()
-        ));
+    let favorite = expected_page == "favorites";
+    let mut url = format!("/api/tracks?limit=50&favorites={favorite}");
+    filters::append_query(&mut url, "q", &conditions.query);
+    filters::append_filters(&mut url, &conditions.filters);
+    if let Some(value) = after {
+        filters::append_query(&mut url, "cursor", &value);
     }
     let response = api::<TrackPage>("GET", &url, None, "").await;
-    let expected_page = if favorite { "favorites" } else { "library" };
     if *ui.generation.peek() != generation
-        || ui.page.peek().as_str() != expected_page
-        || ui.auth.peek().as_ref().map(|session| &session.user.id) != owner.as_ref()
+        || *ui.page.peek() != expected_page
+        || token(ui.auth) != session
     {
         return;
     }
     match response {
         Ok(page) => {
+            // Commit only accepted conditions. Failed validation or a stale
+            // response cannot change the conditions used by the next page.
+            ui.conditions.set(conditions);
             ui.tracks.set(page.items);
             ui.cursor.set(page.next_cursor);
+            ui.error.set(String::new());
+            ui.filter_error.set(String::new());
         }
         Err(message) => ui.error.set(message),
     }
     ui.loading.set(false);
+}
+
+fn search_library(query: String, mut ui: LibraryUi) {
+    if query.len() > 256 {
+        reject_library_conditions("Shorten your search to at most 256 bytes.".into(), ui);
+        return;
+    }
+    let mut conditions = ui.conditions.peek().clone();
+    conditions.query = query;
+    ui.filter_error.set(String::new());
+    spawn_authorized(ui.auth, request_library(conditions, None, ui));
+}
+
+fn reject_library_conditions(message: String, mut ui: LibraryUi) {
+    invalidate_library(ui);
+    ui.loading.set(false);
+    ui.filter_error.set(message);
+}
+
+fn apply_library_filters(filters: TrackFilters, mut ui: LibraryUi) {
+    let mut conditions = ui.conditions.peek().clone();
+    conditions.filters = filters;
+    ui.filter_error.set(String::new());
+    spawn_authorized(ui.auth, request_library(conditions, None, ui));
+}
+
+fn catalog_changed(mut revision: Signal<u64>) {
+    let next = revision.peek().wrapping_add(1);
+    revision.set(next);
 }
 
 fn storage_get(key: &str) -> Option<String> {
@@ -619,12 +662,19 @@ fn App() -> Element {
     let cursor = use_signal(|| None::<String>);
     let loading = use_signal(|| false);
     let request_generation = use_signal(|| 0_u64);
+    let mut library_conditions = use_signal(LibraryConditions::default);
+    let mut filter_draft = use_signal(filters::FilterDraft::default);
+    let mut filter_open = use_signal(|| false);
+    let mut filter_error = use_signal(String::new);
+    let facets_revision = use_signal(|| 0_u64);
     let library = LibraryUi {
         tracks,
         cursor,
         loading,
         error,
         generation: request_generation,
+        conditions: library_conditions,
+        filter_error,
         auth,
         page,
     };
@@ -749,6 +799,17 @@ fn App() -> Element {
     use_effect(move || {
         let _session = auth.read().as_ref().map(|s| s.csrf_token.clone());
         editing_track.set(None);
+        invalidate_library(library);
+        tracks.set(Vec::new());
+        let mut cursor = cursor;
+        cursor.set(None);
+        let mut loading = loading;
+        loading.set(false);
+        library_conditions.set(LibraryConditions::default());
+        query.set(String::new());
+        filter_draft.set(filters::FilterDraft::default());
+        filter_error.set(String::new());
+        filter_open.set(false);
         clear_catalog(catalog);
         busy.set(false);
         import_busy.set(false);
@@ -789,10 +850,7 @@ fn App() -> Element {
             catalog_page(None, catalog);
         }
         if active == "library" || active == "favorites" {
-            spawn_authorized(
-                auth,
-                load_library(query.peek().clone(), active == "favorites", None, library),
-            );
+            spawn_authorized(auth, load_library(None, library));
         }
         spawn_authorized(auth, async move {
             if let Ok(value) = api::<LibraryStats>("GET", "/api/stats", None, "").await {
@@ -854,6 +912,7 @@ fn App() -> Element {
                     });
                     jobs.set(value);
                     if completed {
+                        catalog_changed(facets_revision);
                         notice.set("Your import is ready in the library.".into());
                         if matches!(page.peek().as_str(), "albums" | "artists") {
                             catalog_page(None, catalog);
@@ -863,13 +922,7 @@ fn App() -> Element {
                             stats.set(Some(value));
                         }
                         if matches!(page.peek().as_str(), "library" | "favorites") {
-                            load_library(
-                                query.peek().clone(),
-                                page.peek().as_str() == "favorites",
-                                None,
-                                library,
-                            )
-                            .await;
+                            load_library(None, library).await;
                         }
                     }
                 }
@@ -985,18 +1038,35 @@ fn App() -> Element {
                             div { class: "section-toolbar", div { h2 { if page() == "favorites" { "Your favorites" } else { "In your collection" } }
                                     if let Some(value) = stats.read().as_ref() { p { "{value.tracks} tracks · {value.albums} albums · {value.artists} artists" } }
                                 }
-                                form { class: "search-form", onsubmit: move |e| { e.prevent_default(); spawn_authorized(auth, load_library(query(), page() == "favorites", None, library)); },
+                                form { class: "search-form", onsubmit: move |e| { e.prevent_default(); search_library(query(), library); },
                                     label { class: "sr-only", r#for: "library-search", "Search your library" }
-                                    input { id: "library-search", value: "{query}", placeholder: "Search your music", oninput: move |e| query.set(e.value()) }
+                                    input { id: "library-search", value: "{query}", maxlength: 256, placeholder: "Search your music", oninput: move |e| query.set(e.value()) }
                                     button { r#type: "submit", "aria-label": "Search", "⌕" }
+                                }
+                            }
+                            filters::LibraryFilters {
+                                auth, open: filter_open, draft: filter_draft,
+                                applied: library_conditions.read().filters.clone(),
+                                error: filter_error, loading, revision: facets_revision,
+                                onapply: move |filters| apply_library_filters(filters, library),
+                                oninvalid: move |message| reject_library_conditions(message, library),
+                                onreset: move |_| {
+                                    filter_draft.set(filters::FilterDraft::default());
+                                    apply_library_filters(TrackFilters::default(), library);
+                                },
+                            }
+                            if !library_conditions.read().query.is_empty() {
+                                p { class: "applied-search", role: "status", "Results for “{library_conditions.read().query}”"
+                                    button { class: "button secondary small", onclick: move |_| { query.set(String::new()); search_library(String::new(), library); }, "Clear search" }
                                 }
                             }
                             if !playlists.read().is_empty() { div { class: "playlist-target", label { r#for: "playlist-target", "Add tracks to" } select { id: "playlist-target", value: "{selected_add_playlist}", onchange: move |e| selected_add_playlist.set(e.value()), option { value: "", "Choose a playlist" } for list in playlists.read().iter().filter(|p| p.can_edit) { option { value: "{list.id}", "{list.name}" } } } } }
                             if loading() && tracks.read().is_empty() { div { class: "empty-state", div { class: "spinner" } h3 { "Finding your music…" } } }
                             else if tracks.read().is_empty() { div { class: "empty-state", span { class: "empty-icon", if page() == "favorites" { "♡" } else { "♫" } }
-                                    h3 { if !query().is_empty() { "No matches yet" } else if page() == "favorites" { "Keep the good ones close" } else { "Your collection starts here" } }
-                                    p { if !query().is_empty() { "Try another title, artist, or album." } else if page() == "favorites" { "Tap the heart beside a track to save it here." } else { "Upload your audio files or import a downloadable music link." } }
-                                    if page() == "library" && query().is_empty() { button { class: "button primary", onclick: move |_| add_music.set(true), "+ Add music" } }
+                                    h3 { if !library_conditions.read().query.is_empty() || filters::has_criteria(&library_conditions.read().filters) { "No matching tracks" } else if page() == "favorites" { "Keep the good ones close" } else { "Your collection starts here" } }
+                                    p { if filters::has_criteria(&library_conditions.read().filters) { "No tracks match your applied filters. Broaden the filters or reset them to see more of your music." } else if !library_conditions.read().query.is_empty() { "Try another title, artist, or album, or clear your search." } else if page() == "favorites" { "Tap the heart beside a track to save it here." } else { "Upload your audio files or import a downloadable music link." } }
+                                    if library_conditions.read().filters != TrackFilters::default() { button { class: "button secondary", onclick: move |_| { filter_draft.set(filters::FilterDraft::default()); apply_library_filters(TrackFilters::default(), library); }, "Reset applied filters" } }
+                                    if page() == "library" && library_conditions.read().query.is_empty() && library_conditions.read().filters == TrackFilters::default() { button { class: "button primary", onclick: move |_| add_music.set(true), "+ Add music" } }
                                 } }
                             else { div { class: "track-table", div { class: "track-header", span { "#" } span { "TITLE" } span { "ALBUM" } span { "QUALITY" } span { "TIME" } span { "" } }
                                     for (at, track) in tracks.read().iter().cloned().enumerate() {
@@ -1020,7 +1090,7 @@ fn App() -> Element {
                                         } } }
                                     }
                                 } }
-                            if !tracks.read().is_empty() { div { class: "pagination", button { class: "button secondary small", disabled: loading(), onclick: move |_| { spawn_authorized(auth, load_library(query(), page() == "favorites", None, library)); }, "Back to first page" } span { "Up to 50 tracks per page" } if cursor.read().is_some() { button { class: "button secondary small", disabled: loading(), onclick: move |_| { spawn_authorized(auth, load_library(query(), page() == "favorites", cursor(), library)); }, if loading() { "Loading…" } else { "Next page →" } } } } }
+                            if !tracks.read().is_empty() { div { class: "pagination", button { class: "button secondary small", disabled: loading(), onclick: move |_| { spawn_authorized(auth, load_library(None, library)); }, "Back to first page" } span { "Up to 50 tracks per page" } if cursor.read().is_some() { button { class: "button secondary small", disabled: loading(), onclick: move |_| { spawn_authorized(auth, load_library(cursor(), library)); }, if loading() { "Loading…" } else { "Next page →" } } } } }
                         }
                     }
 
@@ -1201,6 +1271,7 @@ fn App() -> Element {
                                 } }
                             if auth.read().as_ref().is_some_and(|a| a.user.is_admin) {
                                 scanner::ScannerPanel { auth, onchanged: move |_| {
+                                    catalog_changed(facets_revision);
                                     invalidate_library(library);
                                     invalidate_catalog(catalog);
                                     spawn_authorized(auth, async move {
@@ -1245,6 +1316,7 @@ fn App() -> Element {
                     metadata::MetadataEditor { key: "{editing.id}", track_id: editing.id.clone(), auth,
                         onclose: move |_| editing_track.set(None),
                         onsaved: move |updated: Track| {
+                            catalog_changed(facets_revision);
                             let mut catalog = catalog;
                             for track in tracks.write().iter_mut().filter(|t| t.id == updated.id) { *track = updated.clone(); }
                             for track in catalog.tracks.write().iter_mut().filter(|t| t.id == updated.id) { *track = updated.clone(); }
@@ -1255,7 +1327,7 @@ fn App() -> Element {
                             notice.set("Metadata saved. Your original audio file is unchanged.".into());
                             if matches!(page.peek().as_str(), "albums" | "artists") { catalog_page(None, catalog); }
                             if matches!(page.peek().as_str(), "library" | "favorites") {
-                                spawn_authorized(auth, load_library(query(), page() == "favorites", None, library));
+                                spawn_authorized(auth, load_library(None, library));
                             }
                             spawn_authorized(auth, async move { if let Ok(value) = api::<LibraryStats>("GET", "/api/stats", None, "").await { stats.set(Some(value)); } });
                         }
@@ -1265,7 +1337,7 @@ fn App() -> Element {
                             if !error().is_empty() { div { class: "alert error", role: "alert", "{error}" } } h2 { id: "upload-title", "Bring your music along" } p { "Choose audio files from your device. Vela reads the tags, saves the artwork, and keeps your originals intact." }
                             label { class: "upload-zone", r#for: "audio-files", span { "↥" } strong { "Choose audio files" } small { "FLAC · MP3 · AAC · Opus · Vorbis · WAV" } input { id: "audio-files", r#type: "file", multiple: true, accept: "audio/*,.flac,.mp3,.m4a,.aac,.ogg,.opus,.wav,.aiff,.aif,.ape,.wv", disabled: uploading() } }
                             if !upload_status().is_empty() { p { class: "upload-status", role: "status", "{upload_status}" } }
-                            button { class: "button primary", disabled: uploading(), onclick: move |_| { if uploading() { return; } uploading.set(true); error.set(String::new()); spawn_authorized(auth, async move { match upload_files(token(auth), upload_status, error).await { Ok(count) => { upload_status.set(format!("{count} files processed.")); if count > 0 { notice.set(format!("{count} audio files are ready to listen.")); if matches!(page.peek().as_str(), "albums" | "artists") { catalog_page(None, catalog); } load_library(query(), page() == "favorites", None, library).await; if let Ok(value) = api::<LibraryStats>("GET", "/api/stats", None, "").await { stats.set(Some(value)); } } } Err(message) => error.set(message) } uploading.set(false); }); }, if uploading() { "Uploading and reading tags…" } else { "Upload to my library" } }
+                            button { class: "button primary", disabled: uploading(), onclick: move |_| { if uploading() { return; } uploading.set(true); error.set(String::new()); spawn_authorized(auth, async move { match upload_files(token(auth), upload_status, error).await { Ok(count) => { upload_status.set(format!("{count} files processed.")); if count > 0 { catalog_changed(facets_revision); notice.set(format!("{count} audio files are ready to listen.")); if matches!(page.peek().as_str(), "albums" | "artists") { catalog_page(None, catalog); } load_library(None, library).await; if let Ok(value) = api::<LibraryStats>("GET", "/api/stats", None, "").await { stats.set(Some(value)); } } } Err(message) => error.set(message) } uploading.set(false); }); }, if uploading() { "Uploading and reading tags…" } else { "Upload to my library" } }
                             div { class: "modal-divider", "or" } button { class: "button secondary", disabled: uploading(), onclick: move |_| { add_music.set(false); page.set("imports".into()); }, "Import from a download link →" } small { "Files are processed one at a time. Keep this tab open while uploading." }
                         } } }
             }

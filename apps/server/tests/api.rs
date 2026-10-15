@@ -1946,3 +1946,274 @@ async fn admin_folder_scan_imports_real_audio_without_paths_and_respects_private
     app.state.shutdown.cancel();
     worker.await.unwrap().unwrap();
 }
+
+#[tokio::test]
+async fn typed_library_filters_facets_and_sorting_are_private_and_compose_with_search() {
+    let app = TestApp::new().await;
+    let member = app.user("filterlistener").await;
+    let signal = app.upload(&app.admin).await.track;
+    let private_signal = app.upload(&member).await.track;
+    let beacon: UploadResult = app
+        .request(Method::POST, "/api/upload", &app.admin)
+        .multipart(reqwest::multipart::Form::new().part(
+            "file",
+            reqwest::multipart::Part::bytes(OTHER_AUDIO.to_vec()).file_name("beacon.mp3"),
+        ))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    for (owner, track, genre, year) in [
+        (&app.admin, &signal, "Downtempo", 1998),
+        (&app.admin, &beacon.track, "Rock", 2021),
+        (&member, &private_signal, "Private-only genre", 1984),
+    ] {
+        let update = UpdateTrackMetadata {
+            revision: 0,
+            title: track.title.clone(),
+            artist: track.artist.clone(),
+            album: track.album.clone(),
+            album_artist: track.album_artist.clone(),
+            genre: genre.into(),
+            year: Some(year),
+            track_number: track.track_number,
+            disc_number: track.disc_number,
+        };
+        assert_eq!(
+            app.request(
+                Method::PATCH,
+                &format!("/api/tracks/{}/metadata", track.id),
+                owner
+            )
+            .json(&update)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+            StatusCode::OK
+        );
+    }
+    assert_eq!(
+        app.request(
+            Method::POST,
+            &format!("/api/tracks/{}/favorite", signal.id),
+            &app.admin
+        )
+        .json(&json!({"favorite":true}))
+        .send()
+        .await
+        .unwrap()
+        .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        app.client
+            .get(format!("{}/api/catalog/filters", app.base))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+    let response = app
+        .request(Method::GET, "/api/catalog/filters", &app.admin)
+        .send()
+        .await
+        .unwrap();
+    assert!(
+        response.headers()["cache-control"]
+            .to_str()
+            .unwrap()
+            .contains("no-store")
+    );
+    let facets: CatalogFacets = response.json().await.unwrap();
+    assert_eq!(facets.genres, vec!["Downtempo", "Rock"]);
+    assert!(!facets.genres_truncated && !facets.codecs_truncated);
+    assert!(facets.codecs.contains(&signal.codec) && facets.codecs.contains(&beacon.track.codec));
+    let facets: CatalogFacets = app
+        .request(Method::GET, "/api/catalog/filters", &member)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(facets.genres, vec!["Private-only genre"]);
+    let filtered: TrackPage = app
+        .request(Method::GET, "/api/tracks", &app.admin)
+        .query(&[
+            ("q", "Signal"),
+            ("genre", "downtempo"),
+            ("codec", "flac"),
+            ("year_from", "1990"),
+            ("year_to", "2000"),
+            ("min_bitrate", "1"),
+            ("min_sample_rate", "44100"),
+            ("min_bit_depth", "16"),
+            ("favorites", "true"),
+            ("sort", "title"),
+        ])
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(filtered.items.len(), 1);
+    assert_eq!(filtered.items[0].id, signal.id);
+    assert!(filtered.next_cursor.is_none());
+    let unknowns: TrackPage = app
+        .request(Method::GET, "/api/tracks?min_bit_depth=1", &app.admin)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        unknowns.items.len(),
+        1,
+        "unknown MPEG bit depth must not match a quality threshold"
+    );
+    assert_eq!(unknowns.items[0].id, signal.id);
+    for genre in ["Private-only genre", "' OR 1=1 --", "Rock%", "Rock_"] {
+        let page: TrackPage = app
+            .request(Method::GET, "/api/tracks", &app.admin)
+            .query(&[("genre", genre)])
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert!(
+            page.items.is_empty(),
+            "genre is an owner-scoped literal, never SQL or LIKE syntax"
+        );
+    }
+    let first: TrackPage = app
+        .request(Method::GET, "/api/tracks?sort=title&limit=1", &app.admin)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(first.items[0].id, beacon.track.id);
+    let second: TrackPage = app
+        .request(Method::GET, "/api/tracks?sort=title&limit=1", &app.admin)
+        .query(&[("cursor", first.next_cursor.as_deref().unwrap())])
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(second.items[0].id, signal.id);
+    assert!(second.next_cursor.is_none());
+    for sort in ["title", "newest"] {
+        let mut refusals = Vec::new();
+        for cursor in [private_signal.id.clone(), uuid::Uuid::new_v4().to_string()] {
+            let response = app
+                .request(Method::GET, "/api/tracks", &app.admin)
+                .query(&[
+                    ("sort", sort),
+                    ("q", "DefinitelyAbsent"),
+                    ("cursor", cursor.as_str()),
+                ])
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            refusals.push(response.json::<serde_json::Value>().await.unwrap());
+        }
+        assert_eq!(
+            refusals[0], refusals[1],
+            "foreign/missing cursor errors are indistinguishable"
+        );
+    }
+    // Known equal timestamps exercise the UUID tie breaker through real HTTP.
+    sqlx::query("UPDATE tracks SET added_at=1234 WHERE owner_id=?")
+        .bind(&app.admin.user.id)
+        .execute(&app.state.pool)
+        .await
+        .unwrap();
+    let first: TrackPage = app
+        .request(Method::GET, "/api/tracks?sort=newest&limit=1", &app.admin)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let second: TrackPage = app
+        .request(Method::GET, "/api/tracks?sort=newest&limit=1", &app.admin)
+        .query(&[("cursor", first.next_cursor.as_deref().unwrap())])
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(first.items[0].id > second.items[0].id);
+    assert!(second.next_cursor.is_none());
+    assert_ne!(first.items[0].id, private_signal.id);
+    assert_ne!(second.items[0].id, private_signal.id);
+}
+
+#[tokio::test]
+async fn malformed_library_filter_queries_are_bounded_json_errors() {
+    let app = TestApp::new().await;
+    for query in [
+        "sort=owner_id",
+        "year_from=0",
+        "year_to=10000",
+        "year_from=2025&year_to=1990",
+        "year_from=not-a-number",
+        "min_bitrate=0",
+        "min_bitrate=1000001",
+        "min_sample_rate=-1",
+        "min_sample_rate=1536001",
+        "min_bit_depth=65",
+        "genre=%00",
+        "genre=",
+        "codec=%0A",
+        "codec=",
+        "cursor=not-a-uuid",
+        "filter_sql=1",
+        "limit=4294967296",
+        "sort=title&sort=newest",
+    ] {
+        let response = app
+            .request(Method::GET, &format!("/api/tracks?{query}"), &app.admin)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{query}");
+        let error: serde_json::Value = response.json().await.unwrap();
+        assert!(
+            error["error"]
+                .as_str()
+                .is_some_and(|message| message.len() < 256)
+        );
+    }
+    for (field, size) in [("q", 257), ("genre", 1025), ("codec", 65), ("cursor", 129)] {
+        let value = "a".repeat(size);
+        let response = app
+            .request(Method::GET, "/api/tracks", &app.admin)
+            .query(&[(field, value)])
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert!(response.json::<serde_json::Value>().await.unwrap()["error"].is_string());
+    }
+}

@@ -2,7 +2,7 @@
 
 ## Installation and access
 
-See README for local build and Compose. Application management currently covers initial account setup, local user creation, upload/batch upload, direct imports, configured folder scans, catalog editing, favorites and playlists. Storage/public URLs are administrator environment configuration; the full no-console health/storage/invitation wizard remains roadmap work.
+See README for local build and Compose. Application management currently covers initial account setup, local user creation, upload/batch upload, direct imports, configured folder scans, catalog editing, typed library filters, favorites and playlists. Storage/public URLs are administrator environment configuration; the full no-console health/storage/invitation wizard remains roadmap work.
 
 A native deployment uses one binary, built web assets, writable private local data directory and systemd unit in deploy/vela.service. Install an unprivileged `vela` account and copy the binary/web files into /opt/vela; systemd StateDirectory creates /var/lib/vela. SQLite must use local storage with working locks; network filesystems and multi-process use are unsupported.
 
@@ -39,7 +39,7 @@ Data layout: vela.db (+WAL/SHM during operation), media/hash.audio, artwork/hash
 
 After a verified clean checkpoint commit, run `scripts/package-release.sh` with the matching wasm-bindgen CLI on PATH (or VELA_WASM_BINDGEN). It rebuilds native/web release artifacts, includes private backup tooling, deployment/docs and dependency notices, archives the exact Git source checkpoint and writes a version-specific vela-VERSION-SHA256SUMS under target/releases. Previous archives/manifests are preserved. It refuses to overwrite existing archives or package uncommitted source. This does not publish a release. Build triples are labelled from the actual native host; no cross-platform validation is inferred. Review metadata-only license notices before external distribution.
 
-Validate a local native archive with `python3 scripts/verify_package.py target/releases/vela-0.2.0-x86_64-unknown-linux-gnu.tar.gz` and `sha256sum -c target/releases/vela-0.2.0-SHA256SUMS`. The verifier extracts only into its own temporary directory, starts a loopback-only server, checks first-run state/bundled HTML/WASM and graceful exit, then removes its fixture. To run manually, extract the native archive into a new directory, enter it and run `./vela-server`; bundled `dist/` is the default web root.
+Validate a local native archive with `python3 scripts/verify_package.py target/releases/vela-0.3.0-x86_64-unknown-linux-gnu.tar.gz` and `sha256sum -c target/releases/vela-0.3.0-SHA256SUMS`. The verifier extracts only into its own temporary directory, starts a loopback-only server, checks the expected embedded schema version, first-run state/bundled HTML/WASM and graceful exit, then removes its fixture. To run manually, extract the native archive into a new directory, enter it and run `./vela-server`; bundled `dist/` is the default web root.
 
 The native host artifact dynamically links libc/libm/libgcc_s; inspection found GLIBC2.34 symbol requirements. This is a minimum ABI requirement, not validation on every Linux distribution. Only the actual x86_64 GNU/Linux build host was tested; other systems/ARM64 need their own builds and runtime validation.
 
@@ -69,3 +69,7 @@ services:
 Sources are read-only inputs. Supported audio is copied into immutable managed storage, so budget for the additional copy; exact duplicates reuse managed bytes. Existing edited catalog tags survive unchanged and exact-duplicate rescans. Changed files create/deduplicate a new snapshot; missing files never delete tracks. Signature-based change detection is best-effort, not a full integrity audit. Cancellation/shutdown checks occur between I/O calls and finish any atomic publication safely. Broken/network filesystem reads have no hard timeout guarantee; use local storage.
 
 Instance backups include private source configuration records, job state/fingerprints and managed audio, but do not copy the original sources/ directory or external roots. Back up original collections independently. Restores need the intended VELA_SCAN_ROOTS configuration/mounts; managed music remains playable without sources. No downgrade to0.1.x after migration0004 is supported; restore a matching backup and old binary instead.
+
+## Catalog index upgrade (0.3.0)
+
+Migration0005 creates five owner-prefixed indexes for filtering and ordering;0006 rebuilds the genre index with a covering column. Startup applies them before serving, so large existing catalogs can take additional startup time and disk. Use the normal private backup/upgrade procedure. No source audio/tags/sharing grants are rewritten. Measured SQL fixture index sizes/build times are in PERFORMANCE; they are not a guaranteed runtime estimate for a real VPS. Downgrading schema in place is unsupported; restore a matched pre-upgrade backup with its previous binary.

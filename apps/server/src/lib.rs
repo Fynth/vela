@@ -346,6 +346,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/artists/{id}", get(artist))
         .route("/api/artists/{id}/tracks", get(artist_tracks))
         .route("/api/stats", get(stats))
+        .route("/api/catalog/filters", get(catalog_facets))
         .route("/api/upload", upload)
         .route("/api/tracks/{id}/stream", get(stream))
         .route("/api/artwork/{id}", get(artwork))
@@ -474,39 +475,63 @@ async fn create_user(
     Ok(Json(s.auth.create_user(&auth.response.user, c).await?))
 }
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct TrackQuery {
     q: Option<String>,
     cursor: Option<String>,
     limit: Option<u32>,
     favorites: Option<bool>,
+    genre: Option<String>,
+    codec: Option<String>,
+    year_from: Option<i64>,
+    year_to: Option<i64>,
+    min_bitrate: Option<i64>,
+    min_sample_rate: Option<i64>,
+    min_bit_depth: Option<i64>,
+    sort: Option<TrackSort>,
 }
 async fn tracks(
     State(s): State<AppState>,
     Auth(auth): Auth,
-    Query(q): Query<TrackQuery>,
+    query: std::result::Result<Query<TrackQuery>, axum::extract::rejection::QueryRejection>,
 ) -> Result<Json<TrackPage>> {
-    if q.cursor
-        .as_ref()
-        .is_some_and(|c| uuid::Uuid::parse_str(c).is_err())
-    {
-        return Err(invalid("Invalid track cursor"));
-    }
-    if q.q.as_ref().is_some_and(|q| q.len() > 256)
-        || q.cursor.as_ref().is_some_and(|c| c.len() > 128)
-    {
-        return Err(invalid("Search or cursor is too long"));
-    }
+    let Query(q) = query.map_err(|_| invalid("Invalid track filters or pagination"))?;
+    let filters = TrackFilters {
+        genre: q.genre,
+        codec: q.codec,
+        year_from: q.year_from,
+        year_to: q.year_to,
+        min_bitrate: q.min_bitrate,
+        min_sample_rate: q.min_sample_rate,
+        min_bit_depth: q.min_bit_depth,
+        sort: q.sort.unwrap_or_default(),
+    };
     Ok(Json(
         s.media
-            .list_tracks(
+            .list_tracks_filtered(
                 &auth.response.user.id,
                 q.q.as_deref(),
                 q.cursor.as_deref(),
                 q.limit.unwrap_or(50).clamp(1, 100),
                 q.favorites.unwrap_or(false),
+                &filters,
             )
-            .await?,
+            .await
+            .map_err(track_filter_error)?,
     ))
+}
+fn track_filter_error(error: anyhow::Error) -> HttpError {
+    if let Some(error) = error.downcast_ref::<vela_media::InvalidTrackFilter>() {
+        invalid(&error.0)
+    } else {
+        error.into()
+    }
+}
+async fn catalog_facets(
+    State(s): State<AppState>,
+    Auth(auth): Auth,
+) -> Result<Json<CatalogFacets>> {
+    Ok(Json(s.media.catalog_facets(&auth.response.user.id).await?))
 }
 async fn stats(State(s): State<AppState>, Auth(auth): Auth) -> Result<Json<LibraryStats>> {
     Ok(Json(s.media.stats(&auth.response.user.id).await?))

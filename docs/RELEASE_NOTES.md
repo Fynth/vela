@@ -1,3 +1,11 @@
+# Local checkpoint0.3.0
+
+This is a local review checkpoint; PROGRESS records executed gates. No external release is published.
+
+Library and Favorites can combine exact genre/format, release-year range and minimum bitrate/sample-rate/bit-depth filters with search. Title and recently-added sorting use bounded keyset pages with stable UUID tie-breakers. Private, bounded suggestions come from actual catalog tags. Unsaved fields stay drafts while paging; accepted conditions survive refresh/navigation and reset on account change. Validation retains the current result, and delayed requests cannot replace newer/private state.
+
+Format/container labels and numeric measurements do not establish losslessness. Genre matching uses complete tags and ASCII NOCASE. Unknown properties are excluded by numeric criteria; concurrent catalog edits can move live page boundaries. Migrations0005/0006 add query indexes and the measured covering genre upgrade; back up before upgrading and restore matched old data/binaries for rollback. Existing audio and privacy grants are unchanged. Stable incremental builds now watch added migration files, and package verification checks the embedded schema version.
+
 # Local checkpoint0.2.0
 
 This is a local review checkpoint, not an externally published release. See PROGRESS for executed validation and KNOWN_LIMITATIONS for unsupported platforms/features.

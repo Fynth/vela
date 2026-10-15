@@ -28,8 +28,21 @@ Startup removes only regular unpublished temporary files with the service-owned
 published content hashes, other files, directories and symbolic links.
 Single-process operation with cloned service instances is the supported quota
 concurrency model. FTS prefix search uses at most 20 literal terms; query length
-is limited to 512 bytes. UUID cursor pagination is stable within a page traversal
-but does not guarantee newly imported tracks appear in that traversal.
+is limited to 256 bytes. A bounded4097-row FTS probe preserves efficient sparse
+searches; all filter values use SQL parameters. Typed filters combine whole-tag
+genre, stored format label, release-year bounds and known minimum audio
+properties. Minimum bitrate is in kbps; sample rate is in Hz. Unknown values
+do not satisfy numeric criteria. A format/container label or a high sample rate
+does not establish lossless encoding.
+
+Library pages use UUID order by default; title order uses ASCII NOCASE plus UUID
+and recently-added order uses descending addition time plus descending UUID.
+Sorted cursor lookups are owner-scoped and share the page's SQLite read snapshot.
+Pages contain at most100 tracks and one sentinel, without OFFSET. Concurrent
+imports or metadata edits can move boundaries between requests; pagination is
+not a catalog snapshot across requests. The original `list_tracks` method is a
+wrapper with default filters. Genre and format suggestions are read in one
+snapshot, collapsed by ASCII NOCASE and bounded100/32 plus truncation flags.
 
 `tests/fixtures/signal.flac` and `beacon.mp3` are real one-second synthetic sine
 tones generated locally with FFmpeg, not recordings from external artists.

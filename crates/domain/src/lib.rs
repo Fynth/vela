@@ -85,6 +85,35 @@ pub struct TrackPage {
     pub items: Vec<Track>,
     pub next_cursor: Option<String>,
 }
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TrackSort {
+    #[default]
+    Library,
+    Title,
+    Newest,
+}
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
+pub struct TrackFilters {
+    pub genre: Option<String>,
+    pub codec: Option<String>,
+    pub year_from: Option<i64>,
+    pub year_to: Option<i64>,
+    /// Minimum reported bitrate in kilobits per second.
+    pub min_bitrate: Option<i64>,
+    /// Minimum reported sample rate in hertz.
+    pub min_sample_rate: Option<i64>,
+    pub min_bit_depth: Option<i64>,
+    pub sort: TrackSort,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CatalogFacets {
+    pub genres: Vec<String>,
+    pub codecs: Vec<String>,
+    pub genres_truncated: bool,
+    pub codecs_truncated: bool,
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AlbumSummary {
     pub id: String,

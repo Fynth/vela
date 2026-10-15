@@ -1,10 +1,12 @@
 //! Private catalog access and bounded, content-addressed managed media ingestion.
 mod catalog;
+mod filters;
 mod metadata;
 mod range;
 mod validation;
 
 pub use catalog::InvalidCatalogCursor;
+pub use filters::InvalidTrackFilter;
 pub use metadata::CatalogMetadataError;
 pub use range::{RangeError, select_range};
 
@@ -19,7 +21,7 @@ use anyhow::{Context, Result, ensure};
 use sqlx::{QueryBuilder, Row, Sqlite, SqlitePool, sqlite::SqliteRow};
 use tokio::sync::Semaphore;
 use uuid::Uuid;
-use vela_domain::{LibraryStats, Track, TrackPage, UploadResult};
+use vela_domain::{LibraryStats, Track, UploadResult};
 
 /// Internal streaming descriptor. Never serialize filesystem paths into an API.
 #[derive(Debug, Clone)]
@@ -203,93 +205,6 @@ impl MediaService {
         })
     }
 
-    pub async fn list_tracks(
-        &self,
-        owner_id: &str,
-        query: Option<&str>,
-        cursor: Option<&str>,
-        limit: u32,
-        favorites_only: bool,
-    ) -> Result<TrackPage> {
-        let limit = limit.clamp(1, 100);
-        if let Some(cursor) = cursor {
-            ensure!(Uuid::parse_str(cursor).is_ok(), "invalid track cursor");
-        }
-        let fts = query
-            .filter(|query| !query.trim().is_empty())
-            .map(search_expression)
-            .transpose()?;
-        if fts.as_ref().is_some_and(|query| query.is_empty()) {
-            return Ok(TrackPage {
-                items: Vec::new(),
-                next_cursor: None,
-            });
-        }
-        // SQLite's owner/UUID index is ideal for broad searches, but scans an
-        // entire catalog for rare or absent matches. Probe a bounded FTS prefix
-        // and drive sparse searches from FTS rowids instead.
-        let sparse = if let Some(expression) = &fts {
-            let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM (SELECT rowid FROM tracks_fts WHERE tracks_fts MATCH ? LIMIT 4097)")
-                .bind(expression).fetch_one(&self.pool).await?;
-            if count == 0 {
-                return Ok(TrackPage {
-                    items: Vec::new(),
-                    next_cursor: None,
-                });
-            }
-            count <= 4096
-        } else {
-            false
-        };
-        let sparse_projection;
-        let projection = if sparse {
-            sparse_projection = TRACK_SELECT.replace(
-                "FROM tracks t",
-                "FROM tracks_fts CROSS JOIN tracks t ON t.rowid=tracks_fts.rowid",
-            );
-            sparse_projection.as_str()
-        } else {
-            TRACK_SELECT
-        };
-        let mut builder = QueryBuilder::<Sqlite>::new(projection);
-        builder
-            .push_bind(owner_id)
-            .push(" WHERE t.owner_id=")
-            .push_bind(owner_id);
-        if let Some(fts) = &fts {
-            if sparse {
-                builder.push(" AND tracks_fts MATCH ").push_bind(fts);
-            } else {
-                builder
-                    .push(" AND t.rowid IN (SELECT rowid FROM tracks_fts WHERE tracks_fts MATCH ")
-                    .push_bind(fts)
-                    .push(")");
-            }
-        }
-        if let Some(cursor) = cursor {
-            builder.push(" AND t.id > ").push_bind(cursor);
-        }
-        if favorites_only {
-            builder.push(" AND f.track_id IS NOT NULL");
-        }
-        builder
-            .push(" ORDER BY t.id ASC LIMIT ")
-            .push_bind(i64::from(limit) + 1);
-        let rows = builder.build().fetch_all(&self.pool).await?;
-        let mut items = rows
-            .iter()
-            .map(track_from_row)
-            .collect::<Result<Vec<_>>>()?;
-        let has_more = items.len() > limit as usize;
-        items.truncate(limit as usize);
-        let next_cursor = if has_more {
-            items.last().map(|track| track.id.clone())
-        } else {
-            None
-        };
-        Ok(TrackPage { items, next_cursor })
-    }
-
     pub async fn get_track(&self, owner_id: &str, id: &str) -> Result<Option<Track>> {
         let mut builder = QueryBuilder::<Sqlite>::new(TRACK_SELECT);
         builder
@@ -367,17 +282,6 @@ impl MediaService {
             duration_ms: row.try_get("duration_ms")?,
         })
     }
-}
-
-fn search_expression(query: &str) -> Result<String> {
-    ensure!(query.len() <= 512, "search query exceeds length limit");
-    let tokens = query
-        .split(|character: char| !character.is_alphanumeric())
-        .filter(|token| !token.is_empty())
-        .take(20)
-        .map(|token| format!("\"{}\"*", token.chars().take(64).collect::<String>()))
-        .collect::<Vec<_>>();
-    Ok(tokens.join(" AND "))
 }
 
 fn track_from_row(row: &SqliteRow) -> Result<Track> {
@@ -498,20 +402,6 @@ fn persist_content(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn fts_operators_are_quoted_literals() {
-        assert_eq!(
-            search_expression("hello OR artist:secret*").unwrap(),
-            "\"hello\"* AND \"OR\"* AND \"artist\"* AND \"secret\"*"
-        );
-        assert_eq!(
-            search_expression("\"; DROP TABLE tracks; --").unwrap(),
-            "\"DROP\"* AND \"TABLE\"* AND \"tracks\"*"
-        );
-        assert_eq!(search_expression("***").unwrap(), "");
-        assert!(search_expression(&"a".repeat(513)).is_err());
-    }
 
     #[test]
     fn storage_identifiers_are_fixed_hex_and_cannot_traverse() {

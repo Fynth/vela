@@ -6,6 +6,7 @@ import os
 from pathlib import Path, PurePosixPath
 import signal
 import socket
+import sqlite3
 import subprocess
 import tarfile
 import tempfile
@@ -54,6 +55,10 @@ def main():
                         raise RuntimeError('Packaged server failed readiness')
                     time.sleep(.05)
             assert health['version'] == build['version']
+            if 'schema_version' in build:
+                with sqlite3.connect(f'file:{root / "data/vela.db"}?mode=ro', uri=True) as database:
+                    actual = database.execute('SELECT MAX(version) FROM _sqlx_migrations WHERE success=1').fetchone()[0]
+                    assert actual == int(build['schema_version']), 'Packaged binary is missing an expected migration'
             with urllib.request.urlopen(base + '/api/setup', timeout=2) as response:
                 assert json.load(response)['needs_setup'] is True
             for path, expected in [('/', b'bootstrap.js'), ('/bootstrap.js', b'vela_web.js')]:

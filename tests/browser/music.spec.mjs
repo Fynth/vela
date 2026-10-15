@@ -2,6 +2,16 @@ import { test, expect } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
 const fixture = fileURLToPath(new URL('../../crates/media/tests/fixtures/signal.flac', import.meta.url));
 const password = 'local browser fixture password';
+let adminCookies;
+let secondaryAdminCookies;
+
+async function openAdminFixture(page, cookies = adminCookies) {
+  // Reuse only this suite's own isolated sessions, retaining production login limits.
+  expect(cookies).toBeDefined();
+  await page.context().addCookies(cookies);
+  await page.goto('/');
+  await expect(page.getByRole('button', { name: 'Library', exact: true }).first()).toBeVisible();
+}
 
 test.describe.configure({ mode: 'serial' });
 test('first-run setup, real FLAC upload, artwork, decode, favorites and safe sharing', async ({ page, browser }) => {
@@ -273,6 +283,7 @@ test('catalog metadata editor saves without changing audio and handles a stale d
   await other.getByRole('button', { name: 'Edit metadata for Signal', exact: true }).click();
   const otherDialog = other.getByRole('dialog', { name: 'Edit metadata', exact: true });
   await expect(otherDialog.getByLabel('Title', { exact: true })).toHaveValue('Signal');
+  secondaryAdminCookies = await otherContext.cookies();
   await otherDialog.getByLabel('Title', { exact: true }).fill('Signal from another tab');
   await otherDialog.getByRole('button', { name: 'Save metadata', exact: true }).click();
   await expect(otherDialog).toHaveCount(0);
@@ -365,4 +376,171 @@ test('administrator scans a configured folder and rescan preserves catalog edits
   await page.getByRole('button', { name: 'Library', exact: true }).last().click();
   await expect(page.getByRole('button', { name: 'Play Beacon', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Play Signal edited in Vela', exact: true })).toBeVisible();
+  adminCookies = await page.context().cookies();
+});
+
+test('library filters combine real tags, technical properties, favorites and sorting', async ({ page }) => {
+  await openAdminFixture(page);
+  await page.getByRole('button', { name: 'Edit metadata for Signal edited in Vela', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Edit metadata', exact: true });
+  await dialog.getByLabel('Genre', { exact: true }).fill('Browser filters');
+  await dialog.getByRole('button', { name: 'Save metadata', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await page.getByRole('button', { name: 'Filter and sort', exact: true }).click();
+  await expect(page.locator('#library-genre-options option[value="Browser filters"]')).toHaveCount(1);
+  await page.getByLabel('Genre', { exact: true }).fill('browser filters');
+  await page.getByLabel('Format', { exact: true }).selectOption('FLAC');
+  await page.getByLabel('Year from', { exact: true }).fill('2025');
+  await page.getByLabel('Year to', { exact: true }).fill('2025');
+  await page.getByLabel('Minimum bitrate (kbps)', { exact: true }).fill('1');
+  await page.getByLabel('Minimum sample rate (Hz)', { exact: true }).fill('44100');
+  await page.getByLabel('Minimum bit depth', { exact: true }).fill('16');
+  await page.getByLabel('Sort', { exact: true }).selectOption('title');
+  const filtered = page.waitForResponse(r => r.url().includes('/api/tracks?') && new URL(r.url()).searchParams.get('genre') === 'browser filters');
+  await page.getByRole('button', { name: 'Apply filters', exact: true }).click();
+  expect((await filtered).ok()).toBeTruthy();
+  await expect(page.getByRole('button', { name: 'Play Signal edited in Vela', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Play Beacon', exact: true })).toHaveCount(0);
+  await expect(page.locator('.filter-summary')).toContainText('Title A–Z');
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+  await page.screenshot({ path: 'test-results/filters-mobile.png', fullPage: true });
+  await page.getByRole('button', { name: 'Favorites', exact: true }).last().click();
+  await expect(page.getByRole('button', { name: 'Play Signal edited in Vela', exact: true })).toBeVisible();
+  await expect(page.locator('.filter-summary')).toContainText('browser filters');
+  await page.getByRole('button', { name: 'Library', exact: true }).last().click();
+  await page.getByLabel('Year from', { exact: true }).fill('2030');
+  await page.getByRole('button', { name: 'Apply filters', exact: true }).click();
+  await expect(page.locator('.library-filters').getByRole('alert')).toContainText('Year from');
+  await expect(page.getByLabel('Year from', { exact: true })).toHaveValue('2030');
+  await expect(page.locator('.filter-summary')).toContainText('2025–2025');
+  await expect(page.getByRole('button', { name: 'Play Signal edited in Vela', exact: true })).toBeVisible();
+  await page.getByLabel('Year from', { exact: true }).fill('2025');
+  await page.getByLabel('Genre', { exact: true }).fill('Missing browser genre');
+  await page.getByRole('button', { name: 'Apply filters', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'No matching tracks', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Reset applied filters', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Play Beacon', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Play Signal edited in Vela', exact: true })).toBeVisible();
+  await expect(page.getByLabel('Year from', { exact: true })).toHaveValue('');
+  await page.getByLabel('Sort', { exact: true }).selectOption('newest');
+  await page.getByRole('button', { name: 'Apply filters', exact: true }).click();
+  await expect(page.locator('.filter-summary')).toHaveText('Recently added');
+  await expect(page.locator('.track-row .track-title strong').first()).toHaveText('Beacon');
+});
+
+test('newer filter requests win and private suggestions clear across account changes', async ({ page }) => {
+  await openAdminFixture(page, secondaryAdminCookies);
+  await page.getByRole('button', { name: 'Filter and sort', exact: true }).click();
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  let seen;
+  const held = new Promise(resolve => { seen = resolve; });
+  await page.route('**/api/tracks?*', async route => {
+    if (new URL(route.request().url()).searchParams.get('genre') === 'Older missing genre') {
+      const response = await route.fetch();
+      seen();
+      await gate;
+      await route.fulfill({ response });
+    } else { await route.continue(); }
+  });
+  await page.getByLabel('Genre', { exact: true }).fill('Older missing genre');
+  await page.getByRole('button', { name: 'Apply filters', exact: true }).click();
+  await held;
+  await page.getByLabel('Genre', { exact: true }).fill('Browser filters');
+  await page.getByRole('button', { name: 'Apply filters', exact: true }).click();
+  await expect(page.locator('.filter-summary')).toContainText('Browser filters');
+  const older = page.waitForResponse(r => r.url().includes('/api/tracks?') && new URL(r.url()).searchParams.get('genre') === 'Older missing genre');
+  release();
+  await older;
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await expect(page.getByRole('button', { name: 'Play Signal edited in Vela', exact: true })).toBeVisible();
+  await expect(page.locator('.filter-summary')).toContainText('Browser filters');
+  let releaseFacets;
+  const facetGate = new Promise(resolve => { releaseFacets = resolve; });
+  let seenFacets;
+  const facetsHeld = new Promise(resolve => { seenFacets = resolve; });
+  let intercepted = false;
+  await page.route('**/api/catalog/filters', async route => {
+    if (!intercepted) {
+      intercepted = true;
+      const response = await route.fetch();
+      seenFacets();
+      await facetGate;
+      await route.fulfill({ response });
+    } else { await route.continue(); }
+  });
+  await page.getByRole('button', { name: 'Refresh suggestions', exact: true }).click();
+  await facetsHeld;
+  await page.getByRole('button', { name: /Settings/ }).first().click();
+  await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+  await page.locator('#username').fill('listener');
+  await page.locator('#password').fill(password);
+  await page.getByRole('button', { name: 'Sign in →', exact: true }).click();
+  await page.getByRole('button', { name: 'Library', exact: true }).first().click();
+  await expect(page.locator('#library-search')).toHaveValue('');
+  await page.getByRole('button', { name: 'Filter and sort', exact: true }).click();
+  await expect(page.getByLabel('Genre', { exact: true })).toHaveValue('');
+  const oldFacets = page.waitForResponse(r => r.url().endsWith('/api/catalog/filters'));
+  releaseFacets();
+  await oldFacets;
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await expect(page.locator('#library-genre-options option')).toHaveCount(0);
+  await expect(page.getByLabel('Format', { exact: true })).toHaveValue('');
+  await expect(page.locator('.filter-summary')).toHaveText('Library order');
+});
+
+test('real library pagination retains applied filters and search while drafts change', async ({ page }) => {
+  test.setTimeout(120000);
+  await openAdminFixture(page);
+  await expect(page.locator('#library-search')).toBeVisible();
+  const auth = await (await page.request.get('/api/me')).json();
+  // Real, distinct PCM waveforms seed a private catalog through the production
+  // upload endpoint. No catalog response is fabricated or SQL-inserted here.
+  for (let at = 0; at < 52; at++) {
+    const samples = 4410;
+    const wave = Buffer.alloc(44 + samples * 2);
+    wave.write('RIFF', 0); wave.writeUInt32LE(36 + samples * 2, 4);
+    wave.write('WAVEfmt ', 8); wave.writeUInt32LE(16, 16);
+    wave.writeUInt16LE(1, 20); wave.writeUInt16LE(1, 22);
+    wave.writeUInt32LE(44100, 24); wave.writeUInt32LE(88200, 28);
+    wave.writeUInt16LE(2, 32); wave.writeUInt16LE(16, 34);
+    wave.write('data', 36); wave.writeUInt32LE(samples * 2, 40);
+    for (let sample = 0; sample < samples; sample++) {
+      wave.writeInt16LE(Math.round(2000 * Math.sin(2 * Math.PI * (220 + at) * sample / 44100)), 44 + sample * 2);
+    }
+    const response = await page.request.post('/api/upload', {
+      headers: { 'X-CSRF-Token': auth.csrf_token },
+      multipart: { file: { name: `Window ${String(at).padStart(3, '0')}.wav`, mimeType: 'audio/wav', buffer: wave } },
+    });
+    expect(response.ok()).toBeTruthy();
+    expect((await response.json()).duplicate).toBeFalsy();
+  }
+  await page.getByRole('button', { name: 'Filter and sort', exact: true }).click();
+  await page.getByLabel('Format', { exact: true }).selectOption('WAV audio');
+  await page.getByLabel('Sort', { exact: true }).selectOption('title');
+  await page.getByRole('button', { name: 'Apply filters', exact: true }).click();
+  await expect(page.locator('.filter-summary')).toContainText('WAV audio');
+  await page.locator('#library-search').fill('Window');
+  await page.locator('#library-search').press('Enter');
+  await expect(page.locator('.applied-search')).toContainText('Window');
+  await expect(page.locator('.track-row')).toHaveCount(50);
+  await expect(page.locator('.track-row .track-title strong').first()).toHaveText('Window 000');
+  // These are drafts only; paging must continue the committed Window/WAV query.
+  await page.getByLabel('Genre', { exact: true }).fill('Unsaved genre draft');
+  await page.locator('#library-search').fill('Unsaved search draft');
+  const next = page.waitForResponse(r => r.url().includes('/api/tracks?') && new URL(r.url()).searchParams.has('cursor'));
+  await page.getByRole('button', { name: 'Next page →', exact: true }).click();
+  const params = new URL((await next).url()).searchParams;
+  expect(params.get('q')).toBe('Window');
+  expect(params.get('codec')).toBe('WAV audio');
+  expect(params.get('sort')).toBe('title');
+  expect(params.has('genre')).toBeFalsy();
+  await expect(page.locator('.track-row')).toHaveCount(2);
+  await expect(page.locator('.track-row .track-title strong').first()).toHaveText('Window 050');
+  await expect(page.locator('.track-row .track-title strong').last()).toHaveText('Window 051');
+  await page.getByRole('button', { name: 'Back to first page', exact: true }).click();
+  await expect(page.locator('.track-row')).toHaveCount(50);
+  await expect(page.locator('#library-search')).toHaveValue('Unsaved search draft');
+  await expect(page.locator('.applied-search')).toContainText('Window');
 });
