@@ -7,6 +7,7 @@ Vela is a modular monolith: one Axum/Tokio process, one local SQLite database, i
 | `vela-domain` | Framework-independent serialized API contracts and opaque IDs |
 | `vela-core` | Configuration, WAL/FK migrations, Argon2id accounts, sessions, private playlist application services |
 | `vela-media` | Bounded metadata/image validation, BLAKE3 asset identity, immutable publication, owner-authorized catalog/asset lookup, byte-range selection |
+| `vela-scanner` | Read-only directory capabilities, bounded snapshots, persistent scan sources/jobs/fingerprints |
 | `vela-imports` | Source interface, controlled egress, durable bounded direct downloads and job recovery |
 | `vela-server` | HTTP routing, auth/CSRF extraction, browser origin checks, multipart streaming, response headers, semaphore lifetimes, worker supervision |
 | `vela-web` | Dioxus interface, same-origin API calls, account-scoped queue state, native browser audio/File APIs |
@@ -16,6 +17,10 @@ flowchart LR
  Browser[Dioxus web app] -->|cookie + CSRF for writes| HTTP[Axum API]
  HTTP --> Core[Accounts and playlists]
  HTTP --> Media[Catalog and ingestion]
+ HTTP --> Scanner[Durable folder scans]
+ Scanner --> Roots[Operator-approved read-only folders]
+ Scanner --> Media
+ Scanner --> DB
  HTTP --> Imports[Durable import queue]
  Imports --> Egress[Pinned and validated outbound HTTP]
  Egress --> Internet[Public downloadable audio]
@@ -59,8 +64,16 @@ Native engines will implement shared playback contracts behind Android Media3, i
 
 Client asynchronous actions are bound to the initiating CSRF session identity. An old task is dropped before it resumes after a session change, and user-specific draft controls reset. Library request generations independently prevent older search/page responses overwriting newer ones. Queue order tracks occurrence indices so repeated copies of the same song do not move the playing indicator to the wrong occurrence. Both behaviors have real browser regression coverage.
 
-Native shutdown distinguishes expected worker completion after cancellation from infrastructure failure. A30s HTTP drain deadline prevents slow connections from indefinitely holding shutdown; atomic import/upload processing still drains before SQLite closure. The process lifecycle helper tests repeated real SIGTERM/restart and deliberately broken isolated import-job storage.
+Native shutdown distinguishes expected worker completion after cancellation from infrastructure failure. A30s HTTP drain deadline prevents slow connections from indefinitely holding shutdown; atomic import/upload processing still drains before SQLite closure. The process lifecycle helper tests repeated real SIGTERM/restart and deliberately broken isolated import-job and scanner-job storage.
 
 ## Catalog metadata edits
 
 Migration0003 adds an owner-private metadata revision. GET/PATCH metadata snapshots use a typed complete update and a16KiB body bound. One BEGIN IMMEDIATE transaction verifies ownership, validates fields, checks revision, changes only catalog tags, updates grouped identities/FTS via triggers and records a fixed audit event. Stale writes receive409. The native browser dialog retains the draft and offers explicit reload; its async work is scoped to session/editor generation and the mounted component. Originals, technical properties and asset hashes remain unchanged; exact re-ingestion cannot overwrite an edited owner catalog. ADR0005 records the boundary.
+
+## Read-only folder snapshots
+
+Migration0004 adds private scan sources, durable bounded jobs/counters and a per-source file map. Triggers enforce source/track ownership even on reassignment. Administrator source APIs expose configured root IDs/names only, never host paths. VELA_SCAN_ROOTS is operator configuration; absent configuration provides only data/sources. Explicit [] disables it. Configuration rejects unsafe/overlapping roots and aliases into managed data.
+
+On Linux, cap-std/cap-fs-ext opens every root component and child directory without following symlinks. A bounded descriptor-relative depth-first walker admits regular, singly linked audio files and rejects symlinks/special files. Blocking traversal/copy runs on the blocking pool. A64KiB snapshot copy checks file size, free space, deadlines/cancellation and descriptor changes, then fsyncs and enters the shared bounded media pipeline. Originals are never modified. The scanner uses one worker alongside imports, and both are supervised after the HTTP listener is acquired.
+
+Cached size/mtime/ctime/device/inode signatures and hashed relative paths skip unchanged files; this is best-effort change detection. New/changed content is exact-deduplicated into immutable managed storage; metadata edits survive repeated scans. Missing source files and source removal never delete owned music. Shutdown requeues interrupted scans; explicit cancellation retains already published tracks. The UI displays actual job counters with active-only polling. Linux is the implemented scanner platform; blocking kernel/network filesystem operations have no hard cancellation guarantee. See ADR0006.

@@ -30,10 +30,33 @@ impl TestApp {
         Self::with_file_limit(1024 * 1024).await
     }
     async fn with_file_limit(max_file_bytes: u64) -> Self {
+        Self::with_scanner(max_file_bytes, false).await
+    }
+    async fn with_scanner(max_file_bytes: u64, enabled: bool) -> Self {
         let dir = tempfile::tempdir().unwrap();
+        let music = dir.path().join("music");
+        let scan_roots = if enabled {
+            tokio::fs::create_dir_all(music.join("album"))
+                .await
+                .unwrap();
+            tokio::fs::write(music.join("album/signal.flac"), AUDIO)
+                .await
+                .unwrap();
+            tokio::fs::write(music.join("beacon.mp3"), OTHER_AUDIO)
+                .await
+                .unwrap();
+            vec![vela_core::config::ScanRootConfig {
+                id: "fixture".into(),
+                name: "Fixture folder".into(),
+                path: music,
+            }]
+        } else {
+            Vec::new()
+        };
         let config = Config {
+            scan_roots,
             bind: "127.0.0.1:0".parse().unwrap(),
-            data_dir: dir.path().into(),
+            data_dir: dir.path().join("data"),
             web_dir: dir.path().join("web"),
             cookie_secure: false,
             max_file_bytes,
@@ -846,6 +869,7 @@ async fn backup_restores_real_audio_metadata_accounts_and_sessions() {
         String::from_utf8_lossy(&output.stderr)
     );
     let config = Config {
+        scan_roots: Vec::new(),
         data_dir: restored,
         ..app.state.config.clone()
     };
@@ -1000,8 +1024,8 @@ async fn viewer_cannot_edit_manage_access_or_play_and_can_leave() {
 }
 
 #[tokio::test]
-async fn cancelling_large_streams_releases_capacity_while_uploads_continue() {
-    let app = TestApp::with_file_limit(12 * 1024 * 1024).await;
+async fn cancelling_large_streams_releases_capacity_while_uploads_and_scans_continue() {
+    let app = TestApp::with_scanner(12 * 1024 * 1024, true).await;
     let payload_bytes = 10 * 1024 * 1024_u32;
     let mut wave = Vec::with_capacity(payload_bytes as usize + 44);
     wave.extend_from_slice(b"RIFF");
@@ -1048,9 +1072,64 @@ async fn cancelling_large_streams_releases_capacity_while_uploads_continue() {
             .status(),
         StatusCode::TOO_MANY_REQUESTS
     );
+    let source: ScanSource = app
+        .request(Method::POST, "/api/scan-sources", &app.admin)
+        .json(&CreateScanSource {
+            name: "Concurrent folder".into(),
+            root_id: "fixture".into(),
+        })
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let scan: ScanJob = app
+        .request(
+            Method::POST,
+            &format!("/api/scan-sources/{}/scan", source.id),
+            &app.admin,
+        )
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let scanner = app.state.scanner.clone();
+    let shutdown = app.state.shutdown.clone();
+    let worker = tokio::spawn(async move { scanner.run(shutdown).await });
     let (a, b) = tokio::join!(app.upload(&app.admin), app.upload(&app.admin));
     assert_eq!(a.track.id, b.track.id);
     assert!(a.duplicate || b.duplicate);
+    // Finish real scanning/ingestion while all sixteen large response bodies
+    // still hold stream permits. Shared parsing must not wait on playback.
+    tokio::time::timeout(std::time::Duration::from_secs(15), async {
+        loop {
+            let jobs: Vec<ScanJob> = app
+                .request(Method::GET, "/api/scans", &app.admin)
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            let current = jobs.iter().find(|job| job.id == scan.id).unwrap();
+            assert_ne!(current.status, "failed", "{current:?}");
+            if current.status == "completed" {
+                assert_eq!(current.imported + current.duplicates, 2);
+                assert_eq!(current.failed_files, 0);
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap();
     drop(held);
     tokio::time::timeout(std::time::Duration::from_secs(5), async {
         loop {
@@ -1069,6 +1148,8 @@ async fn cancelling_large_streams_releases_capacity_while_uploads_continue() {
     })
     .await
     .unwrap();
+    app.state.shutdown.cancel();
+    worker.await.unwrap().unwrap();
 }
 
 #[tokio::test]
@@ -1572,4 +1653,296 @@ async fn simultaneous_metadata_edits_conflict_and_do_not_overwrite_each_other() 
         .unwrap();
     assert_eq!(final_snapshot.revision, 1);
     assert_eq!(final_snapshot.track, accepted.track);
+}
+
+#[tokio::test]
+async fn admin_folder_scan_imports_real_audio_without_paths_and_respects_private_permissions() {
+    let app = TestApp::with_scanner(1024 * 1024, true).await;
+    let member = app.user("scanlistener").await;
+    for path in ["/api/storage/roots", "/api/scan-sources", "/api/scans"] {
+        assert_eq!(
+            app.request(Method::GET, path, &member)
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            app.client
+                .get(format!("{}{path}", app.base))
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::UNAUTHORIZED
+        );
+    }
+    let roots = app
+        .request(Method::GET, "/api/storage/roots", &app.admin)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(
+        !roots.contains("path")
+            && !roots.contains(app._dir.as_ref().unwrap().path().to_str().unwrap())
+    );
+    let roots: Vec<StorageRoot> = serde_json::from_str(&roots).unwrap();
+    assert_eq!(roots.len(), 1);
+    assert!(roots[0].available);
+    let source_input = CreateScanSource {
+        name: "Archive collection".into(),
+        root_id: "fixture".into(),
+    };
+    assert_eq!(
+        app.client
+            .post(format!("{}/api/scan-sources", app.base))
+            .header("Cookie", &app.admin.cookie)
+            .json(&source_input)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        app.request(Method::POST, "/api/scan-sources", &member)
+            .json(&source_input)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    let mut forged = serde_json::to_value(&source_input).unwrap();
+    forged["path"] = json!("/etc");
+    assert_eq!(
+        app.request(Method::POST, "/api/scan-sources", &app.admin)
+            .json(&forged)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    let source: ScanSource = app
+        .request(Method::POST, "/api/scan-sources", &app.admin)
+        .json(&source_input)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let path = format!("/api/scan-sources/{}/scan", source.id);
+    let job: ScanJob = app
+        .request(Method::POST, &path, &app.admin)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        app.request(Method::POST, &path, &app.admin)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::CONFLICT
+    );
+    for path in [
+        format!("/api/scans/{}/cancel", job.id),
+        format!("/api/scan-sources/{}/scan", source.id),
+    ] {
+        assert_eq!(
+            app.request(Method::POST, &path, &member)
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::FORBIDDEN
+        );
+    }
+    assert_eq!(
+        app.request(
+            Method::DELETE,
+            &format!("/api/scan-sources/{}", source.id),
+            &app.admin
+        )
+        .send()
+        .await
+        .unwrap()
+        .status(),
+        StatusCode::CONFLICT
+    );
+    let shutdown = app.state.shutdown.clone();
+    let scanner = app.state.scanner.clone();
+    let worker = tokio::spawn(async move { scanner.run(shutdown).await });
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(15);
+    loop {
+        let jobs: Vec<ScanJob> = app
+            .request(Method::GET, "/api/scans", &app.admin)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let current = jobs.iter().find(|j| j.id == job.id).unwrap();
+        if current.status == "completed" {
+            assert_eq!(current.imported, 2);
+            assert_eq!(current.failed_files, 0);
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "scan failed or timed out: {current:?}"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    let tracks: TrackPage = app
+        .request(Method::GET, "/api/tracks", &app.admin)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(tracks.items.len(), 2);
+    let track = tracks.items.iter().find(|t| t.title == "Signal").unwrap();
+    assert_eq!(
+        app.request(
+            Method::GET,
+            &format!("/api/tracks/{}/stream", track.id),
+            &app.admin
+        )
+        .send()
+        .await
+        .unwrap()
+        .bytes()
+        .await
+        .unwrap(),
+        AUDIO
+    );
+    assert_eq!(
+        app.request(
+            Method::GET,
+            &format!("/api/tracks/{}/stream", track.id),
+            &member
+        )
+        .send()
+        .await
+        .unwrap()
+        .status(),
+        StatusCode::NOT_FOUND
+    );
+    let metadata: TrackMetadata = app
+        .request(
+            Method::GET,
+            &format!("/api/tracks/{}/metadata", track.id),
+            &app.admin,
+        )
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let update = UpdateTrackMetadata {
+        revision: metadata.revision,
+        title: "Owner curated title".into(),
+        artist: track.artist.clone(),
+        album: track.album.clone(),
+        album_artist: track.album_artist.clone(),
+        genre: track.genre.clone(),
+        year: track.year,
+        track_number: track.track_number,
+        disc_number: track.disc_number,
+    };
+    assert_eq!(
+        app.request(
+            Method::PATCH,
+            &format!("/api/tracks/{}/metadata", track.id),
+            &app.admin
+        )
+        .json(&update)
+        .send()
+        .await
+        .unwrap()
+        .status(),
+        StatusCode::OK
+    );
+    let next: ScanJob = app
+        .request(Method::POST, &path, &app.admin)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    loop {
+        let jobs: Vec<ScanJob> = app
+            .request(Method::GET, "/api/scans", &app.admin)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let current = jobs.iter().find(|j| j.id == next.id).unwrap();
+        if current.status == "completed" {
+            assert_eq!(current.unchanged, 2);
+            break;
+        }
+        assert!(tokio::time::Instant::now() < deadline);
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    let source_audio = app
+        ._dir
+        .as_ref()
+        .unwrap()
+        .path()
+        .join("music/album/signal.flac");
+    assert_eq!(tokio::fs::read(source_audio).await.unwrap(), AUDIO);
+    let tracks: TrackPage = app
+        .request(Method::GET, "/api/tracks", &app.admin)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(
+        tracks
+            .items
+            .iter()
+            .any(|t| t.title == "Owner curated title")
+    );
+    assert_eq!(
+        app.request(
+            Method::DELETE,
+            &format!("/api/scan-sources/{}", source.id),
+            &app.admin
+        )
+        .send()
+        .await
+        .unwrap()
+        .status(),
+        StatusCode::NO_CONTENT
+    );
+    let tracks: TrackPage = app
+        .request(Method::GET, "/api/tracks", &app.admin)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(tracks.items.len(), 2);
+    app.state.shutdown.cancel();
+    worker.await.unwrap().unwrap();
 }

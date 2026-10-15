@@ -22,11 +22,13 @@ def main():
         parser.error('--runs must be1..100')
     exits = []
     with tempfile.TemporaryDirectory(prefix='vela-shutdown-') as directory:
-        for index in range(args.runs + int(args.worker_failure)):
+        for index in range(args.runs + 2 * int(args.worker_failure)):
+            # Destructive fault injection must never contaminate the next fixture.
+            instance_dir = Path(directory) if index < args.runs else Path(directory) / f'fault-{index}'
             with socket.socket() as listener:
                 listener.bind(('127.0.0.1', 0))
                 port = listener.getsockname()[1]
-            environment = {**os.environ, 'VELA_BIND': f'127.0.0.1:{port}', 'VELA_DATA_DIR': directory, 'VELA_WEB_DIR': str(Path('dist').resolve()), 'NO_COLOR': '1'}
+            environment = {**os.environ, 'VELA_BIND': f'127.0.0.1:{port}', 'VELA_DATA_DIR': str(instance_dir), 'VELA_WEB_DIR': str(Path('dist').resolve()), 'VELA_SCAN_ROOTS': '[]', 'NO_COLOR': '1'}
             process = subprocess.Popen([str(args.binary.resolve())], env=environment, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
             try:
                 deadline = time.monotonic() + 10
@@ -39,11 +41,12 @@ def main():
                         if process.poll() is not None or time.monotonic() > deadline:
                             raise RuntimeError('Native server failed readiness')
                         time.sleep(.05)
-                fatal = args.worker_failure and index == args.runs
+                fatal = args.worker_failure and index >= args.runs
+                failed_worker = "Import" if index == args.runs else "Scanner"
                 if fatal:
-                    db=sqlite3.connect(Path(directory)/'vela.db')
+                    db=sqlite3.connect(instance_dir/'vela.db')
                     try:
-                        db.execute('DROP TABLE import_jobs')
+                        db.execute('DROP TABLE import_jobs' if failed_worker == 'Import' else 'DROP TABLE scan_jobs')
                         db.commit()
                     finally:
                         db.close()
@@ -51,9 +54,9 @@ def main():
                     process.send_signal(signal.SIGTERM)
                 output, _ = process.communicate(timeout=20)
                 if fatal:
-                    if process.returncode == 0 or b'Import worker stopped unexpectedly' not in output:
+                    if process.returncode == 0 or f'{failed_worker} worker stopped unexpectedly'.encode() not in output:
                         raise RuntimeError('Worker infrastructure failure did not fail the process')
-                    print('Worker infrastructure failure correctly stopped the process')
+                    print(f'{failed_worker} worker infrastructure failure correctly stopped the process')
                 else:
                     exits.append(process.returncode)
                     if process.returncode:

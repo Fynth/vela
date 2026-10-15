@@ -44,3 +44,7 @@ These conclusions distinguish observed documented scope from Vela design judgmen
 ## Reusable components rather than copied systems
 
 Reuse Axum/Tokio/Tower transport, SQLx/SQLite migrations/FTS, Lofty tags, image codec implementations, rustls-backed reqwest, Argon2id, BLAKE3, Dioxus and native browser audio/File primitives. Retain direct originals whenever the browser supports them. FFmpeg stays an optional controlled later subprocess. Do not copy service architectures wholesale; no microservices, unrestricted plugins, commercial downloader or cloud dependency has been introduced.
+
+## Folder scanner and TLS checkpoint (2026-10-15)
+
+The configured-root implementation uses [cap-std4.0.3](https://docs.rs/cap-std/4.0.3/cap_std/) and [cap-fs-ext4.0.3](https://docs.rs/cap-fs-ext/4.0.3/cap_fs_ext/), with descriptor-relative no-follow opens and nonblocking file admission on Linux. ADR0006 records why imported snapshots reuse managed media rather than directly referencing mutable external paths. Rustls was upgraded to0.23.46 after the four new primary RustSec notices linked in SECURITY.md. No unrelated framework upgrade was bundled into this storage slice.

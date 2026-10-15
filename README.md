@@ -4,7 +4,9 @@ A Rust-first, self-hosted music cloud with a Dioxus web interface. This is an ea
 
 Upload real audio files, browse albums/artists with embedded metadata and artwork, search, favorite, and stream original files. Album tracks follow disc/track order; large collections use bounded pages. Edit your catalog tags in the app with revision protection while keeping original audio files unchanged. Import supported public HTTP/HTTPS audio download links through the app with durable progress/retry/cancel controls. Create private playlists, grant local accounts viewer/editor access, and share expiring, revocable metadata-only links. Owners can list/revoke collaborators; members can leave. The browser player has seeking, volume, shuffle/repeat, queue controls and account-scoped queue persistence.
 
-Normal music uploads and direct URL imports use the web interface. No SSH is needed for those workflows after installation. No catalog content is preloaded.
+Administrators can scan configured read-only music folders in **Settings → Music folders**, watch progress, cancel, and rescan without changing original files or existing catalog edits. Removing a scan source keeps imported music.
+
+Normal music uploads, direct URL imports and configured folder scans use the web interface. No SSH is needed for those workflows after installation. No catalog content is preloaded.
 
 ## Run locally
 
@@ -38,6 +40,7 @@ Compose builds locally, runs as a non-root user, persists a named volume and bin
 | `VELA_COOKIE_SECURE` | `false` | Set `true` behind HTTPS |
 | `VELA_MAX_FILE_BYTES` | `262144000` | Per-file ceiling, 250 MiB |
 | `VELA_MAX_STORAGE_BYTES` | `10737418240` | Managed physical audio budget, 10 GiB |
+| `VELA_SCAN_ROOTS` | `data/sources` as Music folder | Operator-approved folder JSON; `[]` disables scanning; see Operations |
 | `RUST_LOG` | application info | Structured diagnostics, without request URLs/cookies |
 
 Complete initial setup through loopback before enabling public access. Use HTTPS for remote access and enable secure cookies. [Operations](docs/OPERATIONS.md) describes Caddy, systemd, backup/restore and upgrades. Public registration and federation are unavailable; accounts are created by the administrator in Settings.

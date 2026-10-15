@@ -38,6 +38,7 @@ pub struct AppState {
     pub auth: AuthService,
     pub media: MediaService,
     pub imports: ImportService,
+    pub scanner: vela_scanner::Scanner,
     pub playlists: PlaylistService,
     pub config: Config,
     pub shutdown: tokio_util::sync::CancellationToken,
@@ -83,12 +84,38 @@ impl AppState {
         Ok(self.uploads.clone().acquire_many_owned(2).await?)
     }
     pub async fn initialize(config: Config) -> anyhow::Result<Self> {
+        config.validate_scan_roots()?;
         let data_lock = Arc::new(vela_core::database::DataLock::acquire(&config.data_dir).await?);
         let pool = vela_core::database::open(&config.data_dir).await?;
         let auth = AuthService::new(pool.clone()).await?;
         let media = MediaService::new(pool.clone(), config.data_dir.clone(), config.max_file_bytes)
             .with_storage_budget(config.max_storage_bytes);
         media.initialize().await?;
+        let default_source = config.default_source_path()?;
+        if config
+            .scan_roots
+            .iter()
+            .any(|root| root.path == default_source)
+        {
+            tokio::fs::create_dir_all(&default_source).await?;
+        }
+        config.validate_scan_aliases().await?;
+        let scanner = vela_scanner::Scanner::new(
+            pool.clone(),
+            media.clone(),
+            config.data_dir.clone(),
+            config.max_file_bytes,
+            config
+                .scan_roots
+                .iter()
+                .map(|r| vela_scanner::RootConfig {
+                    id: r.id.clone(),
+                    name: r.name.clone(),
+                    path: r.path.clone(),
+                })
+                .collect(),
+        );
+        scanner.initialize().await?;
         // A server restart invalidates abandoned uploads. Never touch managed media.
         let mut staging = tokio::fs::read_dir(config.data_dir.join("staging")).await?;
         while let Some(entry) = staging.next_entry().await? {
@@ -114,6 +141,7 @@ impl AppState {
             auth,
             media,
             imports,
+            scanner,
             config,
             shutdown: tokio_util::sync::CancellationToken::new(),
             uploads: Arc::new(Semaphore::new(2)),
@@ -332,6 +360,17 @@ pub fn router(state: AppState) -> Router {
         .route("/api/imports", get(imports).post(import_create))
         .route("/api/imports/{id}/cancel", post(import_cancel))
         .route("/api/imports/{id}/retry", post(import_retry))
+        .route("/api/storage/roots", get(storage_roots))
+        .route(
+            "/api/scan-sources",
+            get(scan_sources)
+                .post(scan_source_create)
+                .layer(DefaultBodyLimit::max(8 * 1024)),
+        )
+        .route("/api/scan-sources/{id}", delete(scan_source_remove))
+        .route("/api/scan-sources/{id}/scan", post(scan_enqueue))
+        .route("/api/scans", get(scan_jobs))
+        .route("/api/scans/{id}/cancel", post(scan_cancel))
         .route("/api/playlists", get(playlists).post(playlist_create))
         .route("/api/playlists/{id}", get(playlist))
         .route("/api/playlists/{id}/items", post(playlist_add))
@@ -471,6 +510,95 @@ async fn tracks(
 }
 async fn stats(State(s): State<AppState>, Auth(auth): Auth) -> Result<Json<LibraryStats>> {
     Ok(Json(s.media.stats(&auth.response.user.id).await?))
+}
+fn scanner_admin(auth: &Session) -> Result<&str> {
+    if !auth.response.user.is_admin {
+        return Err(HttpError(
+            StatusCode::FORBIDDEN,
+            "Administrator access required".into(),
+        ));
+    }
+    Ok(&auth.response.user.id)
+}
+fn scan_error(error: anyhow::Error) -> HttpError {
+    match error.downcast_ref::<vela_scanner::ScanError>() {
+        Some(vela_scanner::ScanError::Invalid(message)) => invalid(message),
+        Some(vela_scanner::ScanError::Conflict(message)) => {
+            HttpError(StatusCode::CONFLICT, message.clone())
+        }
+        Some(vela_scanner::ScanError::NotFound) => not_found(),
+        None => error.into(),
+    }
+}
+async fn storage_roots(
+    State(s): State<AppState>,
+    Auth(auth): Auth,
+) -> Result<Json<Vec<StorageRoot>>> {
+    scanner_admin(&auth)?;
+    Ok(Json(s.scanner.roots().await?))
+}
+async fn scan_sources(
+    State(s): State<AppState>,
+    Auth(auth): Auth,
+) -> Result<Json<Vec<ScanSource>>> {
+    Ok(Json(s.scanner.list_sources(scanner_admin(&auth)?).await?))
+}
+async fn scan_source_create(
+    State(s): State<AppState>,
+    WriteAuth(auth): WriteAuth,
+    Json(input): Json<CreateScanSource>,
+) -> Result<Json<ScanSource>> {
+    Ok(Json(
+        s.scanner
+            .create_source(scanner_admin(&auth)?, input)
+            .await
+            .map_err(scan_error)?,
+    ))
+}
+async fn scan_source_remove(
+    State(s): State<AppState>,
+    WriteAuth(auth): WriteAuth,
+    Path(id): Path<String>,
+) -> Result<StatusCode> {
+    if !s
+        .scanner
+        .remove_source(scanner_admin(&auth)?, &id)
+        .await
+        .map_err(scan_error)?
+    {
+        return Err(not_found());
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+async fn scan_enqueue(
+    State(s): State<AppState>,
+    WriteAuth(auth): WriteAuth,
+    Path(id): Path<String>,
+) -> Result<Json<ScanJob>> {
+    Ok(Json(
+        s.scanner
+            .enqueue(scanner_admin(&auth)?, &id)
+            .await
+            .map_err(scan_error)?,
+    ))
+}
+async fn scan_jobs(State(s): State<AppState>, Auth(auth): Auth) -> Result<Json<Vec<ScanJob>>> {
+    Ok(Json(s.scanner.jobs(scanner_admin(&auth)?).await?))
+}
+async fn scan_cancel(
+    State(s): State<AppState>,
+    WriteAuth(auth): WriteAuth,
+    Path(id): Path<String>,
+) -> Result<StatusCode> {
+    if !s
+        .scanner
+        .cancel(scanner_admin(&auth)?, &id)
+        .await
+        .map_err(scan_error)?
+    {
+        return Err(not_found());
+    }
+    Ok(StatusCode::NO_CONTENT)
 }
 async fn track_metadata(
     State(s): State<AppState>,

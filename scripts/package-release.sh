@@ -3,7 +3,7 @@
 set -euo pipefail
 export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-2}"
 cd "$(dirname "$0")/.."
-version=0.1.0
+version="$(cargo metadata --locked --no-deps --format-version=1 | python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"]=="vela-server"))')"
 host_triple="$(rustc -vV | sed -n 's/^host: //p')"
 if [[ -n "${CARGO_BUILD_TARGET:-}" && "$CARGO_BUILD_TARGET" != "$host_triple" ]]; then
   echo 'Package on the native build host; cross-target packaging needs separate validation.' >&2
@@ -37,5 +37,5 @@ commit="$(git rev-parse HEAD)"
 printf 'version=%s\ntarget=%s\ncommit=%s\n' "$version" "$host_triple" "$commit" > "$package_dir/BUILD.txt"
 git archive --format=tar.gz --output="$source_archive" HEAD
 tar -C "$package_dir" -czf "$archive" .
-sha256sum "$archive" "$source_archive" > target/releases/SHA256SUMS
+sha256sum "$archive" "$source_archive" > "target/releases/vela-$version-SHA256SUMS"
 echo "Created local review artifacts in target/releases (commit $commit)."

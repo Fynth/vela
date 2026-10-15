@@ -1,0 +1,30 @@
+[package]
+name = "vela-scanner"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+vela-domain.workspace = true
+vela-media.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+sqlx.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+uuid.workspace = true
+blake3.workspace = true
+tempfile.workspace = true
+cap-std.workspace = true
+cap-fs-ext.workspace = true
+tracing.workspace = true
+fs2 = "0.4.3"
+
+[dev-dependencies]
+vela-core = { path = "../core", version = "0.2.0" }
+serde_json.workspace = true

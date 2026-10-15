@@ -154,3 +154,7 @@ After observing the owner-index scan for rare/absent matches, `list_tracks` now 
 | Common prefix (10% matches) | 1.277 / 1.382 / 1.419 | 1.735 / 2.041 / 2.145 |
 
 The probe adds approximately0.46ms at the median for this common-prefix distribution. The tradeoff removes a catalog-wide scan for sparse/no-result searches while preserving a bounded probe and the existing broad plan. Million-entry results above describe the original baseline; post-optimization million-entry timings have not been measured. Raw comparison data: `docs/benchmarks/search-100k.json`. Recheck with multiple owners and concurrent writes before changing the threshold.
+
+## Scanner resource boundary (0.2.0)
+
+The implemented scanner has one serial worker and shares the media parser semaphore with imports/uploads. Traversal holds at most32 directory iterators by default, yields after256 skipped entries, and copies at most one source through a64KiB buffer before bounded media processing. Durable per-source fingerprint maps cap at100k admitted files by default; entry passes cap at1M. These are implementation limits verified by regression tests, not throughput/memory measurements. End-to-end scan rate, concurrent import/stream latency and peak RSS remain unmeasured; no capacity or performance superiority claim follows from the limits.

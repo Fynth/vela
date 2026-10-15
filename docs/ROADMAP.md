@@ -7,7 +7,7 @@ Status meanings: implemented=source exists; verified=checks recorded in PROGRESS
 | 0 Repository | Verified foundations | Stable dependency verification, workspace/server/web, WAL migrations, CI, architecture/threat model; package/runtime evidence remains in hardening |
 | 1 Music cloud | Verified upload/playback slice | Account setup/auth, real batch browser uploads, metadata/artwork, private paginated catalog, original range streaming, player; expanded storage wizard remains |
 | 2 URL import | Verified direct-source slice | Preview, durable queue/progress/retry/cancel, streaming, exact dedup, SSRF; browser/public download and recovery tested; source collections/licenses/storage estimates need richer adapters |
-| 3 Complete library | Partial | Search/favorites/stats and paginated normalized album/artist browsing and revisioned catalog editor present; next genres/editions, scanner/read-only roots, batch metadata editing, organization, job center, advanced filters |
+| 3 Complete library | Partial | Search/favorites/stats and paginated normalized album/artist browsing and revisioned catalog editor and configured read-only snapshot scanning present; next genres/editions, batch metadata editing, organization, job center, advanced filters |
 | 4 Sharing | Partial | Local accounts, explicit collaborator viewer/editor grants, revision-safe edits, expiring/revocable metadata links present; collaborator list/revocation and leave UX present; next invitations, permission-specific media access, revision feed, profiles, ownership transfer |
 | 5 Multi-server | Planned | Server identity registry, secure credentials, native/OpenSubsonic adapters, bounded concurrent unified search, origin-labelled queues, two-server real integration |
 | 6 Federation | Planned, disabled | ActivityPub interoperability profile, explicit opt-in visibility, WebFinger/discovery, origin verification/signatures/replay limits, follow/access requests, durable deliveries, remote metadata cache, blocked peers, privacy tests between two instances |
@@ -19,8 +19,8 @@ Status meanings: implemented=source exists; verified=checks recorded in PROGRESS
 
 ## Next ordered slices
 
-1. Preserve the verified local package checkpoint; native/WASM, nine browser scenarios and extracted native-package startup now pass. Exclusive data-dir locking, shutdown drain and safe backup/restore already have real regressions; retain crash-safe reconciliation as an outstanding durability item.
-2. Authorized read-only scanner roots with durable progress, quotas and safe filesystem boundaries; scanner mutations must preserve owner catalog edits and never rewrite sources. Catalog metadata editing/conflict/search/regroup/original-integrity checks are verified.
+1. Preserve the0.2.0 folder-scanning checkpoint and its executed verification evidence. Keep immutable source copies, private roots and metadata-edit preservation when expanding storage modes. Crash-safe orphan reconciliation remains outstanding.
+2. Complete library organization: typed genre/quality/year filters and a coherent background job center, then batch metadata editing. Direct-reference external storage needs its own lifetime/authorization/backup contract; current scans intentionally copy into managed storage.
 3. Complete local sharing administration: invites with expiry/acceptance, narrow separate stream/download grants, near-real-time revision updates. Keep metadata links view-only by default.
 4. Source adapters: ZIP with zip-slip/bomb limits, administrator-trusted WebDAV and S3 (separate egress policy), Archive.org permitted assets, explicitly licensed catalogs, RSS/episodes as podcast content. Playlist metadata imports require authorized providers, never commercial stream extraction.
 5. Multi-server/native adapter and two-server E2E; then ActivityPub interoperability/security protocol work. Avoid new empty crates before useful implementations exist.

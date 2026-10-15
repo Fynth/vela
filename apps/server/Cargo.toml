@@ -10,6 +10,7 @@ vela-domain.workspace = true
 vela-core.workspace = true
 vela-media.workspace = true
 vela-imports.workspace = true
+vela-scanner.workspace = true
 anyhow.workspace = true
 axum.workspace = true
 tokio.workspace = true

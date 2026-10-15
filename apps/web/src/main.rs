@@ -1,4 +1,5 @@
 mod metadata;
+mod scanner;
 use dioxus::prelude::*;
 use gloo_net::http::{Request, Response};
 use gloo_timers::future::TimeoutFuture;
@@ -1198,6 +1199,17 @@ fn App() -> Element {
                             if auth.read().as_ref().is_some_and(|a| a.user.is_admin) { div { class: "panel", h2 { "Invite someone in" } p { "Create an account with its own private library. Share playlists explicitly after they sign in." }
                                     form { onsubmit: move |e| { e.prevent_default(); spawn_authorized(auth, async move { match api::<User>("POST", "/api/users", Some(json!({"username": new_user(), "password": new_password()})), &token(auth)).await { Ok(value) => { notice.set(format!("Account {} created. Share the password privately.", value.username)); new_user.set(String::new()); new_password.set(String::new()); } Err(message) => error.set(message) } }); }, label { r#for: "new-user", "New username" } input { id: "new-user", required: true, maxlength: 64, value: "{new_user}", autocomplete: "off", oninput: move |e| new_user.set(e.value()) } label { r#for: "new-password", "Initial password" } input { id: "new-password", r#type: "password", required: true, minlength: 12, value: "{new_password}", autocomplete: "new-password", oninput: move |e| new_password.set(e.value()) } button { class: "button primary", r#type: "submit", "Create account" } }
                                 } }
+                            if auth.read().as_ref().is_some_and(|a| a.user.is_admin) {
+                                scanner::ScannerPanel { auth, onchanged: move |_| {
+                                    invalidate_library(library);
+                                    invalidate_catalog(catalog);
+                                    spawn_authorized(auth, async move {
+                                        if let Ok(value) = api::<LibraryStats>("GET", "/api/stats", None, "").await {
+                                            stats.set(Some(value));
+                                        }
+                                    });
+                                } }
+                            }
                         }
                     }
                     footer { class: "content-footer", "YOUR MUSIC, WITHOUT THE NOISE." span { "Vela Music" } }

@@ -336,3 +336,33 @@ test('cancelled metadata responses stay closed across account changes', async ({
   await expect(page.getByText('Signal edited in Vela', { exact: true })).toHaveCount(0);
   await expect(page.locator('.queue-row')).toHaveCount(0);
 });
+
+test('administrator scans a configured folder and rescan preserves catalog edits', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('#username').fill('admin');
+  await page.locator('#password').fill(password);
+  await page.getByRole('button', { name: 'Sign in →', exact: true }).click();
+  await page.getByRole('button', { name: /Settings/ }).first().click();
+  await page.getByLabel('Folder', { exact: true }).selectOption('fixture');
+  await page.getByLabel('Source name', { exact: true }).fill('Mounted collection');
+  await page.getByRole('button', { name: 'Add source', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Scan Mounted collection', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Scan Mounted collection', exact: true }).click();
+  await expect(page.locator('.scanner-job-status').filter({ hasText: 'Scan complete' })).toHaveCount(1);
+  await page.getByRole('button', { name: 'Library', exact: true }).first().click();
+  await expect(page.getByRole('button', { name: 'Play Beacon', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Play Signal edited in Vela', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Play Beacon', exact: true }).click();
+  await expect.poll(() => page.locator('#vela-audio').evaluate(audio => audio.currentTime)).toBeGreaterThan(0);
+  await page.getByRole('button', { name: /Settings/ }).first().click();
+  await page.getByRole('button', { name: 'Scan Mounted collection', exact: true }).click();
+  await expect(page.locator('.scanner-job-status').filter({ hasText: 'Scan complete' })).toHaveCount(2);
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+  await page.screenshot({ path: 'test-results/scanner-mobile.png', fullPage: true });
+  await page.getByRole('button', { name: 'Remove Mounted collection', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Scan Mounted collection', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Library', exact: true }).last().click();
+  await expect(page.getByRole('button', { name: 'Play Beacon', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Play Signal edited in Vela', exact: true })).toBeVisible();
+});

@@ -1,6 +1,42 @@
 //! Framework-independent API contracts. IDs are opaque UUID strings.
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StorageRoot {
+    pub id: String,
+    pub name: String,
+    pub available: bool,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScanSource {
+    pub id: String,
+    pub name: String,
+    pub root_id: String,
+    pub last_scan_at: Option<i64>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CreateScanSource {
+    pub name: String,
+    pub root_id: String,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScanJob {
+    pub id: String,
+    pub source_id: String,
+    pub status: String,
+    pub visited: i64,
+    pub imported: i64,
+    pub duplicates: i64,
+    pub unchanged: i64,
+    pub skipped: i64,
+    pub failed_files: i64,
+    pub error: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub finished_at: Option<i64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct User {
     pub id: String,
