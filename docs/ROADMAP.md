@@ -19,7 +19,7 @@ Status meanings: implemented=source exists; verified=checks recorded in PROGRESS
 
 ## Next ordered slices
 
-1. Preserve the0.2.0 folder-scanning checkpoint and its executed verification evidence. Keep immutable source copies, private roots and metadata-edit preservation when expanding storage modes. Crash-safe orphan reconciliation remains outstanding.
+1. Preserve the0.3.0 filtering/covering-index checkpoint and its executed verification evidence. Keep immutable source copies, private roots and metadata-edit preservation when expanding storage modes. Crash-safe orphan reconciliation remains outstanding.
 2. Complete library organization: typed genre/format/year/quality-minimum filters and title/newest pages are implemented; retain the verified0.3.0 behavior, then add a coherent background job center and batch metadata editing. Direct-reference external storage needs its own lifetime/authorization/backup contract; current scans intentionally copy into managed storage.
 3. Complete local sharing administration: invites with expiry/acceptance, narrow separate stream/download grants, near-real-time revision updates. Keep metadata links view-only by default.
 4. Source adapters: ZIP with zip-slip/bomb limits, administrator-trusted WebDAV and S3 (separate egress policy), Archive.org permitted assets, explicitly licensed catalogs, RSS/episodes as podcast content. Playlist metadata imports require authorized providers, never commercial stream extraction.
