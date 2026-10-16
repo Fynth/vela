@@ -12,7 +12,15 @@ Final patch checks: fmt; strict native/all-target and wasm32 Clippy;110 Rust tes
 
 Eleven responsive Home/recovery images are retained in target/checks/resume-patch-final-screens. The phone44px retry/viewport/no-overflow checks passed in both themes; these are Chromium visual/interaction checks, not screen-reader or physical audio certification. The parity matrix now lists ten actual remaining gaps instead of repeating resolved baseline issues. Next work remains root-coordinated Now Playing, then private deduplicated listening events and real discovery.
 
-The verified0.7.1 source is ready for local archive/frozen-runtime installation on the unchanged user data; exact installation evidence follows below after execution.
+### Active local checkpoint
+
+The verified0.7.1 source/runtime checkpoint is cbbc467e944a8ca02d323be37bb4830e7eaa3901. Native/source archives target/releases/vela-0.7.1-{x86_64-unknown-linux-gnu,source}.tar.gz were produced from that clean commit. Extracted-package version/default setup/assets/WASM/schema7/SIGTERM exit0 passed; both hashes and every preserved0.1–0.7.0 manifest passed (resume-patch-package{,-verify,-checksums}.log; resume-all-release-checksums.log). No artifact was overwritten or published. Highest required GLIBC remains2.34 on this x86_64 Linux host; no ARM64/other-OS claim.
+
+The exact verified native archive was extracted into the new ignored target/runtime/vela-0.7.1/; native/WASM/JS/CSS hashes match the package and built files (resume-frozen-package-match.json). The owned0.6.1 PID159641 was sent SIGTERM and confirmed stopped. Fresh private0600 backup target/upgrade-backups/before-0.7.1-20261016T203131Z.tar.gz was restored into an isolated disposable directory and compared against the original database: schema7,1 account,20 real tracks,0 playlists, quick_check ok,0 foreign-key errors. No source media/account/library was reset/deleted and no production credential was inspected or created. Evidence:resume-upgrade-backup.json.
+
+PID202665 now serves127.0.0.1:3210 from target/runtime/vela-0.7.1/ using the original data/; health reports0.7.1 and setup remains completed. Served WASM/JS/CSS hashes match the frozen package; database counts/integrity are identical after startup (resume-upgrade-runtime.json). Tool process session53837 and log resume-dev-server.log identify this active local process for future graceful shutdown. Frozen BUILD.txt records source cbbc467; later documentation-only commits do not change the runtime. Preserve all target/runtime, target/releases and target/upgrade-backups content; future builds must not cargo clean/replace the active frozen files. Reinspect the process and counts on resume because the user can add music.
+
+No public deployment, external release, remote CI run, real native/mobile background playback, offline or cross-server/federation implementation is claimed. Next autonomous work: a root-coordinated Now Playing view with real track/queue/context/quality state, keyboard focus and320px dark/light E2E without audio remount; then separately design private listening events/consent/idempotency/export before Home recents and radio/mixes. Current ten-gap priorities and platform limits are in SPOTIFY_PARITY_MATRIX and KNOWN_LIMITATIONS.
 
 
 ## Browser resume and recovery0.7.0 (2026-10-16)
