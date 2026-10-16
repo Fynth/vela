@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
+import { randomUUID } from 'node:crypto';
 const fixture = fileURLToPath(new URL('../../crates/media/tests/fixtures/signal.flac', import.meta.url));
 const password = 'local browser fixture password';
 let adminCookies;
@@ -919,6 +920,88 @@ test('private search replies cannot populate another account after logout', asyn
   await expect(page.locator('.now-playing strong')).toHaveText('Ready when you are');
   await expect(page.getByRole('button', { name: 'Shuffle', exact: true })).toHaveAttribute('aria-pressed', 'false');
   await expect(page.getByRole('button', { name: 'Repeat: off', exact: true })).toBeVisible();
+});
+
+test('playlist replies cannot reopen abandoned views or put an old share link on another playlist', async ({ page }) => {
+  await openAdminFixture(page);
+  await navigate(page, 'Playlists');
+  const lists = await (await page.request.get('/api/playlists')).json();
+  const first = lists.find(list => list.name === 'Vela listening');
+  const second = lists.find(list => list.name === 'Evening signals');
+  expect(Boolean(first && second)).toBeTruthy();
+  const hold = async (path, method) => {
+    let release, seen;
+    const gate = new Promise(resolve => { release = resolve; });
+    const held = new Promise(resolve => { seen = resolve; });
+    let once = false;
+    await page.route(path, async route => {
+      if (!once && route.request().method() === method) {
+        once = true;
+        const response = await route.fetch();
+        expect(response.ok()).toBeTruthy();
+        seen(); await gate; await route.fulfill({ response });
+      } else { await route.continue(); }
+    });
+    return { held, release: async () => {
+      const reply = page.waitForResponse(response => response.request().method() === method && new URL(response.url()).pathname === path.replace('**', ''));
+      release(); await reply;
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      await page.unroute(path);
+    } };
+  };
+  const open = async name => {
+    await page.locator('.playlist-card').filter({ hasText: name }).click();
+    await expect(page.locator('.playlist-detail h2')).toHaveText(name);
+  };
+  const pending = await hold(`**/api/playlists/${first.id}`, 'GET');
+  await page.locator('.playlist-card').filter({ hasText: first.name }).click();
+  await pending.held;
+  await navigate(page, 'Home');
+  await navigate(page, 'Playlists');
+  await pending.release();
+  await expect(page.locator('.playlist-detail')).toHaveCount(0);
+
+  await open(second.name);
+  const pendingRefresh = await hold(`**/api/playlists/${second.id}`, 'GET');
+  await page.getByRole('button', { name: 'Remove from playlist', exact: true }).first().click();
+  await pendingRefresh.held;
+  await open(first.name);
+  await pendingRefresh.release();
+  await expect(page.locator('.playlist-detail h2')).toHaveText(first.name);
+  expect((await (await page.request.get(`/api/playlists/${second.id}`)).json()).items).toHaveLength(0);
+
+  const pendingShare = await hold(`**/api/playlists/${first.id}/shares`, 'POST');
+  await page.getByRole('button', { name: 'Create view link', exact: true }).click();
+  await pendingShare.held;
+  await open(second.name);
+  await pendingShare.release();
+  await expect(page.locator('.playlist-detail h2')).toHaveText(second.name);
+  await expect(page.locator('#share-link')).toHaveCount(0);
+
+  // An authenticated API edit advances the revision while an older refresh is held.
+  const auth = await (await page.request.get('/api/me')).json();
+  const tracks = await (await page.request.get('/api/tracks?q=Unbroken&limit=1')).json();
+  const add = async () => {
+    const current = await (await page.request.get(`/api/playlists/${first.id}`)).json();
+    const result = await page.request.post(`/api/playlists/${first.id}/items`, {
+      headers: { 'X-CSRF-Token': auth.csrf_token },
+      data: { revision: current.playlist.revision, mutation_id: randomUUID(), track_id: tracks.items[0].id, item_ids: null },
+    });
+    expect(result.ok()).toBeTruthy();
+  };
+  await add(); await add();
+  await open(first.name);
+  const olderRevision = await hold(`**/api/playlists/${first.id}`, 'GET');
+  await page.getByRole('button', { name: 'Remove from playlist', exact: true }).first().click();
+  await olderRevision.held;
+  await add();
+  const latest = await (await page.request.get(`/api/playlists/${first.id}`)).json();
+  // The stale UI mutation gets a genuine409, then fetches the newer snapshot.
+  await page.getByRole('button', { name: 'Move track up in playlist', exact: true }).nth(1).click();
+  await expect(page.locator('.playlist-detail')).toContainText(`Revision ${latest.playlist.revision}`);
+  await olderRevision.release();
+  await expect(page.locator('.playlist-detail')).toContainText(`Revision ${latest.playlist.revision}`);
+  await expect(page.locator('.playlist-detail .playlist-track')).toHaveCount(latest.items.length);
 });
 
 test('shuffle visits each occurrence once, previous follows history and repeat uses actual audio endings', async ({ page }) => {

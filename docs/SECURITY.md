@@ -77,3 +77,7 @@ The release notice generator now discovers shipped nested license directories an
 ## Playback-order isolation0.6
 
 The pure client order model is capped1000 entries/history states and never supplies authorization. Legacy local queue restoration is capped1000; original HTTP routes still authorize every stream. Shuffle/repeat reset across account changes; metadata changes retain occurrence traversal without widening access. The browser account-change regression explicitly verifies new-user modes as well as stale data/queue isolation. No credentials, media paths, listening events or remote control channel were added to this model.
+
+## Playlist response context0.6.1
+
+Private playlist opens, mutation-refresh snapshots, collaborator updates and returned share-link UI are bound to exact session/view generation and object. Navigation invalidates old requests, including leave-and-return to the same route. Opening a new playlist clears the preceding link; an old created token cannot populate the newly selected playlist form. Already committed server actions remain independently authorized; dropping a stale response is not a revocation or rollback. Refreshes cannot lower the displayed playlist revision, and collaborator list responses must match the current collaborator revision. The PLNAV01 regression holds actual API responses; source tokens are not logged.

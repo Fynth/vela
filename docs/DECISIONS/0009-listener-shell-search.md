@@ -17,3 +17,5 @@ No migration/storage semantics or session credentials change. Before development
 ## Consequences
 
 Search is local,8 results per category; group/playlist substring queries need profiling before a scale claim. Home has no fabricated recents/recommendations. The existing queue will next gain a tested playback transition model, fair shuffle history and explicit recovery. Multi-server, native engines, offline and federation remain distinct future slices.
+
+Follow-up0.6.1: a real held-response browser regression reproduced playlist detail reappearing after navigation away/back under0.6.0. Centralize a PlaylistView context over exact session, route, object and generation. Apply the same contract to post-mutation refresh, share-link presentation and collaborator changes; preserve committed server actions and separately enforced media rights. New detail revisions may not move backwards. PLNAV01 covers actual navigation, deletion refresh and share response races.

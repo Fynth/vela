@@ -1,6 +1,27 @@
 # Verified progress
 
-## Current checkpoint — playback order0.6.0 (2026-10-16)
+## Current checkpoint — playlist context fix0.6.1 (2026-10-16)
+
+Continued autonomously after packaging0.6.0. Final review found that the page-name-only playlist guard could accept an old response after leaving and returning to Playlists. The new PLNAV01 browser scenario was first run against the unchanged0.6.0 native/WASM builds and reproduced the defect (expected no detail, received one;19 scenarios passed before the new failure). Log:target/checks/playlist-navigation-before.log; trace/screens are preserved inplaylist-navigation-reproduced-failure. The failure was fixed in actual product code, not removed from the test.
+
+### Implemented and verified
+
+- Root PlaylistView invalidates pending details on navigation and opening another playlist, captures exact session/target/view generation and clears old share links. Returning to the same route cannot revive an old request. All ordinary navigation/catalog/Jobs/upload destinations use the same invalidation contract.
+- Post-reorder/delete refresh checks selection context before/after GET and cannot lower the displayed revision. A committed mutation remains committed when its abandoned response is dropped. Collaborator list/form changes and share-link results retain their initiating view; a new collaborator draft is preserved. No API/migration/storage/permission changes; sharing remains metadata-only.
+- Full `cargo test --locked --workspace -- --test-threads=2`:107 passed. Final fmt, strict native workspace/all-target Clippy, strict wasm32 Clippy and native/WASM release builds passed. Logs:playlist-navigation-{rust,fmt,clippy-final,clippy-wasm,native,web}.log. JS syntax passed. Locked dependency checks passed with the established paste maintenance exception (playlist-navigation-deny.log); third-party pins are unchanged.
+- Full real Chromium run with VELA_TEST_BINARY=target/release/vela-server and VELA_LIVE_IMPORT_TEST=1:23 passed in34.1s (playlist-navigation-browser-final.log; prior23-case run also passed in36.1s). PLNAV01 holds actual detail, deletion-refresh and share POST responses across route/selection changes, confirms the mutation committed, and prevents a stale detail or another playlist's link appearing. An authenticated out-of-band edit plus a genuine stale-revision409/newer refresh also confirms that an older same-view snapshot cannot lower the displayed revision or remove its latest rows. Existing real FLAC/MP3/WAV/Ogg playback, licensed live import, all ingest/filter/job/share/security/browser races and the two new shuffle scenarios remain green. No mocked catalog/share response replaces the backend.
+- Eight responsive/theme screenshots were regenerated undertarget/checks/playlist-navigation-final-screens. Prior visual review covers the unchanged shell; current E2E repeats overflow, keyboard and persistent-media checks. Full screen-reader/cross-browser/native validation is still absent. The nine Python tooling tests and20 restart/both worker-failure checks recorded below were executed earlier this session; these scripts/worker code did not change.
+
+### Live local checkpoint and safeguards
+
+Stopped the owned0.6 process gracefully (exit0), made private0600 backup target/upgrade-backups/before-0.6.1-20261016T160646Z.tar.gz and restored it to an isolated disposable fixture. Before/after remain schema7,1 account,20 real tracks,0 playlists, quick_check=ok and0 foreign-key errors. No user library, account or original file was reset/deleted, and production credentials were not inspected or created.
+
+The verified0.6.1 binary and assets were copied to ignored target/runtime/vela-0.6.1/ and are now serving127.0.0.1:3210 with the original data/ directory. Health reports0.6.1. This snapshot is separate from mutable target/release and dist, so later builds do not replace the active local interface. Backup/runtime evidence:playlist-navigation-upgrade-{backup,runtime}.json; log:playlist-navigation-dev-server.log. Preserve target/runtime, target/releases and target/upgrade-backups; do not cargo clean/remove target wholesale. Reinspect the listener and counts before any subsequent upgrade because the user may add music.
+
+Local0.6.1 source/native packaging evidence will be added after committing the clean verified source. Earlier0.1–0.6 artifacts are retained. No external release/CI or public deployment occurred. Docker daemon, Firefox/Safari, native/mobile devices and offline/handoff/federation remain unverified or not implemented as marked in the parity matrix. No new benchmark/performance-superiority claim. Next prioritized autonomous slice remains exact playback-context/position restore and reconnect/session-expiry recovery, then Now Playing and privacy-controlled listening-event foundations for real discovery.
+
+
+## Playback order0.6.0 (2026-10-16)
 
 Continued from the verified0.5 source3894e4e and documentation863bec3 in the same session, sequentially in the main agent. The user-visible Home/Search/shell increment and ingest/share/job/security workflows are retained. Third-party dependency pins, seven-crate boundaries and schema7 are unchanged; all local crate versions are0.6.0.
 

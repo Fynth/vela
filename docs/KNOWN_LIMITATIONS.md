@@ -4,6 +4,8 @@ The0.5 listener increment adds a real Home, separate local Search, five-tab phon
 
 Chromium checks cover320/768/1440/1920px dark/light and keyboard More dismissal/containment, not screen-reader certification or all browser/OS combinations. The in-app browser runtime reported no available browser; isolated Playwright Chromium was used against actual native/WASM builds. One requested parallel reviewer hit the environment usage limit without delivering code; implementation/integration continued in the main agent.
 
+Version0.6.1 verifies playlist route/object/session generation guards, post-mutation revision monotonicity and share-link view isolation; this does not complete invitations/media grants or all legacy client workflows.
+
 This is an early functional slice. The complete master roadmap is not delivered. Consult PROGRESS for executed checks; source/build recipes are not proof of platform runtime success.
 
 - No native desktop/mobile packages or audio services; no Android/iOS hardware validation, offline music, device transfer, remote control, PWA cache, background audio or secure native credential storage.

@@ -299,29 +299,75 @@ fn favorite_track(
         }
     });
 }
-fn open_playlist(
-    id: String,
+#[derive(Clone, Copy)]
+struct PlaylistView {
     auth: Signal<Option<AuthResponse>>,
-    mut page: Signal<String>,
-    mut selected: Signal<Option<PlaylistDetail>>,
-    mut generation: Signal<u64>,
-    mut error: Signal<String>,
-) {
-    let request = generation.peek().wrapping_add(1);
-    generation.set(request);
-    selected.set(None);
-    page.set("playlists".into());
-    let session = token(auth);
-    spawn_authorized(auth, async move {
-        let result = api::<PlaylistDetail>("GET", &format!("/api/playlists/{id}"), None, "").await;
-        if token(auth) != session
-            || *generation.peek() != request
-            || page.peek().as_str() != "playlists"
+    page: Signal<String>,
+    selected: Signal<Option<PlaylistDetail>>,
+    generation: Signal<u64>,
+    share_url: Signal<String>,
+}
+struct PlaylistRequest {
+    id: String,
+    generation: u64,
+    session: String,
+}
+impl PlaylistView {
+    fn invalidate(mut self) {
+        let generation = self.generation.peek().wrapping_add(1);
+        self.generation.set(generation);
+        self.selected.set(None);
+        self.share_url.set(String::new());
+    }
+    fn request(self, id: &str) -> PlaylistRequest {
+        PlaylistRequest {
+            id: id.into(),
+            generation: *self.generation.peek(),
+            session: token(self.auth),
+        }
+    }
+    fn route_matches(self, request: &PlaylistRequest) -> bool {
+        !request.session.is_empty()
+            && token(self.auth) == request.session
+            && *self.generation.peek() == request.generation
+            && self.page.peek().as_str() == "playlists"
+    }
+    fn matches(self, request: &PlaylistRequest) -> bool {
+        self.route_matches(request)
+            && self
+                .selected
+                .peek()
+                .as_ref()
+                .is_some_and(|detail| detail.playlist.id == request.id)
+    }
+    async fn refresh(mut self, request: &PlaylistRequest) {
+        if !self.matches(request) {
+            return;
+        }
+        if let Ok(value) =
+            api::<PlaylistDetail>("GET", &format!("/api/playlists/{}", request.id), None, "").await
+            && self.matches(request)
+            && self
+                .selected
+                .peek()
+                .as_ref()
+                .is_some_and(|current| value.playlist.revision >= current.playlist.revision)
         {
+            self.selected.set(Some(value));
+        }
+    }
+}
+fn open_playlist(id: String, mut view: PlaylistView, mut error: Signal<String>) {
+    view.invalidate();
+    view.page.set("playlists".into());
+    let request = view.request(&id);
+    spawn_authorized(view.auth, async move {
+        let result = api::<PlaylistDetail>("GET", &format!("/api/playlists/{id}"), None, "").await;
+        if !view.route_matches(&request) {
             return;
         }
         match result {
-            Ok(value) => selected.set(Some(value)),
+            Ok(value) => view.selected.set(Some(value)),
             Err(message) => error.set(message),
         }
     });
@@ -829,6 +875,13 @@ fn App() -> Element {
     let mut show_queue = use_signal(|| false);
     let mut theme = use_signal(|| storage_get("vela.theme").unwrap_or_else(|| "dark".into()));
 
+    let playlist_view = PlaylistView {
+        auth,
+        page,
+        selected: selected_playlist,
+        generation: playlist_generation,
+        share_url,
+    };
     let actions = use_hook(move || experience::Actions {
         play: EventHandler::new(move |(items, at): (Vec<Track>, usize)| {
             play_queue(items, at, playback)
@@ -840,30 +893,23 @@ fn App() -> Element {
             favorite_track(track, auth, tracks, queue, facets_revision, error)
         }),
         album: EventHandler::new(move |album: AlbumSummary| {
+            playlist_view.invalidate();
             page.set("albums".into());
             let mut catalog = catalog;
             catalog.selected.set(Some(CatalogSelection::Album(album)));
         }),
         artist: EventHandler::new(move |artist: ArtistSummary| {
+            playlist_view.invalidate();
             page.set("artists".into());
             let mut catalog = catalog;
             catalog.selected.set(Some(CatalogSelection::Artist(artist)));
         }),
-        playlist: EventHandler::new(move |id: String| {
-            open_playlist(
-                id,
-                auth,
-                page,
-                selected_playlist,
-                playlist_generation,
-                error,
-            )
-        }),
+        playlist: EventHandler::new(move |id: String| open_playlist(id, playlist_view, error)),
         navigate: EventHandler::new(move |destination: String| {
             if matches!(destination.as_str(), "albums" | "artists") {
                 clear_catalog(catalog);
             }
-            selected_playlist.set(None);
+            playlist_view.invalidate();
             page.set(destination);
         }),
         add: EventHandler::new(move |_| add_music.set(true)),
@@ -928,11 +974,12 @@ fn App() -> Element {
             .as_ref()
             .map(|d| (d.playlist.id.clone(), d.playlist.owner_id.clone()));
         let user = auth.read().as_ref().map(|a| a.user.id.clone());
-        let _revision = collaborator_revision();
+        let revision = collaborator_revision();
         collaborator_list.set(Vec::new());
         if let (Some((id, owner)), Some(user)) = (selected, user)
             && owner == user
         {
+            let request = playlist_view.request(&id);
             spawn_authorized(auth, async move {
                 if let Ok(list) = api::<Vec<PlaylistCollaborator>>(
                     "GET",
@@ -941,11 +988,8 @@ fn App() -> Element {
                     "",
                 )
                 .await
-                    && auth.peek().as_ref().is_some_and(|a| a.user.id == user)
-                    && selected_playlist
-                        .peek()
-                        .as_ref()
-                        .is_some_and(|p| p.playlist.id == id)
+                    && playlist_view.matches(&request)
+                    && *collaborator_revision.peek() == revision
                 {
                     collaborator_list.set(list);
                 }
@@ -1398,15 +1442,17 @@ fn App() -> Element {
                             form { class: "inline-form", onsubmit: move |e| { e.prevent_default(); let name = playlist_name().trim().to_string(); if name.is_empty() { return; } spawn_authorized(auth, async move { match api::<PlaylistSummary>("POST", "/api/playlists", Some(json!({"name": name})), &token(auth)).await { Ok(value) => { playlists.write().insert(0, value); playlist_name.set(String::new()); } Err(message) => error.set(message) } }); }, label { class: "sr-only", r#for: "playlist-name", "New playlist name" } input { id: "playlist-name", required: true, maxlength: 150, placeholder: "New playlist name", value: "{playlist_name}", oninput: move |e| playlist_name.set(e.value()) } button { class: "button primary small", r#type: "submit", "+ Create" } }
                         }
                         if playlists.read().is_empty() { div { class: "empty-state", span { class: "empty-icon", Icon { name: "queue" } } h3 { "Make room for a mood" } p { "Create a playlist, then add tracks from your library." } } }
-                        div { class: "playlist-grid", for list in playlists.read().iter().cloned() { button { class: "playlist-card", key: "{list.id}", onclick: move |_| { share_url.set(String::new()); open_playlist(list.id.clone(),auth,page,selected_playlist,playlist_generation,error); }, div { class: "playlist-art", Icon { name: "queue" } } h3 { "{list.name}" } p { "{list.item_count} tracks" if !list.can_edit { " · Shared with you" } } } } }
+                        div { class: "playlist-grid", for list in playlists.read().iter().cloned() { button { class: "playlist-card", key: "{list.id}", onclick: move |_| { share_url.set(String::new()); open_playlist(list.id.clone(),playlist_view,error); }, div { class: "playlist-art", Icon { name: "queue" } } h3 { "{list.name}" } p { "{list.item_count} tracks" if !list.can_edit { " · Shared with you" } } } } }
                         if let Some(detail) = selected_playlist.read().clone() { section { class: "panel playlist-detail", div { class: "section-toolbar", div { span { class: "eyebrow", "PLAYLIST" } h2 { "{detail.playlist.name}" } p { "{detail.items.len()} tracks · Revision {detail.playlist.revision}" } } if detail.items.iter().any(|i| i.can_stream) { button { class: "button primary", onclick: move |_| { if let Some(value) = selected_playlist.peek().as_ref() { play_queue(value.items.iter().filter(|i| i.can_stream).map(|i| i.track.clone()).collect(), 0, playback); } }, Icon {name:"play"} "Play playlist" } } }
                                 if detail.playlist.owner_id != auth.read().as_ref().map(|a|a.user.id.clone()).unwrap_or_default()
                                     && playlists.read().iter().any(|p|p.id==detail.playlist.id) {
                                     button { class: "button secondary small", onclick: move |_| {
                                         let id=selected_playlist.peek().as_ref().map(|d|d.playlist.id.clone()).unwrap_or_default();
                                         let user=auth.peek().as_ref().map(|a|a.user.id.clone()).unwrap_or_default();
+                                        let request = playlist_view.request(&id);
                                         spawn_authorized(auth, async move { match mutate("DELETE",&format!("/api/playlists/{id}/collaborators/{user}"),None,&token(auth)).await {
-                                            Ok(())=>{selected_playlist.set(None); if let Ok(value)=api::<Vec<PlaylistSummary>>("GET","/api/playlists",None,"").await {playlists.set(value);} notice.set("You left the playlist.".into());}
+                                            Ok(())=>{if playlist_view.matches(&request) { playlist_view.invalidate(); }
+                                                if let Ok(value)=api::<Vec<PlaylistSummary>>("GET","/api/playlists",None,"").await {playlists.set(value);} notice.set("You left the playlist.".into());}
                                             Err(message)=>error.set(message),
                                         } });
                                     }, "Leave playlist" }
@@ -1418,16 +1464,17 @@ fn App() -> Element {
                                                 let mut ids = current.items.iter().map(|entry| entry.id.clone()).collect::<Vec<_>>();
                                                 if at == 0 || at >= ids.len() { return; }
                                                 ids.swap(at, at - 1);
+                                                let request = playlist_view.request(&current.playlist.id);
                                                 spawn_authorized(auth, async move {
                                                     let id = current.playlist.id;
                                                     match mutate("PUT", &format!("/api/playlists/{id}/order"), Some(json!({"revision": current.playlist.revision, "mutation_id": uuid::Uuid::new_v4().to_string(), "item_ids": ids})), &token(auth)).await {
-                                                        Ok(()) => notice.set("Playlist order updated.".into()),
-                                                        Err(message) => error.set(message),
+                                                        Ok(()) => { if playlist_view.matches(&request) { notice.set("Playlist order updated.".into()); } }
+                                                        Err(message) => { if playlist_view.matches(&request) { error.set(message); } }
                                                     }
-                                                    if let Ok(value) = api::<PlaylistDetail>("GET", &format!("/api/playlists/{id}"), None, "").await { selected_playlist.set(Some(value)); }
+                                                    playlist_view.refresh(&request).await;
                                                 });
                                             }, Icon { name: "up" } } }
-                                            if detail.playlist.can_edit { button { class: "icon-button", "aria-label": "Remove from playlist", onclick: move |_| { let id = list_id.clone(); let item = item_id.clone(); spawn_authorized(auth, async move { let path = format!("/api/playlists/{id}/items/{item}?revision={revision}&mutation_id={}", uuid::Uuid::new_v4()); match mutate("DELETE", &path, None, &token(auth)).await { Ok(()) => { if let Ok(value) = api::<PlaylistDetail>("GET", &format!("/api/playlists/{id}"), None, "").await { selected_playlist.set(Some(value)); } } Err(message) => error.set(message) } }); }, Icon { name: "close" } } }
+                                            if detail.playlist.can_edit { button { class: "icon-button", "aria-label": "Remove from playlist", onclick: move |_| { let id = list_id.clone(); let item = item_id.clone(); let request = playlist_view.request(&id); spawn_authorized(auth, async move { let path = format!("/api/playlists/{id}/items/{item}?revision={revision}&mutation_id={}", uuid::Uuid::new_v4()); match mutate("DELETE", &path, None, &token(auth)).await { Ok(()) => playlist_view.refresh(&request).await, Err(message) => { if playlist_view.matches(&request) { error.set(message); } } } }); }, Icon { name: "close" } } }
                                         } } } }
                                 if detail.playlist.owner_id == auth.read().as_ref().map(|a| a.user.id.clone()).unwrap_or_default() {
                                     div { class: "sharing-controls", h3 { "Share the playlist, keep control" } p { "Named collaborators can view playlist metadata. Link views include titles from your own library; contributors’ private tracks stay hidden. Audio access remains separate." }
@@ -1439,19 +1486,22 @@ fn App() -> Element {
                                                         button { class: "button danger small", "aria-label": "Revoke {person.username}'s playlist access", onclick: move |_| {
                                                             let id=selected_playlist.peek().as_ref().map(|p|p.playlist.id.clone()).unwrap_or_default();
                                                             let target=person.user_id.clone();
+                                                            let request = playlist_view.request(&id);
                                                             spawn_authorized(auth, async move { match mutate("DELETE",&format!("/api/playlists/{id}/collaborators/{target}"),None,&token(auth)).await {
-                                                                Ok(())=>{collaborator_revision.set(collaborator_revision()+1); notice.set("Collaborator access revoked.".into());}
-                                                                Err(message)=>error.set(message),
+                                                                Ok(())=>{if !playlist_view.matches(&request) { return; } collaborator_revision.set(collaborator_revision()+1); notice.set("Collaborator access revoked.".into());}
+                                                                Err(message)=>{if playlist_view.matches(&request) {error.set(message);}},
                                                             } });
                                                         }, "Revoke access" }
                                                     }
                                                 }
                                             }
                                         }
-                                        form { class: "inline-form", onsubmit: move |e| { e.prevent_default(); let username = collaborator(); let can_edit = collaborator_edit(); let id = selected_playlist.peek().as_ref().map(|v| v.playlist.id.clone()).unwrap_or_default(); spawn_authorized(auth, async move { match mutate("POST", &format!("/api/playlists/{id}/collaborators"), Some(json!({"username": username, "can_edit": can_edit})), &token(auth)).await { Ok(()) => { collaborator.set(String::new()); notice.set("Playlist access updated.".into()); collaborator_revision.set(collaborator_revision()+1); } Err(message) => error.set(message) } }); }, label { class: "sr-only", r#for: "collaborator", "Collaborator username" } input { id: "collaborator", placeholder: "Username on this server", required: true, value: "{collaborator}", oninput: move |e| collaborator.set(e.value()) } label { class: "checkbox-label", input { r#type: "checkbox", checked: collaborator_edit(), onchange: move |e| collaborator_edit.set(e.checked()) } "Can edit" } button { class: "button secondary small", r#type: "submit", "Grant access" } }
+                                        form { class: "inline-form", onsubmit: move |e| { e.prevent_default(); let username = collaborator(); let can_edit = collaborator_edit(); let id = selected_playlist.peek().as_ref().map(|v| v.playlist.id.clone()).unwrap_or_default(); let request = playlist_view.request(&id); spawn_authorized(auth, async move { match mutate("POST", &format!("/api/playlists/{id}/collaborators"), Some(json!({"username": username, "can_edit": can_edit})), &token(auth)).await { Ok(()) => { if !playlist_view.matches(&request) { return; }
+                                                if *collaborator.peek() == username { collaborator.set(String::new()); }
+                                                notice.set("Playlist access updated.".into()); collaborator_revision.set(collaborator_revision()+1); } Err(message) => { if playlist_view.matches(&request) { error.set(message); } } } }); }, label { class: "sr-only", r#for: "collaborator", "Collaborator username" } input { id: "collaborator", placeholder: "Username on this server", required: true, value: "{collaborator}", oninput: move |e| collaborator.set(e.value()) } label { class: "checkbox-label", input { r#type: "checkbox", checked: collaborator_edit(), onchange: move |e| collaborator_edit.set(e.checked()) } "Can edit" } button { class: "button secondary small", r#type: "submit", "Grant access" } }
                                         div { class: "inline-form share-form", label { r#for: "share-expiry", "Link expires in" } select { id: "share-expiry", value: "{share_days}", onchange: move |e| share_days.set(e.value()), option { value: "1", "1 day" } option { value: "7", "7 days" } option { value: "30", "30 days" } }
-                                            button { class: "button secondary small", onclick: move |_| { let id = selected_playlist.peek().as_ref().map(|v| v.playlist.id.clone()).unwrap_or_default(); let days = share_days().parse::<i64>().unwrap_or(7); spawn_authorized(auth, async move { match api::<ShareResponse>("POST", &format!("/api/playlists/{id}/shares"), Some(json!({"expires_in_seconds": days * 86400})), &token(auth)).await { Ok(value) => { let origin = web_sys::window().and_then(|w| w.location().origin().ok()).unwrap_or_default(); share_url.set(format!("{origin}/#share={}", value.token)); } Err(message) => error.set(message) } }); }, "Create view link" }
-                                            button { class: "button danger small", onclick: move |_| { let id = selected_playlist.peek().as_ref().map(|v| v.playlist.id.clone()).unwrap_or_default(); spawn_authorized(auth, async move { match mutate("DELETE", &format!("/api/playlists/{id}/shares"), None, &token(auth)).await { Ok(()) => { share_url.set(String::new()); notice.set("All share links for this playlist were revoked.".into()); } Err(message) => error.set(message) } }); }, "Revoke all links" }
+                                            button { class: "button secondary small", onclick: move |_| { let id = selected_playlist.peek().as_ref().map(|v| v.playlist.id.clone()).unwrap_or_default(); let request = playlist_view.request(&id); let days = share_days().parse::<i64>().unwrap_or(7); spawn_authorized(auth, async move { match api::<ShareResponse>("POST", &format!("/api/playlists/{id}/shares"), Some(json!({"expires_in_seconds": days * 86400})), &token(auth)).await { Ok(value) => { if !playlist_view.matches(&request) { return; } let origin = web_sys::window().and_then(|w| w.location().origin().ok()).unwrap_or_default(); share_url.set(format!("{origin}/#share={}", value.token)); } Err(message) => { if playlist_view.matches(&request) { error.set(message); } } } }); }, "Create view link" }
+                                            button { class: "button danger small", onclick: move |_| { let id = selected_playlist.peek().as_ref().map(|v| v.playlist.id.clone()).unwrap_or_default(); let request = playlist_view.request(&id); spawn_authorized(auth, async move { match mutate("DELETE", &format!("/api/playlists/{id}/shares"), None, &token(auth)).await { Ok(()) => { if !playlist_view.matches(&request) { return; } share_url.set(String::new()); notice.set("All share links for this playlist were revoked.".into()); } Err(message) => { if playlist_view.matches(&request) { error.set(message); } } } }); }, "Revoke all links" }
                                         }
                                         if !share_url().is_empty() { label { r#for: "share-link", "Copy this view-only link" } input { id: "share-link", readonly: true, value: "{share_url}", onclick: move |_| { if let Some(input) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.get_element_by_id("share-link")).and_then(|e| e.dyn_into::<HtmlInputElement>().ok()) { input.select(); } } } }
                                     }
@@ -1467,7 +1517,7 @@ fn App() -> Element {
                             spawn_authorized(auth, async move {
                                 if let Ok(value) = api::<LibraryStats>("GET", "/api/stats", None, "").await { stats.set(Some(value)); }
                             });
-                        }, onopen: move |destination: String| { page.set(destination); selected_playlist.set(None); } }
+                        }, onopen: move |destination: String| actions.navigate.call(destination) }
                     }
 
                     if page() == "settings" {
@@ -1549,7 +1599,7 @@ fn App() -> Element {
                             label { class: "upload-zone", r#for: "audio-files", span { Icon { name: "upload" } } strong { "Choose audio files" } small { "FLAC · MP3 · AAC · Opus · Vorbis · WAV" } input { id: "audio-files", r#type: "file", multiple: true, accept: "audio/*,.flac,.mp3,.m4a,.aac,.ogg,.opus,.wav,.aiff,.aif,.ape,.wv", disabled: uploading() } }
                             if !upload_status().is_empty() { p { class: "upload-status", role: "status", "{upload_status}" } }
                             button { class: "button primary", disabled: uploading(), onclick: move |_| { if uploading() { return; } uploading.set(true); error.set(String::new()); spawn_authorized(auth, async move { match upload_files(token(auth), upload_status, error).await { Ok(count) => { upload_status.set(format!("{count} files processed.")); if count > 0 { catalog_changed(facets_revision); notice.set(format!("{count} audio files are ready to listen.")); if matches!(page.peek().as_str(), "albums" | "artists") { catalog_page(None, catalog); } load_library(None, library).await; if let Ok(value) = api::<LibraryStats>("GET", "/api/stats", None, "").await { stats.set(Some(value)); } } } Err(message) => error.set(message) } uploading.set(false); }); }, if uploading() { "Uploading and reading tags…" } else { "Upload to my library" } }
-                            div { class: "modal-divider", "or" } button { class: "button secondary", disabled: uploading(), onclick: move |_| { add_music.set(false); page.set("imports".into()); }, "Import from a download link →" } small { "Files are processed one at a time. Keep this tab open while uploading." }
+                            div { class: "modal-divider", "or" } button { class: "button secondary", disabled: uploading(), onclick: move |_| { add_music.set(false); actions.navigate.call("imports".into()); }, "Import from a download link →" } small { "Files are processed one at a time. Keep this tab open while uploading." }
                         } } }
             }
         }
