@@ -1,3 +1,9 @@
+# Local checkpoint0.8.0
+
+Now Playing opens from the current track in the persistent player. Its cover, title, artist, album, original-file properties, seek/volume/transport, favorite and bounded saved-order queue preview use actual root state. Selecting a queue occurrence or using Media Session controls keeps the same dialog/audio element. Opening a paused bookmark does not fetch media. Escape/close restores focus; navigation, sign-out and expired sessions clear the view. Favorite feedback ignores superseded track/view/account replies and successful changes agree across catalog, library and queue.
+
+No schema, HTTP API, storage semantics or upstream dependency pin changes. Native/server packages include an explicit now-playing.css asset; the static-file boundary still denies unrelated files. See PROGRESS for executed checks and KNOWN_LIMITATIONS for browser/platform limits. This is a local review artifact, not an externally published release or complete Spotify-class parity.
+
 # Local checkpoint0.3.0
 
 This is a local review checkpoint; PROGRESS records executed gates. No external release is published.

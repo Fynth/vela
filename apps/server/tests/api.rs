@@ -1708,6 +1708,47 @@ async fn static_assets_never_serve_arbitrary_database_files() {
     )
     .await
     .unwrap();
+    tokio::fs::write(
+        app.state.config.web_dir.join("now-playing.css"),
+        b".now-playing-dialog{color:inherit}",
+    )
+    .await
+    .unwrap();
+    tokio::fs::write(
+        app.state.config.web_dir.join("private.css"),
+        b"private fixture bytes",
+    )
+    .await
+    .unwrap();
+    let stylesheet = app
+        .client
+        .get(format!("{}/now-playing.css", app.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(stylesheet.status(), StatusCode::OK);
+    assert!(
+        stylesheet.headers()["content-type"]
+            .to_str()
+            .unwrap()
+            .starts_with("text/css")
+    );
+    assert!(
+        stylesheet
+            .text()
+            .await
+            .unwrap()
+            .contains(".now-playing-dialog")
+    );
+    assert_eq!(
+        app.client
+            .get(format!("{}/private.css", app.base))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NOT_FOUND
+    );
     tokio::fs::create_dir_all(app.state.config.web_dir.join("api"))
         .await
         .unwrap();

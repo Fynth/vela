@@ -1,0 +1,15 @@
+# ADR0012: one root player, an inspectable Now Playing view
+
+Date:2026-10-17. Status: accepted; execution evidence is recorded in PROGRESS.
+
+The bottom player and account-scoped BrowserPlayer already own the real source, cancellation, recovery and queue occurrence. A second audio component or a route-local player would weaken these invariants. Evolve the existing seven crates without migration, new API, new dependency pins or storage changes.
+
+`apps/web/src/now_playing.rs` is presentation only. Root passes current metadata, clock, context, modes, status, queue and typed actions. Opening the view never resolves/loads audio; transport/seek/volume/retry/queue selection call the same root handlers as the bar. Keep the audio element and unique Media Session button IDs mounted behind it. Preview at most five later occurrences in saved order; explicitly label shuffle semantics instead of claiming these are the randomized next tracks.
+
+The existing lean Dioxus web feature set does not enable mounted events. Open after the renderer batch with a component-scoped deferred effect, like the existing metadata editor; closing/unmounting drops the task. Use a native modal dialog for top-layer placement, background inertness and browser-managed focus. Close before unmounting to restore the opener. [showModal](https://developer.mozilla.org/en-US/docs/Web/API/HTMLDialogElement/showModal) and [dialog](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/dialog) document these browser semantics; actual Chromium acceptance is required separately. Exclude native dialogs from the existing legacy focus trap. Dioxus0.7 has no native close event binding, so a small capture listener forwards close only from the exact current, closed node to its dismiss action. Escape, explicit close, navigation, account expiry and direct native close reconcile root visibility. No second JS playback coordinator is added.
+
+Favorite commits use one authorized path updating matching IDs in library, catalog detail and every queued occurrence. Account changes cancel the continuation. Local pending/error feedback additionally matches the exact session, open generation, track ID and cursor; closing/reopening or selecting another occurrence invalidates it. A committed server mutation remains real even when its old view feedback is discarded. Queue metadata changes never reset traversal.
+
+The additive `now-playing.css` uses existing Vela tokens and native controls, original inline SVG and actual embedded artwork. Explicit server allowlisting and build/package verification include this asset without making arbitrary CSS/files readable. Older archived packages remain verifiable when they do not reference the new asset.
+
+Limitations: browser direct-stream details reflect reported source properties, not proof of decoded losslessness. No lyrics provider, right sidebar, effects, native audio service, offline download, handoff or listening history is implied. Firefox/Safari, screen readers and physical media controls require separate validation.

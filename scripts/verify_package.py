@@ -64,6 +64,10 @@ def main():
             for path, expected in [('/', b'bootstrap.js'), ('/bootstrap.js', b'vela_web.js')]:
                 with urllib.request.urlopen(base + path, timeout=2) as response:
                     assert expected in response.read(1024 * 1024)
+            if 'href="/now-playing.css"' in (root / 'dist/index.html').read_text():
+                with urllib.request.urlopen(base + '/now-playing.css', timeout=2) as response:
+                    assert response.headers.get_content_type() == 'text/css'
+                    assert b'.now-playing-dialog' in response.read(1024 * 1024)
             with urllib.request.urlopen(base + '/pkg/vela_web_bg.wasm', timeout=2) as response:
                 assert response.read(4) == b'\x00asm'
             process.send_signal(signal.SIGTERM)

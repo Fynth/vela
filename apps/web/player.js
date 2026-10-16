@@ -3,6 +3,7 @@
   const checkpoint = () => window.dispatchEvent(new Event("vela-checkpoint"));
   window.addEventListener("pagehide", checkpoint);
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") checkpoint(); });
+  const modalOpen = () => document.querySelector('dialog[open], [role="dialog"]:not(dialog)');
   const audio = () => document.getElementById("vela-audio");
   const destinations = new Set(["home", "search", "library", "albums", "artists", "favorites", "playlists", "imports", "jobs", "settings"]);
   document.addEventListener("vela-route", ({detail}) => {
@@ -14,7 +15,7 @@
     if (destinations.has(destination)) document.querySelector(`[data-destination="${destination}"]`)?.click();
   });
   document.addEventListener("keydown", event => {
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k" && !document.querySelector('[role="dialog"]')) {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k" && !modalOpen()) {
       const destination = document.querySelector('[data-destination="search"]');
       if (destination) { event.preventDefault(); destination.click(); requestAnimationFrame(() => document.getElementById("global-search")?.focus()); }
     }
@@ -26,7 +27,7 @@
   });
 
   document.addEventListener("keydown", (event) => {
-    if (document.querySelector('[role="dialog"]') || event.altKey || event.ctrlKey || event.metaKey || /INPUT|TEXTAREA|SELECT|BUTTON|A|SUMMARY/.test(event.target.tagName) || event.target.isContentEditable) return;
+    if (modalOpen() || event.altKey || event.ctrlKey || event.metaKey || /INPUT|TEXTAREA|SELECT|BUTTON|A|SUMMARY/.test(event.target.tagName) || event.target.isContentEditable) return;
     if (event.code === "Space") { const button = document.getElementById("player-toggle"); if (button) { event.preventDefault(); button.click(); } }
     if (event.code === "ArrowRight" && audio()) { event.preventDefault(); audio().currentTime = Math.min(audio().duration || 0, audio().currentTime + 10); }
     if (event.code === "ArrowLeft" && audio()) { event.preventDefault(); audio().currentTime = Math.max(0, audio().currentTime - 10); }
@@ -44,11 +45,17 @@
   });
   document.addEventListener("play", (event) => { if (event.target.id === "vela-audio" && "mediaSession" in navigator) navigator.mediaSession.playbackState = "playing"; }, true);
   document.addEventListener("pause", (event) => { if (event.target.id === "vela-audio" && "mediaSession" in navigator) navigator.mediaSession.playbackState = "paused"; }, true);
+  // Dioxus has no native dialog close event binding. Synchronize only this exact node.
+  document.addEventListener("close", event => {
+    const dialog = document.getElementById("now-playing-dialog");
+    if (event.target === dialog && dialog && !dialog.open) dialog.querySelector("[data-dialog-dismiss]")?.click();
+  }, true);
   const focusable = (dialog) => [...dialog.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled), a[href], [tabindex="0"]')];
   let activeDialog = null;
   let returnFocus = null;
   new MutationObserver(() => {
-    const dialog = document.querySelector('[role="dialog"]');
+    // Native dialogs provide inertness/focus restoration themselves.
+    const dialog = document.querySelector('[role="dialog"]:not(dialog)');
     if (dialog && dialog !== activeDialog) {
       returnFocus = document.activeElement;
       activeDialog = dialog;

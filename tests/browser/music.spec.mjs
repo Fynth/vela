@@ -1254,9 +1254,15 @@ test('NET02 pause and a newer duplicate occurrence cancel held recovery and retr
     expect(await page.getByRole('button',{name:'Retry playback',exact:true}).evaluate(e=>e.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
     await page.screenshot({path:`test-results/resume-recovery-phone-${theme}.png`});
   }
+  const dialog=await openNowPlaying(page);
+  await expect(dialog.getByRole('status')).toContainText('Press Play to retry from your saved position');
+  const retry=dialog.getByRole('button',{name:'Retry playback',exact:true});
+  await retry.scrollIntoViewIfNeeded();await expect(retry).toBeInViewport();
   await page.unroute('**/api/tracks/*/stream');
-  await page.getByRole('button',{name:'Retry playback',exact:true}).click();
+  await retry.click();
   await expect(page.locator('#vela-audio')).toHaveJSProperty('paused',false);
+  await expect.poll(()=>page.locator('#vela-audio').evaluate(a=>a.currentTime)).toBeGreaterThanOrEqual(6);
+  await dialog.getByRole('button',{name:'Close now playing',exact:true}).click();
   expect(errors).toEqual([]);
 });
 
@@ -1304,6 +1310,152 @@ test('RES04 playlist row plays its correct duplicate occurrence in the full auth
   await expect(page.locator('.now-playing strong')).toHaveText('Harbor');
 });
 
+async function openNowPlaying(page){
+  await page.getByRole('button',{name:'Open now playing',exact:true}).click();
+  const dialog=page.getByRole('dialog',{name:'Now playing',exact:true});
+  await expect(dialog).toBeVisible();await expect.poll(()=>dialog.evaluate(d=>d.matches(':modal'))).toBeTruthy();return dialog;
+}
+
+test('NP01 full player shares genuine audio transport queue and native modal focus',async({page})=>{
+  const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  await page.addInitScript(()=>{
+    if('mediaSession' in navigator){
+      const original=navigator.mediaSession.setActionHandler.bind(navigator.mediaSession);
+      window.__velaTestMediaHandlers={};
+      navigator.mediaSession.setActionHandler=(action,handler)=>{window.__velaTestMediaHandlers[action]=handler;return original(action,handler);};
+    }
+  });
+  await openAdminFixture(page);await findTrack(page,'Harbor');
+  await page.getByRole('button',{name:'Add Harbor to playback queue',exact:true}).click();
+  const inspected=await openNowPlaying(page);
+  await expect(inspected.locator('.np-times')).toContainText('0:30');
+  await expect(inspected.getByRole('slider',{name:'Playback position',exact:true})).toHaveAttribute('max','30');
+  expect(await page.locator('#vela-audio').getAttribute('src')).toBeNull();
+  await inspected.getByRole('button',{name:'Close now playing',exact:true}).click();
+  await findTrack(page,'Drift');
+  await page.getByRole('button',{name:'Play Drift',exact:true}).click();
+  await page.getByRole('button',{name:'Add Drift to playback queue',exact:true}).click();
+  await findTrack(page,'Harbor');await page.getByRole('button',{name:'Add Harbor to playback queue',exact:true}).click();
+  await expect.poll(()=>page.locator('#vela-audio').evaluate(a=>a.readyState)).toBe(4);
+  await page.evaluate(()=>{window.__npAudio=document.querySelector('#vela-audio');window.__npSrc=window.__npAudio.src;window.__npGen=window.__npAudio.dataset.sourceGeneration;});
+  const before=await page.locator('#vela-audio').evaluate(a=>a.currentTime);
+  let streams=0;page.on('request',r=>{if(r.url().endsWith('/stream'))streams++;});
+  const opener=page.getByRole('button',{name:'Open now playing',exact:true});await opener.focus();await page.keyboard.press('Enter');
+  const dialog=page.getByRole('dialog',{name:'Now playing',exact:true});await expect(dialog).toBeVisible();
+  expect(await dialog.evaluate(d=>d.matches(':modal'))).toBeTruthy();
+  await expect(dialog.getByRole('heading',{name:'Drift',exact:true})).toBeVisible();
+  await expect(dialog.locator('.np-context')).toHaveText('Playing from Search results');
+  expect(await page.evaluate(()=>document.querySelectorAll('audio').length===1&&window.__npAudio===document.querySelector('#vela-audio')&&window.__npAudio.src===window.__npSrc&&window.__npAudio.dataset.sourceGeneration===window.__npGen)).toBeTruthy();
+  await expect.poll(()=>page.locator('#vela-audio').evaluate(a=>a.currentTime)).toBeGreaterThan(before);
+  expect(streams).toBe(0);
+  await page.locator('button[data-destination="library"]').first().evaluate(button=>button.focus());
+  expect(await dialog.evaluate(d=>d.contains(document.activeElement))).toBeTruthy();
+  await dialog.getByRole('button',{name:'Close now playing',exact:true}).focus();await page.keyboard.press('Shift+Tab');
+  expect(await dialog.evaluate(d=>d.contains(document.activeElement))).toBeTruthy();await page.keyboard.press('Tab');
+  expect(await dialog.evaluate(d=>d.contains(document.activeElement))).toBeTruthy();
+  await dialog.getByRole('button',{name:'Pause',exact:true}).click();await expect(page.locator('#vela-audio')).toHaveJSProperty('paused',true);
+  await expect(page.locator('#player-toggle')).toHaveAttribute('aria-label','Play');
+  await dialog.getByRole('slider',{name:'Playback position',exact:true}).evaluate(e=>{e.value='8';e.dispatchEvent(new Event('input',{bubbles:true}));});
+  await expect.poll(()=>page.locator('#vela-audio').evaluate(a=>a.currentTime)).toBeGreaterThanOrEqual(8);
+  await dialog.getByRole('button',{name:'Previous track',exact:true}).click();
+  await expect.poll(()=>page.locator('#vela-audio').evaluate(a=>a.currentTime)).toBeLessThan(1);await expect(page.locator('#vela-audio')).toHaveJSProperty('paused',true);
+  await dialog.getByRole('button',{name:'Play',exact:true}).click();await expect(page.locator('#vela-audio')).toHaveJSProperty('paused',false);
+  await dialog.getByRole('slider',{name:'Volume',exact:true}).evaluate(e=>{e.value='0.21';e.dispatchEvent(new Event('input',{bubbles:true}));});
+  await expect(page.locator('#vela-audio')).toHaveJSProperty('volume',0.21);
+  await expect(page.locator('.player-right input[aria-label="Volume"]')).toHaveValue('0.21');
+  await page.evaluate(()=>window.__npDialog=document.querySelector('#now-playing-dialog'));
+  // Duplicate occurrences use the same URL, but Next must update the root cursor
+  // without replacing the dialog or audio element, even through native inertness.
+  await page.evaluate(()=>window.__velaTestMediaHandlers.nexttrack());
+  await expect(dialog.getByText('Track 2 of 3',{exact:true})).toBeVisible();
+  expect(await page.evaluate(()=>window.__npDialog===document.querySelector('#now-playing-dialog')&&window.__npAudio===document.querySelector('#vela-audio')&&window.__npAudio.dataset.sourceGeneration!==window.__npGen)).toBeTruthy();
+  await dialog.getByRole('button',{name:'Shuffle',exact:true}).click();await expect(dialog.getByRole('button',{name:'Shuffle',exact:true})).toHaveAttribute('aria-pressed','true');
+  await dialog.getByRole('button',{name:'Repeat: off',exact:true}).click();await expect(dialog.getByRole('button',{name:'Repeat: all',exact:true})).toHaveAttribute('aria-pressed','true');
+  // Real Media Session bridge calls the mounted bottom controls through native inertness.
+  await page.evaluate(()=>window.__velaTestMediaHandlers.pause());await expect(page.locator('#vela-audio')).toHaveJSProperty('paused',true);
+  await page.evaluate(()=>window.__velaTestMediaHandlers.play());await expect(page.locator('#vela-audio')).toHaveJSProperty('paused',false);
+  await dialog.getByRole('button',{name:'Play Harbor from queue',exact:true}).click();
+  await expect(dialog.getByRole('heading',{name:'Harbor',exact:true})).toBeVisible();
+  expect(await page.evaluate(()=>window.__npDialog===document.querySelector('#now-playing-dialog')&&window.__npAudio===document.querySelector('#vela-audio'))).toBeTruthy();
+  await expect(dialog.locator('.np-details')).toContainText('44100 Hz');
+  const favorite=dialog.getByRole('button',{name:/current track.*favorites|Favorite current track/});
+  const wasLiked=await favorite.getAttribute('aria-pressed');await favorite.click();await expect(favorite).toHaveAttribute('aria-pressed',String(wasLiked!=='true'));
+  await expect(favorite).toBeEnabled();
+  await dialog.getByRole('button',{name:'View full queue',exact:true}).click();await expect(dialog).toHaveCount(0);
+  await expect(page.getByRole('complementary',{name:'Playback queue',exact:true})).toBeVisible();await expect(page.locator('.queue-row').nth(2)).toHaveClass(/current/);
+  await page.getByRole('button',{name:'Close playback queue',exact:true}).click();await openNowPlaying(page);
+  await page.keyboard.press('Escape');await expect(dialog).toHaveCount(0);await expect(opener).toBeFocused();
+  const source=await page.locator('#vela-audio').getAttribute('src');await navigate(page,'Home');await navigate(page,'Library');
+  await expect(page.locator('#vela-audio')).toHaveAttribute('src',source);expect(await page.evaluate(()=>window.__npAudio===document.querySelector('#vela-audio'))).toBeTruthy();
+  await openNowPlaying(page);await dialog.evaluate(d=>d.close());await expect(dialog).toHaveCount(0);await expect(opener).toBeFocused();
+  expect(errors).toEqual([]);
+});
+
+test('NP02 held genuine favorite replies cannot change a newer track or reopened player feedback',async({page})=>{
+  const errors=[];page.on('pageerror',e=>errors.push(e.message));await openAdminFixture(page);await findTrack(page,'Drift');
+  await page.getByRole('button',{name:'Play Drift',exact:true}).click();await findTrack(page,'Harbor');await page.getByRole('button',{name:'Add Harbor to playback queue',exact:true}).click();
+  await page.getByRole('button',{name:'Pause',exact:true}).click();const dialog=await openNowPlaying(page);
+  const waits=[];let calls=0;
+  await page.route('**/api/tracks/*/favorite',async route=>{
+    const at=calls++;let release;const gate=new Promise(resolve=>release=resolve);
+    const headers={...route.request().headers()};if(at%2===0)headers['x-csrf-token']='invalid-fixture-token';
+    const response=await route.fetch({headers});expect(response.ok()).toBe(at%2===1);
+    waits[at]={release,url:route.request().url()};await gate;await route.fulfill({response});
+  });
+  const favorite=()=>dialog.getByRole('button',{name:/current track.*favorites|Favorite current track/});
+  const pending=async at=>expect.poll(()=>Boolean(waits[at])).toBeTruthy();
+  const finish=async at=>{const response=page.waitForResponse(r=>r.url()===waits[at].url&&r.request().method()==='POST');waits[at].release();await response;await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));};
+  await favorite().click();await pending(0);await expect(favorite()).toBeDisabled();
+  await dialog.getByRole('button',{name:'Next track',exact:true}).click();await expect(dialog.getByRole('heading',{name:'Harbor',exact:true})).toBeVisible();
+  await favorite().click();await pending(1);await finish(0);await expect(favorite()).toBeDisabled();await expect(dialog.getByRole('alert')).toHaveCount(0);
+  await finish(1);await expect(favorite()).toBeEnabled();
+  await favorite().click();await pending(2);await dialog.getByRole('button',{name:'Close now playing',exact:true}).click();await openNowPlaying(page);
+  await favorite().click();await pending(3);await finish(2);await expect(favorite()).toBeDisabled();await expect(dialog.getByRole('alert')).toHaveCount(0);
+  await finish(3);await expect(favorite()).toBeEnabled();await expect(dialog.getByRole('alert')).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+test('NP03 queued artwork metadata and favorites stay consistent across screens and responsive themes',async({page})=>{
+  const errors=[];page.on('pageerror',e=>errors.push(e.message));await openAdminFixture(page);await findTrack(page,'Signal edited in Vela');
+  const found=await (await page.request.get('/api/search?q=Signal%20edited%20in%20Vela')).json();const track=found.tracks.find(t=>t.title==='Signal edited in Vela');expect(track).toBeDefined();
+  await page.getByRole('button',{name:`Add ${track.title} to playback queue`,exact:true}).click();
+  expect(await page.locator('#vela-audio').getAttribute('src')).toBeNull();
+  await navigate(page,'Albums');await page.locator('.catalog-card').filter({hasText:track.album}).first().click();
+  const row=page.locator('.group-track-table .track-row').filter({hasText:track.title});
+  const rowFavorite=row.locator('.favorite');const original=await rowFavorite.getAttribute('aria-pressed');await rowFavorite.click();await expect(rowFavorite).toHaveAttribute('aria-pressed',String(original!=='true'));
+  let dialog=await openNowPlaying(page);const favorite=()=>dialog.getByRole('button',{name:/current track.*favorites|Favorite current track/});
+  await expect(favorite()).toHaveAttribute('aria-pressed',String(original!=='true'));await favorite().click();await expect(favorite()).toHaveAttribute('aria-pressed',original);
+  await dialog.getByRole('button',{name:'Close now playing',exact:true}).click();await expect(rowFavorite).toHaveAttribute('aria-pressed',original);
+  await navigate(page,'Library');await page.locator('#library-search').fill(track.title);await page.locator('.search-form').evaluate(f=>f.requestSubmit());
+  const libraryFavorite=page.locator('.track-row').filter({hasText:track.title}).locator('.favorite');await expect(libraryFavorite).toHaveAttribute('aria-pressed',original);
+  await libraryFavorite.click();dialog=await openNowPlaying(page);await expect(favorite()).toHaveAttribute('aria-pressed',String(original!=='true'));await favorite().click();await expect(favorite()).toHaveAttribute('aria-pressed',original);await dialog.getByRole('button',{name:'Close now playing',exact:true}).click();
+  await expect(libraryFavorite).toHaveAttribute('aria-pressed',original);
+  await page.emulateMedia({reducedMotion:'reduce'});
+  for(const width of [320,768,1440,1920]){
+    await page.setViewportSize({width,height:900});
+    for(const theme of ['dark','light']){
+      if(await page.locator('html').getAttribute('data-theme')!==theme)await page.getByRole('button',{name:'Change color theme',exact:true}).click();
+      dialog=await openNowPlaying(page);await expect(dialog.getByRole('heading',{name:track.title,exact:true})).toBeVisible();await expect(dialog.locator('.np-artist')).toHaveText(track.artist);
+      await expect.poll(()=>dialog.locator('.np-artwork img').evaluate(i=>i.complete&&i.naturalWidth>0)).toBeTruthy();
+      expect(await dialog.evaluate(d=>d.scrollWidth<=d.clientWidth+1)).toBeTruthy();
+      await expect(dialog.getByRole('button',{name:'Play',exact:true})).toBeInViewport();
+      if(width>=768)await expect(dialog.getByRole('slider',{name:'Volume',exact:true})).toBeInViewport();
+      await page.screenshot({path:`test-results/now-playing-${width}-${theme}.png`});
+      await dialog.getByRole('button',{name:'Close now playing',exact:true}).click();
+    }
+  }
+  await page.setViewportSize({width:1440,height:720});dialog=await openNowPlaying(page);
+  await expect(dialog.getByRole('button',{name:'Play',exact:true})).toBeInViewport();
+  await expect(dialog.getByRole('slider',{name:'Volume',exact:true})).toBeInViewport();
+  await expect(dialog.locator('.np-details').getByText(`${(track.size_bytes/1024).toFixed(1)} KiB`,{exact:true})).toBeVisible();
+  await page.screenshot({path:'test-results/now-playing-desktop-short.png'});
+  await dialog.getByRole('button',{name:'Close now playing',exact:true}).click();
+  await page.setViewportSize({width:320,height:780});await page.evaluate(()=>document.documentElement.style.fontSize='24px');dialog=await openNowPlaying(page);
+  expect(await dialog.evaluate(d=>d.scrollWidth<=d.clientWidth+1)).toBeTruthy();await dialog.getByRole('button',{name:'Play',exact:true}).scrollIntoViewIfNeeded();await expect(dialog.getByRole('button',{name:'Play',exact:true})).toBeInViewport();
+  await page.screenshot({path:'test-results/now-playing-phone-large-text.png'});
+  expect(await page.locator('#vela-audio').getAttribute('src')).toBeNull();expect(errors).toEqual([]);
+});
+
 test('AUTH01 real revoked session stops the source and clears private playback UI',async({page})=>{
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   // A dedicated real session prevents revoking another scenario's fixture cookie.
@@ -1315,11 +1467,12 @@ test('AUTH01 real revoked session stops the source and clears private playback U
   await findTrack(page,'Harbor');
   await page.getByRole('button',{name:'Add Harbor to playback queue',exact:true}).click();
   const revoked=await page.request.post('/api/logout',{headers:{'X-CSRF-Token':account.csrf_token}});expect(revoked.ok()).toBeTruthy();
-  await page.getByRole('button',{name:'Show playback queue',exact:true}).click();
-  await page.locator('.queue-row').nth(1).getByRole('button',{name:'Harbor',exact:false}).click();
+  const dialog=await openNowPlaying(page);
+  await dialog.getByRole('button',{name:'Play Harbor from queue',exact:true}).click();
   await expect(page.locator('#username')).toBeVisible();
   await expect(page.getByRole('alert').filter({hasText:'Your session expired'})).toBeVisible();
   await expect(page.locator('#vela-audio')).toHaveCount(0);
+  await expect(dialog).toHaveCount(0);
   expect(errors).toEqual([]);
 });
 
@@ -1327,6 +1480,15 @@ test('private job replies cannot reappear after logout and another account signs
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await openAdminFixture(page);
+  // Hold a genuine denied player mutation through the same real account switch.
+  await findTrack(page,'Drift');await page.getByRole('button',{name:'Play Drift',exact:true}).click();
+  await page.getByRole('button',{name:'Pause',exact:true}).click();
+  let releaseFavorite;const favoriteGate=new Promise(resolve=>releaseFavorite=resolve);let favoriteSeen;const favoriteHeld=new Promise(resolve=>favoriteSeen=resolve);
+  await page.route('**/api/tracks/*/favorite',async route=>{
+    const response=await route.fetch({headers:{...route.request().headers(),'x-csrf-token':'invalid-fixture-token'}});expect(response.ok()).toBeFalsy();favoriteSeen();await favoriteGate;await route.fulfill({response});
+  });
+  const player=await openNowPlaying(page);await player.getByRole('button',{name:/current track.*favorites|Favorite current track/}).click();await favoriteHeld;
+  await player.getByRole('button',{name:'Close now playing',exact:true}).click();
   let release;
   const gate = new Promise(resolve => { release = resolve; });
   let seen;
@@ -1352,6 +1514,10 @@ test('private job replies cannot reappear after logout and another account signs
   await page.getByRole('button', { name: 'Sign in →', exact: true }).click();
   await page.getByRole('button', { name: 'Library', exact: true }).first().click();
   expect((await signedIn).ok()).toBeTruthy();
+  const favoriteReply=page.waitForResponse(response=>response.url().endsWith('/favorite')&&response.request().method()==='POST');releaseFavorite();await favoriteReply;
+  await expect(page.getByRole('dialog',{name:'Now playing',exact:true})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Open now playing',exact:true})).toHaveCount(0);
+  await expect(page.getByRole('alert')).toHaveCount(0);
   const older = page.waitForResponse(response => response.url().includes('/api/jobs?'));
   release();
   await older;

@@ -190,3 +190,7 @@ The new pure order model bounds queue/deck/priorities and traversal history at10
 ## Browser bookmarks/recovery0.7
 
 Snapshots cap serialized output at4MiB and queue size at1000. Media time updates serialize no more than once per5s; explicit edits/seek/pause/lifecycle checkpoints flush immediately. Recovery has three delays,10s HEAD deadlines and an8s watchdog. These are resource-policy bounds, not measured startup/seek/CPU/FPS claims. Browser tests exercise actual decode and position tolerances, not physical audible start latency or playback superiority. Large-queue serialization and cross-browser profiling remain outstanding.
+
+## Now Playing0.8 measurement scope
+
+The view projects existing root state; it issues no new catalog/stream request on open and materializes at most five preview entries from the bounded queue. NP01 checks actual audio-node/source/generation continuity and zero additional stream requests on open. This is a correctness/resource invariant, not a playback-latency or frame-rate benchmark. No new p50/p95/p99, gapless, CPU or memory performance claim is made for0.8; use the reproducible catalog benchmarks above for their stated SQL-only scope.

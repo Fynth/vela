@@ -2,6 +2,8 @@
 
 Audit2026-10-16: actual main HEADb7033e4, version0.4.0; clean initial tree. Baseline rerun:97 Rust tests,16 real Chromium scenarios including the opted-in licensed import, fmt/strict native+WASM Clippy and release builds passed. Existing development data contains one account and was backed up/restored separately. Status applies to the described scope, not the whole reference product. VERIFIED requires executed evidence; PARTIAL means usable subset or current implementation awaiting checks; NOT_STARTED means absent; BLOCKED means an actual external dependency prevents progress. All native desktop/mobile clients below are NOT_STARTED; a tested Linux server is not a desktop client.
 
+Current0.8 increment (2026-10-17): root Now Playing verified with110 Rust tests,33 Chromium scenarios, native/WASM strict checks and responsive images; detailed evidence and remaining platform limits are in PROGRESS. The audit paragraph above is the preserved starting baseline, not the current version.
+
 | Feature / priority | Status | Existing/proposed location | Acceptance / tests | Platform / rights limits |
 | --- | --- | --- | --- | --- |
 | Setup/auth/private accounts P0 | VERIFIED | core/auth.rs; server/lib.rs; web/main.rs | G01, TCP auth/CSRF/ownership; browser01 | Chromium web; no public registration |
@@ -20,7 +22,8 @@ Audit2026-10-16: actual main HEADb7033e4, version0.4.0; clean initial tree. Base
 | Jobs/progress P1 | VERIFIED | core/jobs.rs; web/jobs.rs | Existing mixed-page/TCP/browser14/15/30 | Owned jobs; no SSE or global admin queue |
 | Metadata/artwork P1 | PARTIAL | media/metadata.rs; web/metadata.rs | Existing unchanged-source/revision tests | No write-back/bulk/enrichment/recording matching |
 | Context menus/info P1 | PARTIAL | web/experience.rs (0.5) | EXP04 actual next/last/favorite handlers and technical details; general context menus remain partial | Actual local fields; unavailable actions omitted |
-| Full-screen/right Now Playing P1 | NOT_STARTED | web future playback view | G02 layout/state sync | Persistent bottom bar/queue exist |
+| Full Now Playing P0 | VERIFIED | web/now_playing.rs, now-playing.css, root main.rs, player.js | NP01–03/G02/G13: real audio continuity, modal focus, transport/Media Session, metadata/favorites/preview, stale replies; NET02/AUTH01 expiry/recovery | Chromium web; phone full-height/desktop modal; reported source properties, no native certification |
+| Persistent right Now Playing/context panel P1 | NOT_STARTED | future shared shell view | G02 stable panel sizing/context navigation | Full modal and persistent bar exist |
 | History/consent/export P1 | NOT_STARTED | future listening service/migration | G07/G14 event dedup, privacy/delete/export | No fabricated played minutes |
 | Deterministic recommendations/radio P1 | NOT_STARTED | future media application service | G06 sparse library/reasons/authorization | Accessible files only; no paid AI/catalog |
 | Weekly/daily/rotation mixes P1 | NOT_STARTED | future durable listening jobs | G06 real refresh/materialization/diversity | Requires real history/consent first |
@@ -45,17 +48,17 @@ Audit2026-10-16: actual main HEADb7033e4, version0.4.0; clean initial tree. Base
 
 ## Ten current experience gaps, in order
 
-The baseline Home/local Search/shell, stale-play guard, occurrence order and browser resume/recovery increments are now implemented to the verified scopes above. Keep their EXP/PLAY/RES/NET/AUTH regressions at every merge. The remaining prioritized gaps are:
+The baseline Home/local Search/shell, stale-play guard, occurrence order browser resume/recovery and root Now Playing increments are now implemented to the verified scopes above. Keep their EXP/PLAY/RES/NET/AUTH regressions at every merge. The remaining prioritized gaps are:
 
-1. P0 complete Now Playing and rich track context — apps/web/src/main.rs, icons.rs, style.css; EXP06/G02: shared-state desktop/phone view, seek/favorite/queue/quality actions and uninterrupted navigation.
-2. P0 broader playback/accessibility verification — apps/web/src/browser_player.rs, player.js and tests/browser; G07/G13: real Firefox/Safari, keyboard/screen-reader audit, pending seek/expiry/reconnect and large-queue rendering. Current Chromium evidence does not certify these targets.
-3. P1 private listened-time foundation — proposed crates/core/src/listening.rs, domain DTOs/migration and root player; G07/G14: consent/opt-out, deduplicated meaningful duration, export/delete, owner isolation and recovery.
-4. P1 personalized Home/radio/mixes — proposed crates/media/src/discovery.rs and apps/web/src/experience.rs; G06: sparse-library deterministic ranking/diversity/reasons from actual accessible IDs, no fake history.
-5. P1 richer catalog/navigation — crates/media/src/catalog.rs, crates/domain/src/lib.rs and web/main.rs; G04: edition/recording/contributor identity, full-context pagination, technical variants and responsive large-list behavior.
-6. P1 playlist organization/actions and media sharing — crates/core/src/playlists.rs, web/main.rs/experience.rs; G05: folders/pins/cover/context menus, queue save/drag order, revisioned collaboration, invitations and separately revoked media grants.
-7. P1 device registry/handoff and native desktop — proposed playback-session service/WS and desktop adapter; G08: two real clients, exact authorization, sequence/idempotency, accepted transfer before stopping origin and Linux packaging/media keys.
-8. P1 mobile/offline — proposed platform/android and platform/ios bridges plus typed local manifests; G09: actual native background service, hashes/quotas/resume, airplane-mode audio and secure credentials. Dioxus WASM is not native validation.
-9. P1 multi-server/federation/rooms — proposed catalog adapters and authorized transports; G11/G12: two instances/clients, explicit origin IDs/rights, bounded search, remote removal and private-by-default signed discovery/control.
+1. P0 broader playback/accessibility verification — apps/web/src/browser_player.rs, player.js and tests/browser; G07/G13: real Firefox/Safari, keyboard/screen-reader audit, pending seek/expiry/reconnect and large-queue rendering. Current Chromium evidence does not certify these targets.
+2. P1 private listened-time foundation — proposed crates/core/src/listening.rs, domain DTOs/migration and root player; G07/G14: consent/opt-out, deduplicated meaningful duration, export/delete, owner isolation and recovery.
+3. P1 personalized Home/radio/mixes — proposed crates/media/src/discovery.rs and apps/web/src/experience.rs; G06: sparse-library deterministic ranking/diversity/reasons from actual accessible IDs, no fake history.
+4. P1 richer catalog/navigation — crates/media/src/catalog.rs, crates/domain/src/lib.rs and web/main.rs; G04: edition/recording/contributor identity, full-context pagination, technical variants and responsive large-list behavior.
+5. P1 playlist organization/actions and media sharing — crates/core/src/playlists.rs, web/main.rs/experience.rs; G05: folders/pins/cover/context menus, queue save/drag order, revisioned collaboration, invitations and separately revoked media grants.
+6. P1 device registry/handoff and native desktop — proposed playback-session service/WS and desktop adapter; G08: two real clients, exact authorization, sequence/idempotency, accepted transfer before stopping origin and Linux packaging/media keys.
+7. P1 mobile/offline — proposed platform/android and platform/ios bridges plus typed local manifests; G09: actual native background service, hashes/quotas/resume, airplane-mode audio and secure credentials. Dioxus WASM is not native validation.
+8. P1 multi-server/federation/rooms — proposed catalog adapters and authorized transports; G11/G12: two instances/clients, explicit origin IDs/rights, bounded search, remote removal and private-by-default signed discovery/control.
+9. P1 complete track context and navigation — apps/web/src/now_playing.rs, experience.rs and main.rs; G02/G04: accessible general context menus, artist/album navigation, credits when known and optional right panel with shared state. Current full player deliberately omits unsupported lyrics/devices/effects.
 10. P1 interoperability and release hardening — proposed OpenSubsonic transport, lyrics/statistics/export services, deploy/CI/docs; real client contracts, authorized lyrics, accurate private summaries, backup restore, container/ARM/native matrix and remaining license-notice review.
 
 G01/G04/G05/G10/G14 have verified existing subsets, not complete golden-demo acceptance. G02/G03/G13 are the current0.5 increment. G06/G08/G09/G11/G12 remain NOT_STARTED. Native Vela features are separated above from future authorized integrations; missing remote media must never be silently substituted. No experimental or unavailable feature receives a decorative active button.

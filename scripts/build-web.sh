@@ -20,5 +20,5 @@ else
 fi
 mkdir -p dist/pkg
 "$wasm_cli" "target/wasm32-unknown-unknown/$wasm_dir/vela-web.wasm" --target web --out-dir dist/pkg --out-name vela_web
-cp apps/web/index.html apps/web/style.css apps/web/bootstrap.js apps/web/player.js apps/web/vela.svg dist/
+cp apps/web/index.html apps/web/style.css apps/web/now-playing.css apps/web/bootstrap.js apps/web/player.js apps/web/vela.svg dist/
 echo 'Web assets built in dist/'

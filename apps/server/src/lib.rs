@@ -250,6 +250,7 @@ async fn protection(State(state): State<AppState>, req: Request, next: Next) -> 
         path,
         "/" | "/index.html"
             | "/style.css"
+            | "/now-playing.css"
             | "/bootstrap.js"
             | "/player.js"
             | "/vela.svg"
