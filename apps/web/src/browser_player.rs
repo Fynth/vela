@@ -157,6 +157,19 @@ impl BrowserPlayer {
     pub fn position(&self) -> f64 {
         self.0.borrow().position
     }
+    /// A paused restore/pending retry has a bookmark but no usable media clock.
+    pub fn elapsed(&self) -> f64 {
+        let s = self.0.borrow();
+        if s.loaded
+            && s.pending.is_none()
+            && let Some(element) = self.valid(s.generation).filter(|e| {
+                e.ready_state() >= 1 && e.error().is_none() && e.current_time().is_finite()
+            })
+        {
+            return element.current_time();
+        }
+        s.position
+    }
     pub fn wants_play(&self) -> bool {
         self.0.borrow().intent
     }

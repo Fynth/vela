@@ -1146,6 +1146,15 @@ test('RES01 restored duplicate occurrence keeps position context and preferences
   await expect(page.locator('.queue-row').nth(1)).toHaveClass(/current/);
   await expect(page.locator('.queue-context')).toHaveText('Playing from Search results');
   await expect(page.getByRole('button',{name:'Shuffle',exact:true}).first()).toHaveAttribute('aria-pressed','true');
+  await page.getByRole('button',{name:'Shuffle',exact:true}).first().click();
+  // A paused restored bookmark has no src: sequential Previous must use its saved elapsed time.
+  await page.getByRole('button',{name:'Previous track',exact:true}).click();
+  await expect(page.locator('.queue-row').nth(1)).toHaveClass(/current/);
+  expect(await page.locator('#vela-audio').getAttribute('src')).toBeNull();
+  await expect(page.getByRole('slider',{name:'Playback position',exact:true})).toHaveValue('0');
+  expect(streams).toBe(0);
+  await page.getByRole('slider',{name:'Playback position',exact:true}).evaluate(e=>{e.value='11';e.dispatchEvent(new Event('input',{bubbles:true}));});
+
   await page.getByRole('button',{name:'Play',exact:true}).click();
   await expect(page.locator('#vela-audio')).toHaveJSProperty('paused',false);
   await expect.poll(()=>page.locator('#vela-audio').evaluate(a=>a.currentTime)).toBeGreaterThanOrEqual(11);

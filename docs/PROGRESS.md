@@ -1,5 +1,20 @@
 # Verified progress
 
+## Restored-clock follow-up0.7.1 (2026-10-16)
+
+The0.7.0 source26eec9459dc6d8ef068d9939cb7d0be3c90b3445 was packaged locally and extracted-package startup/default assets/schema7/SIGTERM exit0 and both SHA256 entries passed (resume-package{,-verify,-checksums}.log). Its native/source archives remain under target/releases; it was not installed over the active0.6.1 server or externally published.
+
+During final review, a sequential Previous on a paused restored occurrence was found to use the empty HTMLMediaElement's0s clock instead of the saved11s position. RES01 was extended to disable restored shuffle, press Previous before loading any source, require the same duplicate row/0s/no media request, then set a pending11s seek and explicitly resume. Running the extended test against the actual0.7.0 binary/WASM reproduced the wrong selected row:22 passed,1 failed,7 skipped. Evidence:resume-restored-previous-sequential-before-fix.log and resume-previous-before-fix/. The earlier shuffle-only variant passed because its first-history boundary independently seeks to0; the sequential branch is now explicit.
+
+Version0.7.1 adds BrowserPlayer::elapsed: use the matching metadata-ready error-free active element clock, otherwise the bookmark. PlaybackUi supplies this to the unchanged order model. No schema/API/storage/dependency pin changed; workspace/lock versions are0.7.1.
+
+Final patch checks: fmt; strict native/all-target and wasm32 Clippy;110 Rust tests; native release; release WASM/static build; locked cargo-deny policy all passed (target/checks/resume-patch-{fmt,clippy,clippy-wasm,rust,native,web,deny}.log). The complete real Chromium suite passed30/30 in59.9s including the new sequential branch, all prior recovery/expiry/playlist/order/navigation/ingest/security checks and licensed live import (resume-patch-browser.log). The9 Python tests passed earlier in this session with unchanged tool code (resume-python.log). Docker info actually failed because /var/run/docker.sock is absent (resume-docker.log); no container/native-client/mobile/other-browser claim follows.
+
+Eleven responsive Home/recovery images are retained in target/checks/resume-patch-final-screens. The phone44px retry/viewport/no-overflow checks passed in both themes; these are Chromium visual/interaction checks, not screen-reader or physical audio certification. The parity matrix now lists ten actual remaining gaps instead of repeating resolved baseline issues. Next work remains root-coordinated Now Playing, then private deduplicated listening events and real discovery.
+
+The verified0.7.1 source is ready for local archive/frozen-runtime installation on the unchanged user data; exact installation evidence follows below after execution.
+
+
 ## Browser resume and recovery0.7.0 (2026-10-16)
 
 Continued from clean main df24a13, runtime/source e69120c and the frozen0.6.1 loopback server. Seven existing crates remain; all workspace versions are0.7.0. No database migration, storage semantics, server API or third-party dependency pin changed; the existing web-sys dependency enables MediaError. One actual read-only playback reviewer delivered findings; its subsequent implementation turn hit the environment usage limit without delivering a file. Main implemented and integrated all code sequentially.
@@ -20,7 +35,7 @@ Continued from clean main df24a13, runtime/source e69120c and the frozen0.6.1 lo
 - `python3 -m unittest discover -s tests -p 'test_*.py'`:9 passed (resume-python.log). Pre-work private backup before-0.7.0-work-20261016T164541Z.tar.gz restored into a disposable isolated directory: schema7,1 account,20 tracks,0 playlists, quick_check ok,0 foreign-key errors (resume-before-backup.json). Runtime was reinspected immediately before packaging: the same real counts and frozen0.6.1 executable (resume-before-runtime.json).
 - Eight Home phone/tablet/desktop/ultrawide dark/light screenshots and three actual exhausted-recovery screenshots were generated again. Desktop and320px recovery dark/light were visually inspected; no horizontal overflow and retry remains in viewport with a44px target. Files are copied to target/checks/resume-final-screens. In-app Browser reported no available browser, so only isolated Playwright Chromium was used. No physical audible output, screen-reader certification, Firefox/Safari, native/mobile/background or Docker runtime claim. Shutdown/worker recovery tools were executed in the earlier0.5 checkpoint; those code paths are unchanged and were not represented as newly run here. No new benchmark/superiority claim.
 
-Package/frozen runtime checkpoint follows after verification. Next prioritized autonomous slice: root-coordinated Now Playing and accessible richer track context, then privacy-controlled deduplicated listened-time events before truthful recents/radio/mixes. Native/offline/device handoff/rooms/multi-server/federation remain absent as recorded in the parity matrix.
+The0.7.0 local package was verified and retained; the0.7.1 follow-up above is the intended active runtime. Next prioritized autonomous slice: root-coordinated Now Playing and accessible richer track context, then privacy-controlled deduplicated listened-time events before truthful recents/radio/mixes. Native/offline/device handoff/rooms/multi-server/federation remain absent as recorded in the parity matrix.
 
 
 ## Current checkpoint — playlist context fix0.6.1 (2026-10-16)

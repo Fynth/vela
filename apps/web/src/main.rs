@@ -453,7 +453,7 @@ fn play_queue(mut new_queue: Vec<Track>, at: usize, context: PlaybackContext, mu
 }
 fn advance(command: Command, mut ui: PlaybackUi) {
     synchronize_order(ui);
-    let elapsed = audio().map_or(0.0, |p| p.current_time());
+    let elapsed = ui.engine.peek().elapsed();
     let entropy = (js_sys::Math::random() * (u32::MAX as f64 + 1.0)) as u32;
     let transition = ui.order.write().transition(command, elapsed, entropy);
     match transition {
