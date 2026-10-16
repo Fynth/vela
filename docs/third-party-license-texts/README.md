@@ -14,6 +14,7 @@ The0.4.0 review reduced metadata-only gaps from12 to6:
 The independent repeat of the winapi comparison matched1390 i686 files/50,930,577 bytes and1419 x86_64 files/53,157,228 bytes, with no unmatched or changed file. Only Cargo-generated normalized Cargo.toml and .cargo-ok were excluded; Cargo.toml.orig was compared with upstream Cargo.toml. [The report](winapi-provenance.json) retains pinned subtree IDs and counts. [The read-only helper](verify_winapi_provenance.py) reproduces the comparison using bounded GitHub tree requests and registry sources named by saved Cargo metadata:
 
 ```bash
+mkdir -p target/checks
 cargo metadata --locked --offline --format-version=1 > target/checks/jobs-cargo-metadata.json
 python3 docs/third-party-license-texts/verify_winapi_provenance.py --metadata target/checks/jobs-cargo-metadata.json
 ```
