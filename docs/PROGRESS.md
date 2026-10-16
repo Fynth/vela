@@ -28,7 +28,7 @@ An initial current-data snapshot was restored/checked before development (target
 
 The feature matrix, product flows, design system, ADR0009 and contracts document exact verified subsets. Home/Search/next-last are usable but the full consumer roadmap remains incomplete. Next highest-priority slice: a framework-free queue/playback transition model, fair shuffle previous/forward behavior, deterministic previous-button seek and recovery/resume tests; then root-coordinated Now Playing and privacy-controlled listening events for real radio/mixes. Exact position resume, native/offline, device handoff, rooms, multi-server and federation remain absent. No performance-superiority or new latency measurement is claimed.
 
-The earlier progress below is historical evidence, not the current runtime/account state. Local0.5 native/source archive verification will be recorded after the clean checkpoint is packaged.
+The earlier progress below is historical evidence, not the current runtime/account state. Local0.5 runtime/source checkpoint3894e4e67736fa558c44a0541ddad44aee2c29dd was packaged into target/releases/vela-0.5.0-{x86_64-unknown-linux-gnu,source}.tar.gz. scripts/verify_package.py extracted the native artifact and verified default startup, version/first-run assets/WASM, schema7 and clean SIGTERM. Both0.5 checksums and all preserved0.1–0.4 manifests passed. readelf reports highest GLIBC symbol2.34; actual runtime testing covers this x86_64 Linux host only. Logs:experience-{package,package-verify,checksums}.log. No archive was published externally.
 
 ## Historical0.4 checkpoint
 
