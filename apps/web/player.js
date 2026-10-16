@@ -1,8 +1,29 @@
 /* The native audio element owns decoding, buffering and platform media controls. */
 (() => {
   const audio = () => document.getElementById("vela-audio");
+  const destinations = new Set(["home", "search", "library", "albums", "artists", "favorites", "playlists", "imports", "jobs", "settings"]);
+  document.addEventListener("vela-route", ({detail}) => {
+    if (destinations.has(detail) && location.hash !== "#" + detail) history.pushState(null, "", "#" + detail);
+    document.querySelectorAll("details.track-info-menu[open]").forEach(menu => menu.removeAttribute("open"));
+  });
+  window.addEventListener("hashchange", () => {
+    const destination = location.hash.slice(1);
+    if (destinations.has(destination)) document.querySelector(`[data-destination="${destination}"]`)?.click();
+  });
+  document.addEventListener("keydown", event => {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k" && !document.querySelector('[role="dialog"]')) {
+      const destination = document.querySelector('[data-destination="search"]');
+      if (destination) { event.preventDefault(); destination.click(); requestAnimationFrame(() => document.getElementById("global-search")?.focus()); }
+    }
+    if (event.key === "Escape") document.querySelectorAll("details.track-info-menu[open]").forEach(menu => menu.removeAttribute("open"));
+  });
+  window.addEventListener("resize", () => { if (innerWidth > 620) document.querySelector('[aria-labelledby="more-title"] [data-dialog-dismiss]')?.click(); });
+  document.addEventListener("click", event => {
+    document.querySelectorAll("details.track-info-menu[open]").forEach(menu => { if (!menu.contains(event.target)) menu.removeAttribute("open"); });
+  });
+
   document.addEventListener("keydown", (event) => {
-    if (document.querySelector('[role="dialog"]') || event.altKey || event.ctrlKey || event.metaKey || /INPUT|TEXTAREA|SELECT|BUTTON|A/.test(event.target.tagName) || event.target.isContentEditable) return;
+    if (document.querySelector('[role="dialog"]') || event.altKey || event.ctrlKey || event.metaKey || /INPUT|TEXTAREA|SELECT|BUTTON|A|SUMMARY/.test(event.target.tagName) || event.target.isContentEditable) return;
     if (event.code === "Space") { const button = document.getElementById("player-toggle"); if (button) { event.preventDefault(); button.click(); } }
     if (event.code === "ArrowRight" && audio()) { event.preventDefault(); audio().currentTime = Math.min(audio().duration || 0, audio().currentTime + 10); }
     if (event.code === "ArrowLeft" && audio()) { event.preventDefault(); audio().currentTime = Math.max(0, audio().currentTime - 10); }
@@ -36,7 +57,7 @@
   }).observe(document.getElementById("main"), { childList: true, subtree: true });
   document.addEventListener("keydown", (event) => {
     if (!activeDialog) return;
-    if (event.key === "Escape") activeDialog.querySelector('button[aria-label="Close upload dialog"]:not(:disabled)')?.click();
+    if (event.key === "Escape") activeDialog.querySelector('[data-dialog-dismiss], button[aria-label="Close upload dialog"]:not(:disabled)')?.click();
     if (event.key !== "Tab") return;
     const controls = focusable(activeDialog);
     const first = controls[0];

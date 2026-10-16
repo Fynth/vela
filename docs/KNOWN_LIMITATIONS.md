@@ -1,5 +1,9 @@
 # Unsupported and unverified functionality
 
+The0.5 listener increment adds a real Home, separate local Search, five-tab phone navigation with a keyboard-controlled More sheet, and next/last queue actions. This is not complete consumer-app parity. Home uses current additions/favorites/albums/playlists, not listening history or personalized mixes. Search returns at most8 per category without pagination; group/playlist matching is ASCII case-insensitive literal substring, track matching is FTS. No typo/transliteration/Unicode collation, search history, remote search or group-query latency guarantee exists. The sidebar shows at most6 playlist shortcuts. Exact playback position and fair shuffle history still need implementation; queue occurrence/order/cursor persist and route changes retain active audio. General right-click menus, full-screen/right Now Playing and a complete design-system component suite remain partial/absent.
+
+Chromium checks cover320/768/1440/1920px dark/light and keyboard More dismissal/containment, not screen-reader certification or all browser/OS combinations. The in-app browser runtime reported no available browser; isolated Playwright Chromium was used against actual native/WASM builds. One requested parallel reviewer hit the environment usage limit without delivering code; implementation/integration continued in the main agent.
+
 This is an early functional slice. The complete master roadmap is not delivered. Consult PROGRESS for executed checks; source/build recipes are not proof of platform runtime success.
 
 - No native desktop/mobile packages or audio services; no Android/iOS hardware validation, offline music, device transfer, remote control, PWA cache, background audio or secure native credential storage.

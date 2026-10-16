@@ -64,7 +64,7 @@ fn number(value: &str, max: i64, name: &str) -> Result<Option<i64>, String> {
 }
 
 pub fn append_query(url: &mut String, key: &str, value: &str) {
-    url.push('&');
+    url.push(if url.contains('?') { '&' } else { '?' });
     url.push_str(key);
     url.push('=');
     url.push_str(

@@ -1,6 +1,21 @@
 //! Framework-independent API contracts. IDs are opaque UUID strings.
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SearchQuery {
+    pub q: String,
+}
+
+/// Bounded results from owned media and explicitly granted playlist metadata.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SearchResults {
+    pub tracks: Vec<Track>,
+    pub albums: Vec<AlbumSummary>,
+    pub artists: Vec<ArtistSummary>,
+    pub playlists: Vec<PlaylistSummary>,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum JobKind {
@@ -279,7 +294,7 @@ pub struct ImportJob {
     pub created_at: i64,
     pub updated_at: i64,
 }
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PlaylistSummary {
     pub id: String,
     pub name: String,
@@ -326,7 +341,7 @@ pub struct ShareResponse {
     pub token: String,
     pub expires_at: i64,
 }
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LibraryStats {
     pub tracks: i64,
     pub albums: i64,

@@ -1,5 +1,11 @@
 # Authoritative architecture
 
+## Listening experience increment (0.5.0)
+
+Keep the seven-crate boundary and schema7. SearchQuery/SearchResults are domain DTOs; media owns bounded track/group matching, core owns collaborator-aware playlist search, and GET /api/search only authenticates/validates/composes. Each category is limited8 in SQL. Group/playlist names use parameterized literal ASCII-case-insensitive substrings; tracks retain FTS. There is no federated/global search or cross-service snapshot guarantee.
+
+Web client.rs owns typed same-origin transport; new Home/Search pages own cancellable request groups and exact session/query/generation/lifetime checks. Presentation receives root Actions rather than accessing storage. Home uses real bounded newest/favorite/group/playlist APIs. Root App retains the only audio element, queue occurrence/cursor and playback handlers while shell.rs handles navigation. Closed hash destinations support browser history without putting credentials in routes. Audio play promises are guarded by element/source/request identity; navigation never replaces the audio source. ADR0009 and PRODUCT_SPEC define the incremental consumer UX. Existing modules and API contracts remain compatible.
+
 Vela is a modular monolith: one Axum/Tokio process, one local SQLite database, immutable managed media and generated web assets. Edition2024; Rust1.99.0 pinned. No Redis, mandatory FFmpeg, external search engine or cloud service. Dioxus0.7.10 compiles to WebAssembly; HTMLMediaElement owns browser decoding. Domain contracts do not depend on HTTP, SQL or UI frameworks.
 
 | Boundary | Current responsibilities |

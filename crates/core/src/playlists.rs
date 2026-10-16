@@ -41,6 +41,17 @@ impl PlaylistService {
         let rows=sqlx::query("SELECT p.*, (SELECT COUNT(*) FROM playlist_items i WHERE i.playlist_id=p.id) item_count, (p.owner_id=? OR COALESCE(c.can_edit,0)) can_edit FROM playlists p LEFT JOIN playlist_collaborators c ON c.playlist_id=p.id AND c.user_id=? WHERE p.owner_id=? OR c.user_id IS NOT NULL ORDER BY p.created_at DESC,p.id LIMIT 200").bind(&user.id).bind(&user.id).bind(&user.id).fetch_all(&self.pool).await?;
         Ok(rows.iter().map(summary).collect())
     }
+    /// Search only owned or explicitly granted names. A result grants no media.
+    pub async fn search(&self, user: &User, query: &str) -> Result<Vec<PlaylistSummary>> {
+        if query.len() > 256 || query.trim().is_empty() || query.chars().any(char::is_control) {
+            return Err(Error::Invalid(
+                "Search must contain 1–256 bytes without control characters".into(),
+            ));
+        }
+        let rows = sqlx::query("SELECT p.*, (SELECT COUNT(*) FROM playlist_items i WHERE i.playlist_id=p.id) item_count, (p.owner_id=? OR COALESCE(c.can_edit,0)) can_edit FROM playlists p LEFT JOIN playlist_collaborators c ON c.playlist_id=p.id AND c.user_id=? WHERE (p.owner_id=? OR c.user_id IS NOT NULL) AND instr(lower(p.name),lower(?))>0 ORDER BY p.name COLLATE NOCASE,p.id LIMIT 8")
+            .bind(&user.id).bind(&user.id).bind(&user.id).bind(query.trim()).fetch_all(&self.pool).await?;
+        Ok(rows.iter().map(summary).collect())
+    }
     pub async fn detail(&self, user: &User, id: &str) -> Result<PlaylistDetail> {
         let row=sqlx::query("SELECT p.*, (SELECT COUNT(*) FROM playlist_items i WHERE i.playlist_id=p.id) item_count, (p.owner_id=? OR COALESCE(c.can_edit,0)) can_edit FROM playlists p LEFT JOIN playlist_collaborators c ON c.playlist_id=p.id AND c.user_id=? WHERE p.id=? AND (p.owner_id=? OR c.user_id IS NOT NULL)").bind(&user.id).bind(&user.id).bind(id).bind(&user.id).fetch_optional(&self.pool).await?.ok_or(Error::NotFound)?;
         self.detail_for(summary(&row), Some(&user.id)).await

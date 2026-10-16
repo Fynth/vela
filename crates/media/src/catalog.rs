@@ -11,10 +11,10 @@ use crate::{MediaService, TRACK_SELECT, track_from_row};
 #[error("invalid catalog cursor")]
 pub struct InvalidCatalogCursor;
 
-const ALBUM_SELECT: &str = "SELECT b.id,b.title,ar.name AS artist,b.artist_id,NULLIF(b.release_year,0) AS year,(SELECT COUNT(*) FROM tracks t WHERE t.owner_id=b.owner_id AND t.album_id=b.id) AS track_count,(SELECT COALESCE(SUM(t.duration_ms),0) FROM tracks t WHERE t.owner_id=b.owner_id AND t.album_id=b.id) AS duration_ms,(SELECT t.artwork_id FROM tracks t WHERE t.owner_id=b.owner_id AND t.album_id=b.id AND t.artwork_id IS NOT NULL ORDER BY COALESCE(t.disc_number,1),COALESCE(t.track_number,2147483647),t.id LIMIT 1) AS artwork_id FROM albums b JOIN artists ar ON ar.id=b.artist_id AND ar.owner_id=b.owner_id";
-const ALBUM_VISIBLE: &str =
+pub(super) const ALBUM_SELECT: &str = "SELECT b.id,b.title,ar.name AS artist,b.artist_id,NULLIF(b.release_year,0) AS year,(SELECT COUNT(*) FROM tracks t WHERE t.owner_id=b.owner_id AND t.album_id=b.id) AS track_count,(SELECT COALESCE(SUM(t.duration_ms),0) FROM tracks t WHERE t.owner_id=b.owner_id AND t.album_id=b.id) AS duration_ms,(SELECT t.artwork_id FROM tracks t WHERE t.owner_id=b.owner_id AND t.album_id=b.id AND t.artwork_id IS NOT NULL ORDER BY COALESCE(t.disc_number,1),COALESCE(t.track_number,2147483647),t.id LIMIT 1) AS artwork_id FROM albums b JOIN artists ar ON ar.id=b.artist_id AND ar.owner_id=b.owner_id";
+pub(super) const ALBUM_VISIBLE: &str =
     "EXISTS(SELECT 1 FROM tracks t WHERE t.owner_id=b.owner_id AND t.album_id=b.id)";
-const ARTIST_VISIBLE: &str = "(EXISTS(SELECT 1 FROM tracks t WHERE t.owner_id=ar.owner_id AND t.artist_id=ar.id) OR EXISTS(SELECT 1 FROM albums b JOIN tracks t ON t.album_id=b.id AND t.owner_id=b.owner_id WHERE b.owner_id=ar.owner_id AND b.artist_id=ar.id))";
+pub(super) const ARTIST_VISIBLE: &str = "(EXISTS(SELECT 1 FROM tracks t WHERE t.owner_id=ar.owner_id AND t.artist_id=ar.id) OR EXISTS(SELECT 1 FROM albums b JOIN tracks t ON t.album_id=b.id AND t.owner_id=b.owner_id WHERE b.owner_id=ar.owner_id AND b.artist_id=ar.id))";
 // UNION keeps a track credited both directly and as album artist only once.
 // Each arm can start from its indexed owner/artist association.
 const ARTIST_TRACKS: &str = "SELECT t.id,t.album_id,t.artwork_id FROM tracks t WHERE t.owner_id=ar.owner_id AND t.artist_id=ar.id UNION SELECT t.id,t.album_id,t.artwork_id FROM albums b JOIN tracks t ON t.album_id=b.id AND t.owner_id=b.owner_id WHERE b.owner_id=ar.owner_id AND b.artist_id=ar.id";
@@ -240,7 +240,7 @@ fn validate_cursor(cursor: &str) -> Result<String> {
         .map_err(|_| InvalidCatalogCursor.into())
 }
 
-fn artist_select() -> String {
+pub(super) fn artist_select() -> String {
     format!(
         "SELECT ar.id,ar.name,(SELECT COUNT(*) FROM ({ARTIST_TRACKS})) AS track_count,(SELECT COUNT(DISTINCT album_id) FROM ({ARTIST_TRACKS})) AS album_count,(SELECT artwork_id FROM ({ARTIST_TRACKS}) WHERE artwork_id IS NOT NULL ORDER BY id LIMIT 1) AS artwork_id FROM artists ar"
     )
@@ -275,7 +275,7 @@ fn track_page(rows: &[SqliteRow], limit: usize) -> Result<TrackPage> {
     Ok(TrackPage { items, next_cursor })
 }
 
-fn album_from_row(row: &SqliteRow) -> Result<AlbumSummary> {
+pub(super) fn album_from_row(row: &SqliteRow) -> Result<AlbumSummary> {
     Ok(AlbumSummary {
         id: row.try_get("id")?,
         title: row.try_get("title")?,
@@ -288,7 +288,7 @@ fn album_from_row(row: &SqliteRow) -> Result<AlbumSummary> {
     })
 }
 
-fn artist_from_row(row: &SqliteRow) -> Result<ArtistSummary> {
+pub(super) fn artist_from_row(row: &SqliteRow) -> Result<ArtistSummary> {
     Ok(ArtistSummary {
         id: row.try_get("id")?,
         name: row.try_get("name")?,

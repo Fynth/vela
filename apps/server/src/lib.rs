@@ -348,6 +348,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/artists/{id}", get(artist))
         .route("/api/artists/{id}/tracks", get(artist_tracks))
         .route("/api/stats", get(stats))
+        .route("/api/search", get(search))
         .route("/api/jobs", get(background_jobs))
         .route("/api/catalog/filters", get(catalog_facets))
         .route("/api/upload", upload)
@@ -538,6 +539,31 @@ async fn catalog_facets(
 }
 async fn stats(State(s): State<AppState>, Auth(auth): Auth) -> Result<Json<LibraryStats>> {
     Ok(Json(s.media.stats(&auth.response.user.id).await?))
+}
+async fn search(
+    State(s): State<AppState>,
+    Auth(auth): Auth,
+    query: std::result::Result<Query<SearchQuery>, axum::extract::rejection::QueryRejection>,
+) -> Result<Json<SearchResults>> {
+    let Query(query) = query.map_err(|_| invalid("Invalid search query"))?;
+    let media = s
+        .media
+        .search_catalog(&auth.response.user.id, &query.q)
+        .await
+        .map_err(|error| {
+            if error.is::<vela_media::search::InvalidSearchQuery>() {
+                invalid("Invalid search query")
+            } else {
+                error.into()
+            }
+        })?;
+    let playlists = s.playlists.search(&auth.response.user, &query.q).await?;
+    Ok(Json(SearchResults {
+        tracks: media.tracks,
+        albums: media.albums,
+        artists: media.artists,
+        playlists,
+    }))
 }
 async fn background_jobs(
     State(s): State<AppState>,

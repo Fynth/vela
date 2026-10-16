@@ -19,11 +19,13 @@ Status meanings: implemented=source exists; verified=checks recorded in PROGRESS
 
 ## Next ordered slices
 
-1. Preserve the0.4.0 job-center checkpoint and its executed verification evidence alongside earlier source/native archives. Keep immutable source copies, private roots and metadata-edit preservation when expanding storage modes. Crash-safe orphan reconciliation remains outstanding.
-2. Complete library organization: retain typed filters/keyset ordering and the real import/scan job center, then add revision-safe batch metadata editing. Direct-reference external storage needs its own lifetime/authorization/backup contract; current scans intentionally copy into managed storage.
-3. Complete local sharing administration: invites with expiry/acceptance, narrow separate stream/download grants, near-real-time revision updates. Keep metadata links view-only by default.
-4. Source adapters: ZIP with zip-slip/bomb limits, administrator-trusted WebDAV and S3 (separate egress policy), Archive.org permitted assets, explicitly licensed catalogs, RSS/episodes as podcast content. Playlist metadata imports require authorized providers, never commercial stream extraction.
-5. Multi-server/native adapter and two-server E2E; then ActivityPub interoperability/security protocol work. Avoid new empty crates before useful implementations exist.
+The2026-10-16 consumer-experience brief supersedes the earlier batch-metadata-first ordering. See SPOTIFY_PARITY_MATRIX for the broader phased backlog and concrete ten-gap audit.
+
+1. Preserve0.5 verified Home/local Search/shared shell/play-next increment and existing ingest/share/security workflows. One root audio node, bounded real content, private access and responsive keyboard navigation are required at every subsequent merge.
+2. Playback correctness: extract deterministic queue/repeat/shuffle transitions and test occurrence identity, fair previous/forward behavior, previous-button seek, persistence and network/reconnect/expired-session recovery before adding audio effects.
+3. Complete root-coordinated Now Playing/track context and listening-event foundation with privacy/consent, deduplication and real listened-time thresholds; then deterministic sparse-library radio/mixes with playable candidates and explanations.
+4. Sharing: expiring invitations and explicitly separate media grants, revision updates and accessible collaboration. Then device presence/handoff with two actual clients and Linux desktop validation; mobile/offline require native services and real platform evidence.
+5. Native multi-server adapters/two-instance integration, then optional standards-based federation and authorized social/rooms. Extend catalog editions, batch edits, smart rules and ZIP/trusted WebDAV/S3/authorized source adapters as independent tested slices. Preserve immutable originals and egress boundaries.
 
 ## Cross-cutting acceptance
 

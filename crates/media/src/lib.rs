@@ -3,6 +3,7 @@ mod catalog;
 mod filters;
 mod metadata;
 mod range;
+pub mod search;
 mod validation;
 
 pub use catalog::InvalidCatalogCursor;

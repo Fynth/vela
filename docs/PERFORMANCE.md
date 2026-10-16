@@ -1,5 +1,9 @@
 # Reproducible performance measurements
 
+## Experience0.5 verification scope
+
+No new latency/CPU/throughput benchmark is claimed for the0.5 UX slice. The new local aggregate search bounds each SQL result category at8 and cancels obsolete browser requests. Its album/artist/playlist substring predicates are not constant-time/indexed search guarantees and have not been measured at1M groups. Existing measurements below apply only to their recorded query/source scope. Real Chromium checks establish decoded audio/seek and unchanged active media node/source through navigation, not audible-start timing or gapless accuracy.20 production-process clean restarts plus independent worker-failure injections passed; they establish lifecycle regression coverage, not concurrent-user capacity.
+
 Measured at 2026-10-13T19:02:43.194711+00:00 using `scripts/benchmark_catalog.py`.
 
 These measurements exercise SQLite catalog queries over synthetic metadata. They are not HTTP latency, streaming throughput, audible playback time, or a comparison with other products.

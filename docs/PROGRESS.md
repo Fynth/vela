@@ -1,5 +1,37 @@
 # Verified progress
 
+## Current checkpoint — listener experience0.5.0 (2026-10-16)
+
+The actual starting repository was clean main atb7033e4, source/runtimeac01e40, version0.4.0. Its baseline was rerun:97 Rust tests,16 Chromium tests (including the opted-in licensed live import), fmt, strict native/WASM Clippy and release builds passed before changes. Seven existing crates were evolved; no new framework, crate, migration or persistent-data reset was introduced. One read-only parallel experience reviewer identified player/navigation risks but then hit the environment usage limit and delivered no code; the main agent implemented/integrated this increment. No external publishing occurred.
+
+### What users can use
+
+- New real Home with greeting, newest owned tracks, favorites, albums and authorized playlists; useful first-upload/import actions and honest loading/error/empty/refresh states. No imaginary recents, global catalog or recommendations.
+- A separate Search page with300ms debounce, Enter, Ctrl/Cmd+K and tracks/albums/artists/playlists categories. New authenticated GET /api/search bounds each category8, filters owned catalog/current named playlist grants, rejects malformed/unknown/empty/control/overlong queries and never grants media access. Literal group/playlist matching and FTS tracks reuse existing services/projections.
+- Shared listening-oriented sidebar with real library/playlist shortcuts, original SVG icons, dark/light responsive styles, and five phone tabs with a keyboard-controlled More sheet. Jobs navigation is administrator-only; existing uploads/imports/folder administration and metadata/playlist flows remain functional.
+- Root-owned audio survives Home/Search/Library/album/artist/playlist/history/theme/menu changes. Home/Search use typed cancellable requests, physical AbortController cancellation and independent session/query/generation/lifetime guards. Late play-promise errors cannot overwrite a newer play. Next/last queue actions preserve duplicate occurrences and active playback; cursor changes now persist alongside order. Logout releases the media source and clears pending play identity.
+
+### Executed evidence
+
+- `cargo fmt --all -- --check`:passed; `CARGO_BUILD_JOBS=2 cargo clippy --locked --workspace --all-targets -- -D warnings`:passed; `cargo clippy --locked -p vela-web --target wasm32-unknown-unknown -- -D warnings`:passed. Final logs:target/checks/experience-final-{fmt,clippy,clippy-wasm}.log.
+- `cargo test --locked --workspace -- --test-threads=2`:99 passed,0 failed (prior97 plus2 real TCP aggregate-search tests). New tests cover private same-file owners, named playlist grant/revocation without stream access, empty-group hiding, literal hostile text,8-result bounds and malformed query fields. Log:experience-final-rust.log.
+- `cargo build --locked --release -p vela-server` and `VELA_WASM_BINDGEN=target/tools/wasm-bindgen-0.2.129-x86_64-unknown-linux-musl/wasm-bindgen scripts/build-web.sh`:passed. Logs:experience-final-{native,web}.log. JavaScript syntax passed for player.js and music.spec.mjs.
+- `(cd tests/browser && VELA_TEST_BINARY=target/release/vela-server VELA_LIVE_IMPORT_TEST=1 npx playwright test)`:20/20 passed in38.6s against real isolated native/WASM builds. Existing16 workflows retained; four new cases exercise actual Home/all-kind Search, navigation audio-node/source/time continuity, next/last duplicate order and reload cursor,300ms query ordering/physical abort/invalid bytes, late failed old play after genuine newer playback, and private Search replies held across logout/account change. No catalog responses were fabricated. Real locally generated45s PCM audio supplements existing FLAC/MP3/artwork and licensed live Ogg import. Log:experience-browser-final.log.
+- Eight Home screenshots were reviewed at320/768/1440/1920px in both themes, with reduced motion and no horizontal overflow. The More sheet passed keyboard focus containment/Escape/return-focus checks. Copies:target/checks/experience-final-screens/experience-home-*-*.png. Baseline images are retained inexperience-baseline-screens. In-app Browser reported no available browser; isolated Playwright Chromium was the fallback. No physical sound, screen-reader, Firefox/Safari or native device claim.
+- `python3 -m unittest discover -s tests -p 'test_*.py'`:9 passed. `python3 scripts/verify_shutdown.py --runs20 --worker-failure` (CLI spelling `--runs 20`):20 real SIGTERM/restart exits0; separate import/scanner storage-failure fixtures correctly failed the process. Locked cargo-deny policy passed with only the established compile-time paste maintenance exception. Notices were regenerated;6 known metadata-only license gaps remain. Compose configuration passed; Docker daemon is absent, so no container build/runtime verification. Logs:experience-{python,shutdown,deny,notices,compose,docker}.log.
+
+### Data safety and local runtime
+
+An initial current-data snapshot was restored/checked before development (target/upgrade-backups/before-0.5.0-20261016T094642Z.tar.gz). Persistent development data changed during this session and was re-inspected rather than reset: the final pre-start snapshot contains1 account,20 actual tracks,0 playlists, schema7. Fresh backup target/upgrade-backups/before-0.5.0-final-20261016T153528Z.tar.gz was restored to a separate disposable fixture and matched schema/counts/quick_check. The previous listener was already absent when inspected; a0.5 server is now running on127.0.0.1:3210 with the existing data directory and built dist. Health/setup report0.5.0, setup stays claimed, SQLite quick_check isok and foreign_key_check has0 errors. No production credentials were read/created and no development library/media was deleted. Backup/runtime evidence is inexperience-upgrade-{backup,runtime}.json. Reinspect on resume: users may continue adding data.
+
+### Scope and next work
+
+The feature matrix, product flows, design system, ADR0009 and contracts document exact verified subsets. Home/Search/next-last are usable but the full consumer roadmap remains incomplete. Next highest-priority slice: a framework-free queue/playback transition model, fair shuffle previous/forward behavior, deterministic previous-button seek and recovery/resume tests; then root-coordinated Now Playing and privacy-controlled listening events for real radio/mixes. Exact position resume, native/offline, device handoff, rooms, multi-server and federation remain absent. No performance-superiority or new latency measurement is claimed.
+
+The earlier progress below is historical evidence, not the current runtime/account state. Local0.5 native/source archive verification will be recorded after the clean checkpoint is packaged.
+
+## Historical0.4 checkpoint
+
 Checkpoint2026-10-16, version0.4.0. The initially empty repository is a seven-crate Rust/Dioxus modular monolith. Actual specialized agents contributed media/import/UI, the job read model and security/QA review; the principal reviewed and integrated shared contracts, migrations and transport. No external publishing occurred. This is a functional early product slice, not completion of the master roadmap.
 
 ## Implemented and verified

@@ -4,6 +4,8 @@ A Rust-first, self-hosted music cloud with a Dioxus web interface. This is an ea
 
 Upload real audio files, browse albums/artists with embedded metadata and artwork, search, favorite, and stream original files. Album tracks follow disc/track order; large collections use bounded pages. Filter tracks by complete genre tag, format, release years and reported audio properties, combine with search/favorites, and sort by title or recently added. Applied conditions remain stable while paging; unsaved form changes stay drafts. Edit your catalog tags in the app with revision protection while keeping original audio files unchanged. Import supported public HTTP/HTTPS audio download links through the app with durable progress/retry/cancel controls. Create private playlists, grant local accounts viewer/editor access, and share expiring, revocable metadata-only links. Owners can list/revoke collaborators; members can leave. The browser player has seeking, volume, shuffle/repeat, queue controls and account-scoped queue persistence.
 
+**Home** brings your actual new music, favorites, albums and playlists together. **Search** finds private tracks, albums, artists and explicitly shared playlist names, with category filters and Ctrl/Cmd+K. Play music, add it next or last in the queue, and move between pages without interrupting playback. Phones use Home/Search/Library/Playlists tabs plus a More menu; both themes adapt from320px to wide desktop screens.
+
 Administrators can scan configured read-only music folders in **Settings → Music folders**, watch progress, cancel, and rescan without changing original files or existing catalog edits. Removing a scan source keeps imported music.
 
 **Jobs** brings your URL imports and administrator folder scans into one private, paginated history. Filter by type/state, inspect actual progress, cancel eligible work, retry imports or start a new scan pass. Active tasks refresh while the page is visible; idle history has a Refresh control. Uploads remain in their upload dialog.
@@ -59,6 +61,6 @@ npm ci --prefix tests/browser
 (cd tests/browser && npx playwright install chromium && npx playwright test)
 ```
 
-See [progress](docs/PROGRESS.md), [architecture](docs/ARCHITECTURE.md), [roadmap](docs/ROADMAP.md), [security](docs/SECURITY.md), [performance](docs/PERFORMANCE.md), [known limitations](docs/KNOWN_LIMITATIONS.md), and [research](docs/RESEARCH.md). CI configuration does not mean CI has run. Native mobile/desktop, offline downloads, multi-server access, OpenSubsonic and federation remain roadmap work.
+See [experience parity](docs/SPOTIFY_PARITY_MATRIX.md), [product flows](docs/PRODUCT_SPEC.md), [design system](docs/DESIGN_SYSTEM.md), [progress](docs/PROGRESS.md), [architecture](docs/ARCHITECTURE.md), [roadmap](docs/ROADMAP.md), [security](docs/SECURITY.md), [performance](docs/PERFORMANCE.md), [known limitations](docs/KNOWN_LIMITATIONS.md), and [research](docs/RESEARCH.md). CI configuration does not mean CI has run. Native mobile/desktop, offline downloads, multi-server access, OpenSubsonic and federation remain roadmap work.
 
 AGPL-3.0-or-later. Real test audio is locally generated sine-wave material. Optional live-import tests use Wikimedia's explicitly licensed example audio, with attribution recorded in `tests/browser/README.md`.

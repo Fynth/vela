@@ -11,6 +11,20 @@ async function openAdminFixture(page, cookies = adminCookies) {
   await page.context().addCookies(cookies);
   await page.goto('/');
   await expect(page.getByRole('button', { name: 'Library', exact: true }).first()).toBeVisible();
+  await page.getByRole('button', { name: 'Library', exact: true }).first().click();
+}
+
+
+async function navigate(page, name) {
+  const mobile = page.getByRole('navigation', { name: 'Mobile navigation', exact: true });
+  if (await mobile.isVisible()) {
+    const tab = mobile.getByRole('button', { name, exact: true });
+    if (await tab.count()) { await tab.click(); }
+    else {
+      await mobile.getByRole('button', { name: 'More destinations', exact: true }).click();
+      await page.getByRole('dialog', { name: 'More from your library', exact: true }).getByRole('button', { name, exact: true }).click();
+    }
+  } else { await page.getByRole('button', { name, exact: true }).first().click(); }
 }
 
 test.describe.configure({ mode: 'serial' });
@@ -21,6 +35,8 @@ test('first-run setup, real FLAC upload, artwork, decode, favorites and safe sha
   await page.locator('#username').fill('admin');
   await page.locator('#password').fill(password);
   await page.getByRole('button', { name: 'Create your music space →', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Make room for your first listen', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Library', exact: true }).first().click();
   await expect(page.getByRole('heading', { name: 'Your music. Your space.' })).toBeVisible();
   await page.getByRole('button', { name: '+ Add music', exact: true }).first().click();
   await page.locator('#audio-files').setInputFiles(fixture);
@@ -72,6 +88,7 @@ test('first-run setup, real FLAC upload, artwork, decode, favorites and safe sha
   await listenerPage.locator('#username').fill('listener');
   await listenerPage.locator('#password').fill(password);
   await listenerPage.getByRole('button', { name: 'Sign in →', exact: true }).click();
+  await listenerPage.getByRole('button', { name: 'Library', exact: true }).first().click();
   await expect(listenerPage.getByRole('button', { name: 'Play Signal', exact: true })).toHaveCount(0);
   await listenerPage.getByRole('button', { name: /Playlists/ }).first().click();
   await listenerPage.locator('.playlist-card').filter({ hasText: 'Evening signals' }).click();
@@ -172,6 +189,7 @@ test('pending private responses are discarded when another account signs in', as
   await page.locator('#username').fill('admin');
   await page.locator('#password').fill(password);
   await page.getByRole('button', { name: 'Sign in →', exact: true }).click();
+  await page.getByRole('button', { name: 'Library', exact: true }).first().click();
   await page.getByRole('button', { name: /Playlists/ }).first().click();
   let release;
   const gate = new Promise(resolve => { release = resolve; });
@@ -193,6 +211,7 @@ test('pending private responses are discarded when another account signs in', as
   await page.locator('#username').fill('listener');
   await page.locator('#password').fill(password);
   await page.getByRole('button', { name: 'Sign in →', exact: true }).click();
+  await page.getByRole('button', { name: 'Library', exact: true }).first().click();
   const older = page.waitForResponse(r => /^\/api\/playlists\/[^/]+$/.test(new URL(r.url()).pathname));
   release();
   await older;
@@ -256,6 +275,7 @@ test('catalog metadata editor saves without changing audio and handles a stale d
   await page.locator('#username').fill('admin');
   await page.locator('#password').fill(password);
   await page.getByRole('button', { name: 'Sign in →', exact: true }).click();
+  await page.getByRole('button', { name: 'Library', exact: true }).first().click();
   await page.getByRole('button', { name: 'Edit metadata for Signal', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Edit metadata', exact: true });
   await expect(dialog.getByLabel('Title', { exact: true })).toHaveValue('Signal');
@@ -266,6 +286,7 @@ test('catalog metadata editor saves without changing audio and handles a stale d
   await other.locator('#username').fill('admin');
   await other.locator('#password').fill(password);
   await other.getByRole('button', { name: 'Sign in →', exact: true }).click();
+  await other.getByRole('button', { name: 'Library', exact: true }).first().click();
   await other.getByRole('button', { name: 'Edit metadata for Signal', exact: true }).click();
   const otherDialog = other.getByRole('dialog', { name: 'Edit metadata', exact: true });
   await expect(otherDialog.getByLabel('Title', { exact: true })).toHaveValue('Signal');
@@ -288,7 +309,7 @@ test('catalog metadata editor saves without changing audio and handles a stale d
   await dialog.getByRole('button', { name: 'Save metadata', exact: true }).click();
   await expect(dialog).toHaveCount(0);
   await expect(page.getByText('Metadata saved. Your original audio file is unchanged.', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Albums', exact: true }).last().click();
+  await navigate(page, 'Albums');
   await page.getByRole('button', { name: 'Open album Browser edits by Vela Test', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Browser edits', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Play Signal edited in Vela', exact: true }).click();
@@ -298,6 +319,7 @@ test('catalog metadata editor saves without changing audio and handles a stale d
   await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(dialog).toHaveCount(0);
   await page.reload();
+  await navigate(page, 'Library');
   await expect(page.getByRole('button', { name: 'Play Signal edited in Vela', exact: true })).toBeVisible();
   await otherContext.close();
 });
@@ -307,6 +329,7 @@ test('cancelled metadata responses stay closed across account changes', async ({
   await page.locator('#username').fill('admin');
   await page.locator('#password').fill(password);
   await page.getByRole('button', { name: 'Sign in →', exact: true }).click();
+  await page.getByRole('button', { name: 'Library', exact: true }).first().click();
   let release;
   const gate = new Promise(resolve => { release = resolve; });
   let seen;
@@ -325,6 +348,7 @@ test('cancelled metadata responses stay closed across account changes', async ({
   await page.locator('#username').fill('listener');
   await page.locator('#password').fill(password);
   await page.getByRole('button', { name: 'Sign in →', exact: true }).click();
+  await page.getByRole('button', { name: 'Library', exact: true }).first().click();
   const older = page.waitForResponse(r => /\/api\/tracks\/[^/]+\/metadata/.test(new URL(r.url()).pathname));
   release();
   await older;
@@ -339,6 +363,7 @@ test('administrator scans a configured folder and rescan preserves catalog edits
   await page.locator('#username').fill('admin');
   await page.locator('#password').fill(password);
   await page.getByRole('button', { name: 'Sign in →', exact: true }).click();
+  await page.getByRole('button', { name: 'Library', exact: true }).first().click();
   await page.getByRole('button', { name: /Settings/ }).first().click();
   await page.getByLabel('Folder', { exact: true }).selectOption('fixture');
   await page.getByLabel('Source name', { exact: true }).fill('Mounted collection');
@@ -391,7 +416,7 @@ test('library filters combine real tags, technical properties, favorites and sor
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
   await page.screenshot({ path: 'test-results/filters-mobile.png', fullPage: true });
-  await page.getByRole('button', { name: 'Favorites', exact: true }).last().click();
+  await navigate(page, 'Favorites');
   await expect(page.getByRole('button', { name: 'Play Signal edited in Vela', exact: true })).toBeVisible();
   await expect(page.locator('.filter-summary')).toContainText('browser filters');
   await page.getByRole('button', { name: 'Library', exact: true }).last().click();
@@ -463,6 +488,7 @@ test('newer filter requests win and private suggestions clear across account cha
   await page.locator('#username').fill('listener');
   await page.locator('#password').fill(password);
   await page.getByRole('button', { name: 'Sign in →', exact: true }).click();
+  await page.getByRole('button', { name: 'Library', exact: true }).first().click();
   await page.getByRole('button', { name: 'Library', exact: true }).first().click();
   await expect(page.locator('#library-search')).toHaveValue('');
   await page.getByRole('button', { name: 'Filter and sort', exact: true }).click();
@@ -597,16 +623,20 @@ test('job center controls genuine scans and pages their preserved history on mob
   await expect(rows).toHaveCount(50);
   await page.setViewportSize({ width: 320, height: 780 });
   const mobile = page.getByRole('navigation', { name: 'Mobile navigation' });
-  await expect(mobile.getByRole('button')).toHaveCount(8);
+  await expect(mobile.getByRole('button')).toHaveCount(5);
+  await mobile.getByRole('button', { name: 'More destinations', exact: true }).click();
+  const destinations = page.getByRole('dialog', { name: 'More from your library', exact: true });
   for (const name of ['Jobs', 'Settings', 'Add music']) {
-    await expect(mobile.getByRole('button', { name, exact: true })).toBeInViewport();
+    await expect(destinations.getByRole('button', { name, exact: true })).toBeInViewport();
   }
+  await page.keyboard.press('Escape');
+  await expect(destinations).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({ path: 'test-results/jobs-mobile.png' });
   await page.locator('.job-center-links').getByRole('button', { name: 'Add music', exact: true }).click();
   await expect(page.locator('#import-url')).toBeVisible();
-  await mobile.getByRole('button', { name: 'Jobs', exact: true }).click();
+  await navigate(page, 'Jobs');
   await page.locator('.job-center-links').getByRole('button', { name: 'Open library', exact: true }).click();
   await expect(page.locator('#library-search')).toBeVisible();
   expect(errors).toEqual([]);
@@ -665,6 +695,213 @@ test('job filters ignore late replies and failed refresh retains a confirmed pag
   expect(legacyRequests).toBe(0);
 });
 
+test('Home and global search use real music while navigation preserves the player and next queue', async ({ page }) => {
+  test.setTimeout(120000);
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await openAdminFixture(page);
+  const auth = await (await page.request.get('/api/me')).json();
+  const samples = 44100 * 45;
+  const wave = Buffer.alloc(44 + samples * 2);
+  wave.write('RIFF', 0); wave.writeUInt32LE(36 + samples * 2, 4);
+  wave.write('WAVEfmt ', 8); wave.writeUInt32LE(16, 16);
+  wave.writeUInt16LE(1, 20); wave.writeUInt16LE(1, 22);
+  wave.writeUInt32LE(44100, 24); wave.writeUInt32LE(88200, 28);
+  wave.writeUInt16LE(2, 32); wave.writeUInt16LE(16, 34);
+  wave.write('data', 36); wave.writeUInt32LE(samples * 2, 40);
+  for (let sample = 0; sample < samples; sample++) wave.writeInt16LE(Math.round(1500 * Math.sin(2 * Math.PI * 330 * sample / 44100)), 44 + sample * 2);
+  const upload = await page.request.post('/api/upload', { headers: { 'X-CSRF-Token': auth.csrf_token }, multipart: { file: { name: 'Unbroken session.wav', mimeType: 'audio/wav', buffer: wave } } });
+  expect(upload.ok()).toBeTruthy();
+  const track = (await upload.json()).track;
+  await navigate(page, 'Playlists');
+  await page.locator('#playlist-name').fill('Vela listening');
+  await page.getByRole('button', { name: '+ Create', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Vela listening', exact: true })).toBeVisible();
+  await navigate(page, 'Home');
+  await expect(page.getByRole('heading', { name: 'Hello, admin.', exact: true })).toBeVisible();
+  const additions = page.locator('[aria-labelledby="home-additions"]');
+  await additions.getByRole('button', { name: `Play ${track.title}`, exact: true }).click();
+  await expect.poll(() => page.locator('#vela-audio').evaluate(audio => audio.currentTime)).toBeGreaterThan(0);
+  await page.getByRole('slider', { name: 'Playback position', exact: true }).evaluate(input => { input.value = '5'; input.dispatchEvent(new Event('input', { bubbles: true })); });
+  await expect.poll(() => page.locator('#vela-audio').evaluate(audio => audio.currentTime)).toBeGreaterThanOrEqual(5);
+  const source = await page.locator('#vela-audio').getAttribute('src');
+  await page.evaluate(() => { window.__experienceAudio = document.getElementById('vela-audio'); });
+  const checkPlayer = async () => {
+    expect(await page.evaluate(() => document.getElementById('vela-audio') === window.__experienceAudio)).toBeTruthy();
+    await expect(page.locator('#vela-audio')).toHaveAttribute('src', source);
+    await expect(page.locator('#vela-audio')).toHaveJSProperty('paused', false);
+  };
+  await navigate(page, 'Search');
+  await page.locator('#global-search').fill('Vela');
+  await page.locator('#global-search').press('Enter');
+  for (const name of ['Track results', 'Album results', 'Artist results', 'Playlist results']) await expect(page.getByRole('region', { name, exact: true })).toBeVisible();
+  await checkPlayer();
+  await page.getByRole('region', { name: 'Album results', exact: true }).getByRole('button').first().click();
+  await expect(page.locator('.catalog-detail')).toBeVisible();
+  await checkPlayer();
+  await navigate(page, 'Artists');
+  await page.getByRole('button', { name: 'Open artist Vela Test', exact: true }).click();
+  await expect(page.locator('.catalog-detail')).toBeVisible();
+  await checkPlayer();
+  await navigate(page, 'Playlists');
+  await checkPlayer();
+  await page.goBack();
+  await expect(page).toHaveURL(/#artists$/);
+  await checkPlayer();
+  await page.keyboard.press('Control+k');
+  await expect(page.locator('#global-search')).toBeFocused();
+  await page.getByRole('button', { name: 'Show playback queue', exact: true }).click();
+  await page.getByRole('button', { name: 'Clear upcoming tracks', exact: true }).click();
+  await page.getByRole('button', { name: 'Close playback queue', exact: true }).click();
+  const search = async text => {
+    await page.locator('#global-search').fill(text);
+    await page.locator('#global-search').press('Enter');
+    await expect(page.getByRole('region', { name: 'Track results', exact: true })).toBeVisible();
+  };
+  await search('Beacon');
+  await page.getByRole('button', { name: 'Play Beacon next', exact: true }).click();
+  await search('Signal');
+  await page.getByRole('button', { name: 'Add Signal edited in Vela to playback queue', exact: true }).click();
+  await search('Beacon');
+  await page.getByRole('button', { name: 'Play Beacon next', exact: true }).click();
+  await checkPlayer();
+  await page.getByRole('button', { name: 'Show playback queue', exact: true }).click();
+  await expect(page.locator('.queue-row .queue-track strong')).toHaveText([track.title, 'Beacon', 'Beacon', 'Signal edited in Vela']);
+  await expect(page.locator('.queue-row').first()).toHaveClass(/current/);
+  await page.getByRole('button', { name: 'Close playback queue', exact: true }).click();
+  await navigate(page, 'Home');
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  for (const width of [320, 768, 1440, 1920]) {
+    await page.setViewportSize({ width, height: 900 });
+    for (const theme of ['dark', 'light']) {
+      const current = await page.locator('html').getAttribute('data-theme');
+      if (current !== theme) await page.getByRole('button', { name: 'Change color theme', exact: true }).click();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+      await checkPlayer();
+      await page.screenshot({ path: `test-results/experience-home-${width}-${theme}.png` });
+    }
+  }
+  await page.setViewportSize({ width: 320, height: 780 });
+  const more = page.getByRole('button', { name: 'More destinations', exact: true });
+  await more.focus();
+  await page.keyboard.press('Enter');
+  const sheet = page.getByRole('dialog', { name: 'More from your library', exact: true });
+  await expect(sheet).toBeVisible();
+  await page.keyboard.press('Shift+Tab');
+  expect(await sheet.evaluate(node => node.contains(document.activeElement))).toBeTruthy();
+  await page.keyboard.press('Escape');
+  await expect(sheet).toHaveCount(0);
+  await expect(more).toBeFocused();
+  await checkPlayer();
+  await page.reload();
+  await navigate(page, 'Library');
+  await page.getByRole('button', { name: 'Show playback queue and controls', exact: true }).click();
+  await expect(page.locator('.queue-row .queue-track strong')).toHaveText([track.title, 'Beacon', 'Beacon', 'Signal edited in Vela']);
+  await expect(page.locator('.queue-row').first()).toHaveClass(/current/);
+  expect(errors).toEqual([]);
+});
+
+test('global search debounces and discards obsolete queries including invalid drafts', async ({ page }) => {
+  await openAdminFixture(page);
+  await navigate(page, 'Search');
+  let release, seen, delivered;
+  const delivery = new Promise(resolve => { delivered = resolve; });
+  const gate = new Promise(resolve => { release = resolve; });
+  const held = new Promise(resolve => { seen = resolve; });
+  let once = false;
+  await page.route('**/api/search?*', async route => {
+    if (!once && new URL(route.request().url()).searchParams.get('q') === 'Older missing result') {
+      once = true;
+      const response = await route.fetch();
+      seen(); await gate; try { await route.fulfill({ response }); } finally { delivered(); }
+    } else { await route.continue(); }
+  });
+  await page.locator('#global-search').fill('Older missing result');
+  await page.locator('#global-search').press('Enter');
+  await held;
+  const aborted = page.waitForEvent('requestfailed', { predicate: request => new URL(request.url()).searchParams.get('q') === 'Older missing result' });
+  await page.locator('#global-search').fill('Beacon');
+  await aborted;
+  // No Enter: production debounce must issue this newer request itself.
+  await expect(page.getByRole('button', { name: 'Play Beacon', exact: true })).toBeVisible();
+  release(); await delivery;
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await expect(page.getByRole('button', { name: 'Play Beacon', exact: true })).toBeVisible();
+  await page.locator('.search-categories').getByRole('button', { name: 'Albums', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'No search results', exact: true })).toBeVisible();
+  await page.locator('.search-categories').getByRole('button', { name: 'Tracks', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Play Beacon', exact: true })).toBeVisible();
+  await page.locator('#global-search').fill('я'.repeat(129));
+  await expect(page.locator('.search-page').getByRole('alert')).toContainText('256 bytes');
+  await expect(page.locator('.search-track-row')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Clear global search', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Find your next listen', exact: true }).last()).toBeVisible();
+});
+
+test('late play rejections cannot overwrite a newer genuine playback selection', async ({ page }) => {
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await openAdminFixture(page);
+  await page.evaluate(() => {
+    const play = HTMLMediaElement.prototype.play;
+    let hold = true;
+    HTMLMediaElement.prototype.play = function () {
+      const actual = play.call(this);
+      if (!hold) return actual;
+      hold = false;
+      actual.catch(() => {});
+      return new Promise((_, reject) => { window.__rejectOldPlay = reject; });
+    };
+  });
+  await page.getByRole('button', { name: 'Play Signal edited in Vela', exact: true }).click();
+  await page.getByRole('button', { name: 'Play Beacon', exact: true }).click();
+  await expect.poll(() => page.locator('#vela-audio').evaluate(audio => audio.currentTime)).toBeGreaterThan(0);
+  await page.evaluate(() => window.__rejectOldPlay(new DOMException('Fixture old play aborted', 'AbortError')));
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await expect(page.getByRole('alert').filter({ hasText: 'Playback could not start' })).toHaveCount(0);
+  await expect(page.locator('.now-playing strong')).toHaveText('Beacon');
+  expect(errors).toEqual([]);
+});
+
+test('private search replies cannot populate another account after logout', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('#username').fill('admin');
+  await page.locator('#password').fill(password);
+  await page.getByRole('button', { name: 'Sign in →', exact: true }).click();
+  await navigate(page, 'Search');
+  let release, seen, delivered;
+  const delivery = new Promise(resolve => { delivered = resolve; });
+  const gate = new Promise(resolve => { release = resolve; });
+  const held = new Promise(resolve => { seen = resolve; });
+  let once = false;
+  await page.route('**/api/search?*', async route => {
+    if (!once) {
+      once = true;
+      const response = await route.fetch();
+      expect((await response.json()).tracks.length).toBeGreaterThan(0);
+      seen(); await gate; try { await route.fulfill({ response }); } finally { delivered(); }
+    } else { await route.continue(); }
+  });
+  await page.locator('#global-search').fill('Unbroken');
+  await page.locator('#global-search').press('Enter');
+  await held;
+  await navigate(page, 'Settings');
+  await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+  await page.locator('#username').fill('listener');
+  await page.locator('#password').fill(password);
+  await page.getByRole('button', { name: 'Sign in →', exact: true }).click();
+  await navigate(page, 'Search');
+  await expect(page.locator('#global-search')).toHaveValue('');
+  await page.locator('#global-search').fill('Unbroken');
+  await page.locator('#global-search').press('Enter');
+  await expect(page.getByRole('heading', { name: 'No search results', exact: true })).toBeVisible();
+  release(); await delivery;
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await expect(page.getByRole('heading', { name: 'No search results', exact: true })).toBeVisible();
+  await expect(page.locator('.search-track-row')).toHaveCount(0);
+  await expect(page.locator('.now-playing strong')).toHaveText('Ready when you are');
+});
+
 test('private job replies cannot reappear after logout and another account signs in', async ({ page }) => {
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
@@ -692,12 +929,15 @@ test('private job replies cannot reappear after logout and another account signs
   await page.locator('#password').fill(password);
   const signedIn = page.waitForResponse(response => new URL(response.url()).pathname === '/api/login');
   await page.getByRole('button', { name: 'Sign in →', exact: true }).click();
+  await page.getByRole('button', { name: 'Library', exact: true }).first().click();
   expect((await signedIn).ok()).toBeTruthy();
   const older = page.waitForResponse(response => response.url().includes('/api/jobs?'));
   release();
   await older;
-  await page.getByRole('button', { name: 'Jobs', exact: true }).first().click();
-  await expect(page.getByRole('heading', { name: 'No background tasks yet', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Jobs', exact: true })).toHaveCount(0);
+  const privateJobs = await (await page.request.get('/api/jobs')).json();
+  expect(privateJobs.items).toEqual([]);
+  await navigate(page, 'Search');
   await expect(page.locator('.background-job')).toHaveCount(0);
   await expect(page.getByText('Job center archive', { exact: true })).toHaveCount(0);
   await expect(page.locator('#job-type option[value="scan"]')).toHaveCount(0);

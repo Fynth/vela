@@ -161,6 +161,223 @@ async fn actor(r: Response) -> Actor {
 }
 
 #[tokio::test]
+async fn global_search_finds_owned_music_and_granted_metadata_without_audio_rights() {
+    let app = TestApp::new().await;
+    let listener = app.user("searchlistener").await;
+    let outsider = app.user("searchoutsider").await;
+    let original = app.upload(&app.admin).await.track;
+    let private_copy = app.upload(&listener).await.track;
+    let list: PlaylistSummary = app
+        .request(Method::POST, "/api/playlists", &app.admin)
+        .json(&CreatePlaylist {
+            name: "Signal sessions".into(),
+        })
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    app.request(Method::POST, &format!("/api/playlists/{}/items", list.id), &app.admin)
+        .json(&json!({"revision":0,"mutation_id":uuid::Uuid::new_v4().to_string(),"track_id":original.id}))
+        .send().await.unwrap().error_for_status().unwrap();
+    let r = app
+        .request(Method::GET, "/api/search?q=Signal", &app.admin)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.headers()["cache-control"], "no-store");
+    let matches: SearchResults = r.json().await.unwrap();
+    assert_eq!(matches.tracks[0].id, original.id);
+    assert_eq!(matches.playlists[0].id, list.id);
+    assert!(matches.albums.is_empty() && matches.artists.is_empty());
+    let names: SearchResults = app
+        .request(Method::GET, "/api/search?q=Vela", &listener)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(names.artists.len(), 1);
+    assert_eq!(names.albums.len(), 1);
+    assert_eq!(names.tracks[0].id, private_copy.id);
+    app.request(
+        Method::POST,
+        &format!("/api/playlists/{}/collaborators", list.id),
+        &app.admin,
+    )
+    .json(&CollaboratorRequest {
+        username: listener.user.username.clone(),
+        can_edit: false,
+    })
+    .send()
+    .await
+    .unwrap()
+    .error_for_status()
+    .unwrap();
+    let granted: SearchResults = app
+        .request(Method::GET, "/api/search?q=Signal", &listener)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(granted.playlists[0].id, list.id);
+    assert!(!granted.playlists[0].can_edit);
+    assert_eq!(granted.tracks.len(), 1);
+    assert_eq!(granted.tracks[0].id, private_copy.id);
+    assert_ne!(granted.tracks[0].id, original.id);
+    assert_eq!(
+        app.request(
+            Method::GET,
+            &format!("/api/tracks/{}/stream", original.id),
+            &listener
+        )
+        .send()
+        .await
+        .unwrap()
+        .status(),
+        StatusCode::NOT_FOUND
+    );
+    let absent: SearchResults = app
+        .request(Method::GET, "/api/search?q=Signal", &outsider)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(
+        absent.tracks.is_empty()
+            && absent.albums.is_empty()
+            && absent.artists.is_empty()
+            && absent.playlists.is_empty()
+    );
+    app.request(
+        Method::DELETE,
+        &format!(
+            "/api/playlists/{}/collaborators/{}",
+            list.id, listener.user.id
+        ),
+        &app.admin,
+    )
+    .send()
+    .await
+    .unwrap()
+    .error_for_status()
+    .unwrap();
+    let revoked: SearchResults = app
+        .request(Method::GET, "/api/search?q=Signal", &listener)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(revoked.playlists.is_empty());
+}
+
+#[tokio::test]
+async fn global_search_bounds_each_category_hides_empty_groups_and_rejects_invalid_queries() {
+    let app = TestApp::new().await;
+    app.upload(&app.admin).await;
+    // Explicit metadata fixtures exercise query bounds, not fabricated audio or UI.
+    for at in 0..12 {
+        let asset = uuid::Uuid::new_v4().to_string();
+        sqlx::query("INSERT INTO media_assets(id,hash,storage_path,content_type,size_bytes) VALUES(?,?,?,'audio/flac',99)")
+            .bind(&asset).bind(&asset).bind(format!("media/query-fixture-{at}.audio"))
+            .execute(&app.state.pool).await.unwrap();
+        sqlx::query("INSERT INTO tracks(id,owner_id,media_asset_id,title,artist,album,album_artist,duration_ms,codec) VALUES(?,?,?,?,?,?,?,1000,'FLAC')")
+            .bind(uuid::Uuid::new_v4().to_string()).bind(&app.admin.user.id).bind(&asset)
+            .bind(format!("Matching {at:02}")).bind(format!("Matching artist {at:02}"))
+            .bind(format!("Matching album {at:02}")).bind(format!("Matching artist {at:02}"))
+            .execute(&app.state.pool).await.unwrap();
+        app.request(Method::POST, "/api/playlists", &app.admin)
+            .json(&CreatePlaylist {
+                name: format!("Matching playlist {at:02}"),
+            })
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap();
+    }
+    let result: SearchResults = app
+        .request(Method::GET, "/api/search?q=matching", &app.admin)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        (
+            result.tracks.len(),
+            result.albums.len(),
+            result.artists.len(),
+            result.playlists.len()
+        ),
+        (8, 8, 8, 8)
+    );
+    assert_eq!(result.albums[0].title, "Matching album 00");
+    assert_eq!(result.artists[0].name, "Matching artist 00");
+    sqlx::query("DELETE FROM tracks WHERE owner_id=? AND title='Matching 00'")
+        .bind(&app.admin.user.id)
+        .execute(&app.state.pool)
+        .await
+        .unwrap();
+    for query in ["Matching album 00", "Matching artist 00", "%_' OR 1=1 --"] {
+        let matches: SearchResults = app
+            .request(Method::GET, "/api/search", &app.admin)
+            .query(&[("q", query)])
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert!(matches.albums.is_empty() && matches.artists.is_empty());
+    }
+    for path in [
+        "/api/search",
+        "/api/search?q=",
+        "/api/search?q=x&extra=1",
+        "/api/search?q=a&q=b",
+        "/api/search?q=Signal%00",
+    ] {
+        let response = app
+            .request(Method::GET, path, &app.admin)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{path}");
+        let error: ApiError = response.json().await.unwrap();
+        assert_eq!(error.error, "Invalid search query");
+    }
+    let long = "я".repeat(129);
+    assert_eq!(
+        app.request(Method::GET, "/api/search", &app.admin)
+            .query(&[("q", long)])
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        app.client
+            .get(format!("{}/api/search?q=Signal", app.base))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+}
+
+#[tokio::test]
 async fn job_center_is_private_validated_and_controls_real_import_jobs() {
     let app = TestApp::new().await;
     let member = app.user("tasklistener").await;

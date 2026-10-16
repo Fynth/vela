@@ -1,5 +1,11 @@
 # Threat model and security architecture
 
+## Local search and listener state (0.5.0)
+
+GET /api/search requires authentication, denies unknown/malformed query fields, caps raw query text at256 bytes and rejects empty/control input. Parameterized owner constraints apply to every catalog result; playlist names require ownership or a current named collaborator grant. Grant revocation immediately removes a playlist from new searches. A result never grants audio/artwork/download access. Each category is bounded8, private no-store applies and request query values are not traced by the server. Real TCP tests cover private same-file catalogs, revoked grants, hidden empty groups, literal hostile text, bounds and invalid queries.
+
+Home/Search physically abort superseded page requests and reject stale session/query/generation/lifetime replies. Browser regressions hold actual backend responses across query/account changes and assert no private data returns. Logout clears active audio source, pending play identity and OS metadata. A late failed play promise cannot report over a newer selection. These controls do not constitute offline token storage, cross-server credentials or an independent security audit.
+
 Assets: user audio, private catalog metadata, account credentials, session/CSRF secrets, share tokens, import source URLs, filesystem capacity, server network reachability and availability. Trust boundaries: browser/API caller, administrator configuration, embedded media tags/artwork, public download servers and future federation peers. Files supplied by users and URLs/redirects/DNS/metadata are untrusted.
 
 ## Implemented controls
