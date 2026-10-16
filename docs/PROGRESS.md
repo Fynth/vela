@@ -1,6 +1,34 @@
 # Verified progress
 
-## Current checkpoint — listener experience0.5.0 (2026-10-16)
+## Current checkpoint — playback order0.6.0 (2026-10-16)
+
+Continued from the verified0.5 source3894e4e and documentation863bec3 in the same session, sequentially in the main agent. The user-visible Home/Search/shell increment and ingest/share/job/security workflows are retained. Third-party dependency pins, seven-crate boundaries and schema7 are unchanged; all local crate versions are0.6.0.
+
+### Usable increment
+
+- apps/web/src/playback.rs is a pure bounded occurrence-index state machine, consumed by the root PlaybackUi bridge. Shuffle visits every occurrence once per cycle and records real previous/forward traversal. Repeat-all refills a full permutation while excluding the previous last item from the first draw only. Repeated copies of the same track stay separate occurrences.
+- Manual Next bypasses repeat-one; real natural EOF under repeat-one restarts the current track. Repeat-off stops at exhaustion. Previous after3s seeks to the start while preserving paused/playing state; otherwise it returns through actual shuffle history or sequential order, respecting boundaries.
+- Play next takes priority even during shuffle. Insert/swap/remove remap deck/history/current/priorities synchronously, and current removal is rejected. Actual queue editing preserves active media. Legacy queue restore is capped1000, queue/cursor persistence remains account-scoped, and transient modes reset across account changes. Consolidated the duplicate cursor-persistence effect; metadata/favorite edits retain traversal.
+- Repeat-one now has a distinct original SVG and repeat controls expose pressed state. The shuffle queue explains that visible rows retain saved order. No precomputed upcoming preview, durable shuffle journal, exact position resume or new native/audio-effect capability is implied.
+
+### Executed checks and actual failures corrected
+
+- Final fmt, strict native workspace/all-target Clippy and strict wasm32 Clippy passed:target/checks/playback-final-{fmt,clippy,clippy-wasm}.log.
+- `CARGO_BUILD_JOBS=2 cargo test --locked --workspace -- --test-threads=2`:107 passed,0 failed. Eight new pure-model tests cover2048 length/seed permutations, full repeated cycles,10000 repeat-all transitions/bounded history, manual-vs-ended repeat, previous/forward, empty/singleton/legacy bounds, next priorities and edits. They caught an intermediate repeat-all implementation that omitted the preceding last occurrence for an entire new cycle; it was fixed by excluding it only from the first draw. Log:playback-final-rust.log; targeted log:playback-unit-final.log.
+- Native0.6 release build passed (playback-native.log); release WASM/static build passed using the pinned wasm-bindgen CLI (playback-web-final.log). JS syntax passed. Locked dependency policy passed (playback-deny.log); regenerated notices retain the6 known metadata-only gaps (playback-notices.log).
+- `(cd tests/browser && VELA_TEST_BINARY=target/release/vela-server VELA_LIVE_IMPORT_TEST=1 npx playwright test)`:22 passed in34.1s. New scenarios20/21 use genuine30s PCM uploads and actual decoder EOF, not a synthetic ended event. They test fair traversal, Previous/Next history, paused seek, repeat-one/manual-next, repeat-all, explicit-next through reorder/remove, duplicate rows and reload cursor. Scenario19 additionally confirms account-mode reset. All prior browser regressions including licensed live import/private races passed. Log:playback-browser-recheck.log.
+- Initial runs failed on test assumptions: the old-play test looked only at the first50 random-UUID tracks, and the expanded account-mode test tried Shuffle before initializing any queue in its fresh context. Tests now search for the real audio and explicitly start it. Assertions and production limits were preserved. Failure logs/traces are retained underplayback-browser{,-final}.log andplayback-{first,second}-browser-failure; no failing run is represented as green.
+- Eight responsive/theme screenshots were regenerated and copied totarget/checks/playback-final-screens; phone dark and desktop light were inspected again, with layout consistent with the eight reviewed0.5 combinations. No Firefox/Safari, screen-reader, physical output or native client claim. The9 Python tests and20 clean restarts/both worker failures were executed earlier in this session for the0.5 slice; their code is unchanged and their exact logs remain in the section below. Docker daemon remains unavailable.
+
+### Data/runtime checkpoint
+
+The owned0.5 development process was gracefully stopped and returned exit0. A fresh private0600 backup target/upgrade-backups/before-0.6.0-20261016T155224Z.tar.gz was restored in an isolated disposable directory and verified. Existing schema7,1 user,20 tracks and0 playlists match before/after, quick_check=ok and foreign_key_check has0 errors. The0.6 server now serves127.0.0.1:3210 using the same data/ and dist/; health reports0.6.0. No source media, account or playlist was reset/deleted; production credentials were not inspected or created. Evidence:playback-upgrade-{backup,runtime}.json andplayback-dev-server.log. Reinspect counts on resume because the user may continue adding music.
+
+No external publication or remote CI occurred. The0.5 and earlier archives remain intact.0.6 local native/source packaging will be recorded after the clean source checkpoint is committed. Next autonomous slice: persist explicit playback context/exact position with stale-source/session guards, then implement reconnect/expired-session recovery and root-coordinated Now Playing. Privacy-controlled listening events are a separate prerequisite for truthful Home recents/radio/mixes. Native/offline/devices/rooms/multi-server/federation remain absent.
+
+## Previous listener checkpoint0.5.0
+
+## Listener experience0.5.0 (2026-10-16)
 
 The actual starting repository was clean main atb7033e4, source/runtimeac01e40, version0.4.0. Its baseline was rerun:97 Rust tests,16 Chromium tests (including the opted-in licensed live import), fmt, strict native/WASM Clippy and release builds passed before changes. Seven existing crates were evolved; no new framework, crate, migration or persistent-data reset was introduced. One read-only parallel experience reviewer identified player/navigation risks but then hit the environment usage limit and delivered no code; the main agent implemented/integrated this increment. No external publishing occurred.
 

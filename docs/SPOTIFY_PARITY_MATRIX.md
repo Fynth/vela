@@ -10,13 +10,14 @@ Audit2026-10-16: actual main HEADb7033e4, version0.4.0; clean initial tree. Base
 | Shared shell/navigation P0 | PARTIAL | web/main.rs, shell.rs, icons.rs, style.css | EXP03/G02/G13: persistent audio, keyboard/phone/theme | Original Vela SVG/branding; five mobile tabs + More; broader shell still partial |
 | Browser playback P0 | PARTIAL | web/main.rs; player.js | G01/G04: FLAC/MP3/Ogg decode/seek; EXP03 navigation continuity | HTMLMediaElement, actual browser codec support |
 | Play next / add last P0 | VERIFIED | web/main.rs; experience.rs | EXP04: occurrence-aware insertion, no interruption | Bounded browser queue; no handoff |
-| Queue/repeat/shuffle P0 | PARTIAL | web/main.rs | Existing duplicate/reorder E2E; EXP04 | Existing shuffle has no fair back-stack; no drag/drop |
+| Fair occurrence order P0 | VERIFIED | web/playback.rs; root PlaybackUi | PLAY01/02:8 unit tests + browser20/21 + mode isolation19 | Chromium audio; transient history, no native proof |
+| Queue/repeat/shuffle P0 | PARTIAL | web/main.rs | Existing duplicate/reorder E2E; EXP04 | 0.6 bounded fair history/priority model; no drag/drop/save-queue/handoff |
 | Playback resume/reconnect P0 | PARTIAL | web/main.rs | G07 future position/network recovery tests | Queue persists by account; exact position not implemented |
 | Library/filters/favorites P0 | VERIFIED | media/filters.rs; web/filters.rs/main.rs | Typed filter/TCP; browser11–13 |50-item pages; no full-library virtualization |
 | Albums/artists P0 | PARTIAL | media/catalog.rs; web/main.rs | G04; existing group/race E2E | Provisional groups; visible-page playback; no editions/biographies |
 | Playlist create/share/collaboration P0 | PARTIAL | core/playlists.rs; web/main.rs | G05; revision/idempotency/revoke TCP/E2E | Named local grants; metadata never grants audio |
 | Upload/URL/folder ingest P0 | VERIFIED | media/imports/scanner; web modules | G01/G10; real audio/SSRF/recovery | Direct authorized files only; no DRM extraction |
-| Jobs/progress P1 | VERIFIED | core/jobs.rs; web/jobs.rs | Existing mixed-page/TCP/browser14/15/20 | Owned jobs; no SSE or global admin queue |
+| Jobs/progress P1 | VERIFIED | core/jobs.rs; web/jobs.rs | Existing mixed-page/TCP/browser14/15/22 | Owned jobs; no SSE or global admin queue |
 | Metadata/artwork P1 | PARTIAL | media/metadata.rs; web/metadata.rs | Existing unchanged-source/revision tests | No write-back/bulk/enrichment/recording matching |
 | Context menus/info P1 | PARTIAL | web/experience.rs (0.5) | EXP04 actual next/last/favorite handlers and technical details; general context menus remain partial | Actual local fields; unavailable actions omitted |
 | Full-screen/right Now Playing P1 | NOT_STARTED | web future playback view | G02 layout/state sync | Persistent bottom bar/queue exist |
@@ -48,13 +49,17 @@ Audit2026-10-16: actual main HEADb7033e4, version0.4.0; clean initial tree. Base
 2. P0 all-category Search (four local categories verified in0.5; full/remote search next) — media/catalog.rs/core/playlists.rs → search API/page; EXP02 owner/grant bounds and delayed queries, G03.
 3. P0 old play-promise callback race (fixed/verified in0.5) — web/main.rs start_audio; EXP05 reject an older play after a successful newer selection/logout.
 4. P0 navigation/mobile shell (Home/Search/five-tab increment verified in0.5) — web/main.rs/style.css; EXP03 five phone tabs plus keyboard More sheet, G13.
-5. P0 queue: next/last verified in0.5; fair shuffle history remains missing — web/main.rs; EXP04 next/last/duplicates, then state-machine property tests, G07.
+5. P0 queue: next/last verified in0.5; fair shuffle/previous/repeat order model added in0.6 (PLAY01/02); exact resume/recovery next — web/main.rs; EXP04 next/last/duplicates, then state-machine property tests, G07.
 6. P0 resume and offline-network errors lack explicit recovery — web/main.rs/player.js; G07 server restart/seek/session tests before new engines.
-7. P1 no private listened-event foundation or mixes — future core/media; G06 deterministic sparse-library radio, history opt-out and dedup first.
+7. P1 no private listened-event foundation or mixes — crates/core/src/listening.rs and crates/media/src/discovery.rs (proposed), web/experience.rs; G06 deterministic sparse-library radio, history opt-out and dedup first.
 8. P1 no complete Now Playing/lyrics context — web/main.rs; EXP06 root-coordinated desktop/mobile view and real technical fields.
-9. P1 no secure device/offline client layer — future client/native modules; G08/G09 real devices, persisted manifests, scoped credentials.
+9. P1 no secure device/offline client layer — web/client.rs, proposed platform/android and platform/ios bridges; G08/G09 real devices, persisted manifests, scoped credentials.
 10. P1 sharing is metadata-only and network clients absent — core/playlists.rs and future adapters; G05 separate grant tests, G11/G12 two instances/rooms.
 
 G01/G04/G05/G10/G14 have verified existing subsets, not complete golden-demo acceptance. G02/G03/G13 are the current0.5 increment. G06/G08/G09/G11/G12 remain NOT_STARTED. Native Vela features are separated above from future authorized integrations; missing remote media must never be silently substituted. No experimental or unavailable feature receives a decorative active button.
 
 Executed0.5 evidence:99 Rust tests,20 Chromium scenarios including licensed live import, strict native/WASM Clippy, release builds,9 Python tooling tests and20 clean restarts plus both worker-failure checks. Browser16 covers EXP01/03/04,17 covers EXP02 query ordering/physical abort,18 covers EXP05 old play rejection,19 covers private search after account change. Eight reviewed Home screenshots cover320/768/1440/1920px and both themes. These verify bounded increments, not complete G02/G03/G13 or cross-browser/native parity. No schema change (version7); fresh existing-data backup and fixture restore passed.
+
+Playback0.6 acceptance IDs: PLAY01 tests fair occurrence permutations, repeat-one EOF/manual-next separation, repeat-all full cycles/boundaries, previous seek/history and bounded state. PLAY02 tests real queue priority/remapping under edits, duplicate rows, cursor restore and account-mode reset. Queue breadth remains PARTIAL until save/drag-drop/durable context/recovery and native validation exist. Current browser scenarios20/21 cover these real audio/queue contracts;19 covers account-mode isolation;22 retains the private job-response regression.
+
+Executed0.6 evidence:107 Rust tests (the prior99 plus8 playback-model tests),22 Chromium scenarios including the licensed import, final native/WASM strict Clippy and release builds passed. PLAY01/02 are VERIFIED to this browser/pure-model scope. Initial expanded browser runs exposed fixture assumptions (first-page-only track lookup; toggling transport before any queue existed); tests were corrected to search/start real audio while preserving assertions, and the complete22-case rerun passed. No server schema/data semantics changed.

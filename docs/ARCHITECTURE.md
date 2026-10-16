@@ -38,6 +38,10 @@ flowchart LR
  HTTP -->|authorized original byte ranges| Disk
 ```
 
+## Playback order (0.6.0)
+
+The existing root uses a PlaybackUi bridge for all queue starts/selections/edits/transport commands. Its framework-free playback.rs model emits explicit transitions over occurrence indices, with a bounded unplayed shuffle deck, history cursor and manual-next priority. Insert/swap/remove remap all references synchronously; catalog-only tag/favorite updates leave traversal intact. A full repeat-all cycle includes every occurrence and prevents immediate boundary replay when alternatives exist. Previous and natural EOF have distinct semantics. Queue/cursor storage remains per account, legacy restore is capped1000, account lifecycle resets modes, and duplicate cursor-persistence effects are consolidated. ADR0010 defines exact invariants and limitations. No new DB or native engine is introduced.
+
 ## Persistence and identity
 
 Migration0001 defines accounts/sessions, physical media assets, private tracks, artwork, FTS5 triggers, favorites, durable import jobs, playlists/items/collaborators/mutation history, hashed expiring shares and audit events. Foreign keys and constraints are enabled on all pool connections; four connections,10s busy timeout,15s acquire timeout, WAL and FULL synchronous mode. Transactions preserve playlist revisions and import state.

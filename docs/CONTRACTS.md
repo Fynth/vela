@@ -1,5 +1,11 @@
 # Initial integration contracts
 
+## Playback order increment (0.6.0)
+
+Main implements/integrates sequentially after the0.5 checkpoint; no schema, network or storage ownership change. apps/web/src/playback.rs is a framework-free bounded occurrence-index transition model, not another audio engine. At most1000 entries/history states. Inputs: explicit Next/Previous/natural Ended, elapsed seconds and caller-provided entropy. Outputs: Play(index), seek start with an explicit resume flag, Stop or no action. Sequential mode respects boundaries/repeat-all; repeat-one applies only to natural Ended. Previous after3s seeks current without changing paused/playing state. Shuffle consumes each occurrence once per cycle, records real previous/forward history, stops at exhaustion unless repeat-all, and avoids immediate cycle-boundary repetition when multiple entries exist. Play next is prioritized even in shuffle; Add last becomes an unvisited occurrence. Insert/swap/remove remap every occurrence reference; removing the current item is rejected. Explicit context/queue selection starts a new cycle; metadata updates do not. Shuffle mode changes reset traversal while keeping explicit next requests. Queue order/cursor remain account-scoped; transient shuffle history is not yet a durable cross-device journal.
+
+Root PlaybackUi coordinates existing signals/HTMLMediaElement and consumes transitions; child pages retain the same Actions contract. Every queue mutation updates the order model synchronously. Restore bounds legacy queues to1000 entries and resets traversal for the restored cursor; account changes reset listening modes. No native/gapless/normalization/offline/handoff claim. Unit tests cover permutations, history, repeats, boundaries, priority and edit invariants; real browser E2E must verify actual Next/Previous/shuffle/seek and queue edits before this increment is marked verified.
+
 ## Music-first Home and search (0.5.0)
 
 Evolve seven existing crates without schema changes. Main owns domain/root Cargo+lock/server/TCP+browser tests/authoritative docs. Data contributor owns media search+tests and core playlist search+tests plus their exports; web contributor owns apps/web only; reviewer owns the three new product/parity/design documents. Contributors do not run Cargo or commit; main coordinates at most two compiler jobs.

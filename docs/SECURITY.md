@@ -73,3 +73,7 @@ Existing cancel/retry/scan APIs retain CSRF/Origin/ownership/state/queue checks;
 ## Notice provenance hardening (0.4.0)
 
 The release notice generator now discovers shipped nested license directories and the explicitly reviewed r-efi AUTHORS grants. Pinned wasite texts preserve original bytes; both winapi architecture packages were matched file-by-file to their upstream commit before root license texts were retained. Cached texts require an HTTPS source record and matching SHA256, with bounded reads; missing/tampered provenance fails packaging. Nine Python tooling regressions include these integrity cases. Metadata-only gaps decreased12→6; exact inspected archive hashes and honest missing-grant findings are retained in [notice provenance](third-party-license-texts/README.md). This supplies build evidence, not an independent legal review or authorization to publish externally.
+
+## Playback-order isolation0.6
+
+The pure client order model is capped1000 entries/history states and never supplies authorization. Legacy local queue restoration is capped1000; original HTTP routes still authorize every stream. Shuffle/repeat reset across account changes; metadata changes retain occurrence traversal without widening access. The browser account-change regression explicitly verifies new-user modes as well as stale data/queue isolation. No credentials, media paths, listening events or remote control channel were added to this model.

@@ -23,6 +23,7 @@ pub fn Icon(name: &'static str) -> Element {
         "next-add" => "M3 5h12M3 10h9M3 15h6m7-4v10m-5-5h10",
         "shuffle" => "M3 5h3c6 0 6 14 12 14h3m-4-4 4 4-4 4M3 19h3c6 0 6-14 12-14h3m-4-4 4 4-4 4",
         "repeat" => "M5 7h14l-4-4m4 4-4 4M19 17H5l4 4m-4-4 4-4",
+        "repeat-one" => "M5 6h14l-3-3m3 3-3 3M19 18H5l3 3m-3-3 3-3M11 11l2-1v5",
         "volume" => "M3 9h4l5-5v16l-5-5H3Zm13-2a7 7 0 0 1 0 10m3-13a11 11 0 0 1 0 16",
         "sun" => {
             "M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0ZM12 2v2m0 16v2M2 12h2m16 0h2M5 5l1 1m12 12 1 1M5 19l1-1M18 6l1-1"

@@ -27,6 +27,26 @@ async function navigate(page, name) {
   } else { await page.getByRole('button', { name, exact: true }).first().click(); }
 }
 
+function pcmWave(duration, frequency) {
+  const samples = 44100 * duration;
+  const wave = Buffer.alloc(44 + samples * 2);
+  wave.write('RIFF', 0); wave.writeUInt32LE(36 + samples * 2, 4);
+  wave.write('WAVEfmt ', 8); wave.writeUInt32LE(16, 16);
+  wave.writeUInt16LE(1, 20); wave.writeUInt16LE(1, 22);
+  wave.writeUInt32LE(44100, 24); wave.writeUInt32LE(88200, 28);
+  wave.writeUInt16LE(2, 32); wave.writeUInt16LE(16, 34);
+  wave.write('data', 36); wave.writeUInt32LE(samples * 2, 40);
+  for (let sample = 0; sample < samples; sample++) wave.writeInt16LE(Math.round(1500 * Math.sin(2 * Math.PI * frequency * sample / 44100)), 44 + sample * 2);
+  return wave;
+}
+
+async function findTrack(page, title) {
+  await navigate(page, 'Search');
+  await page.locator('#global-search').fill(title);
+  await page.locator('#global-search').press('Enter');
+  await expect(page.getByRole('region', { name: 'Track results', exact: true })).toBeVisible();
+}
+
 test.describe.configure({ mode: 'serial' });
 test('first-run setup, real FLAC upload, artwork, decode, favorites and safe sharing', async ({ page, browser }) => {
   const errors = [];
@@ -701,15 +721,7 @@ test('Home and global search use real music while navigation preserves the playe
   page.on('pageerror', error => errors.push(error.message));
   await openAdminFixture(page);
   const auth = await (await page.request.get('/api/me')).json();
-  const samples = 44100 * 45;
-  const wave = Buffer.alloc(44 + samples * 2);
-  wave.write('RIFF', 0); wave.writeUInt32LE(36 + samples * 2, 4);
-  wave.write('WAVEfmt ', 8); wave.writeUInt32LE(16, 16);
-  wave.writeUInt16LE(1, 20); wave.writeUInt16LE(1, 22);
-  wave.writeUInt32LE(44100, 24); wave.writeUInt32LE(88200, 28);
-  wave.writeUInt16LE(2, 32); wave.writeUInt16LE(16, 34);
-  wave.write('data', 36); wave.writeUInt32LE(samples * 2, 40);
-  for (let sample = 0; sample < samples; sample++) wave.writeInt16LE(Math.round(1500 * Math.sin(2 * Math.PI * 330 * sample / 44100)), 44 + sample * 2);
+  const wave = pcmWave(45, 330);
   const upload = await page.request.post('/api/upload', { headers: { 'X-CSRF-Token': auth.csrf_token }, multipart: { file: { name: 'Unbroken session.wav', mimeType: 'audio/wav', buffer: wave } } });
   expect(upload.ok()).toBeTruthy();
   const track = (await upload.json()).track;
@@ -853,7 +865,9 @@ test('late play rejections cannot overwrite a newer genuine playback selection',
       return new Promise((_, reject) => { window.__rejectOldPlay = reject; });
     };
   });
+  await findTrack(page, 'Signal');
   await page.getByRole('button', { name: 'Play Signal edited in Vela', exact: true }).click();
+  await findTrack(page, 'Beacon');
   await page.getByRole('button', { name: 'Play Beacon', exact: true }).click();
   await expect.poll(() => page.locator('#vela-audio').evaluate(audio => audio.currentTime)).toBeGreaterThan(0);
   await page.evaluate(() => window.__rejectOldPlay(new DOMException('Fixture old play aborted', 'AbortError')));
@@ -868,6 +882,9 @@ test('private search replies cannot populate another account after logout', asyn
   await page.locator('#username').fill('admin');
   await page.locator('#password').fill(password);
   await page.getByRole('button', { name: 'Sign in →', exact: true }).click();
+  await page.getByRole('button', { name: 'Play new additions', exact: true }).click();
+  await page.getByRole('button', { name: 'Shuffle', exact: true }).click();
+  await page.getByRole('button', { name: 'Repeat: off', exact: true }).click();
   await navigate(page, 'Search');
   let release, seen, delivered;
   const delivery = new Promise(resolve => { delivered = resolve; });
@@ -900,6 +917,112 @@ test('private search replies cannot populate another account after logout', asyn
   await expect(page.getByRole('heading', { name: 'No search results', exact: true })).toBeVisible();
   await expect(page.locator('.search-track-row')).toHaveCount(0);
   await expect(page.locator('.now-playing strong')).toHaveText('Ready when you are');
+  await expect(page.getByRole('button', { name: 'Shuffle', exact: true })).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.getByRole('button', { name: 'Repeat: off', exact: true })).toBeVisible();
+});
+
+test('shuffle visits each occurrence once, previous follows history and repeat uses actual audio endings', async ({ page }) => {
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await openAdminFixture(page);
+  const auth = await (await page.request.get('/api/me')).json();
+  for (const [name, frequency] of [['Drift', 440], ['Harbor', 550]]) {
+    const response = await page.request.post('/api/upload', { headers: { 'X-CSRF-Token': auth.csrf_token }, multipart: { file: { name: `${name}.wav`, mimeType: 'audio/wav', buffer: pcmWave(30, frequency) } } });
+    expect(response.ok()).toBeTruthy();
+  }
+  await findTrack(page, 'Unbroken session');
+  await page.getByRole('button', { name: 'Play Unbroken session', exact: true }).click();
+  for (const title of ['Drift', 'Harbor']) {
+    await findTrack(page, title);
+    await page.getByRole('button', { name: `Add ${title} to playback queue`, exact: true }).click();
+  }
+  await page.getByRole('button', { name: 'Shuffle', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Shuffle', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  const selected = async () => page.locator('#vela-audio').getAttribute('src');
+  const heard = [await selected()];
+  for (let step = 0; step < 2; step++) {
+    const previous = await selected();
+    await page.getByRole('button', { name: 'Next track', exact: true }).click();
+    await expect.poll(selected).not.toBe(previous);
+    await expect(page.locator('#vela-audio')).toHaveJSProperty('paused', false);
+    heard.push(await selected());
+  }
+  expect(new Set(heard).size).toBe(3);
+  await page.getByRole('button', { name: 'Next track', exact: true }).click();
+  await expect(page.locator('#vela-audio')).toHaveJSProperty('paused', true);
+  expect(await selected()).toBe(heard[2]);
+  await page.getByRole('slider', { name: 'Playback position', exact: true }).evaluate(input => { input.value = '0'; input.dispatchEvent(new Event('input', { bubbles: true })); });
+  await page.getByRole('button', { name: 'Previous track', exact: true }).click();
+  await expect(page.locator('#vela-audio')).toHaveAttribute('src', heard[1]);
+  await page.getByRole('button', { name: 'Next track', exact: true }).click();
+  await expect(page.locator('#vela-audio')).toHaveAttribute('src', heard[2]);
+  await expect.poll(() => page.locator('#vela-audio').evaluate(audio => audio.readyState)).toBeGreaterThanOrEqual(2);
+  await page.getByRole('slider', { name: 'Playback position', exact: true }).evaluate(input => { input.value = '5'; input.dispatchEvent(new Event('input', { bubbles: true })); });
+  await page.getByRole('button', { name: 'Pause', exact: true }).click();
+  await page.getByRole('button', { name: 'Previous track', exact: true }).click();
+  expect(await selected()).toBe(heard[2]);
+  await expect(page.locator('#vela-audio')).toHaveJSProperty('paused', true);
+  await expect.poll(() => page.locator('#vela-audio').evaluate(audio => audio.currentTime)).toBeLessThan(1);
+  await page.getByRole('button', { name: 'Repeat: off', exact: true }).click();
+  await page.getByRole('button', { name: 'Repeat: all', exact: true }).click();
+  await page.getByRole('button', { name: 'Play', exact: true }).click();
+  await page.locator('#vela-audio').evaluate(audio => { audio.currentTime = audio.duration - 0.15; });
+  // Let the actual decoder reach EOF; do not dispatch an artificial ended event.
+  await expect.poll(() => page.locator('#vela-audio').evaluate(audio => audio.currentTime)).toBeLessThan(2);
+  await expect(page.locator('#vela-audio')).toHaveJSProperty('paused', false);
+  expect(await selected()).toBe(heard[2]);
+  await page.getByRole('button', { name: 'Next track', exact: true }).click();
+  await expect(page.locator('#vela-audio')).toHaveJSProperty('paused', true);
+  expect(await selected()).toBe(heard[2]);
+  await page.getByRole('button', { name: 'Repeat: one', exact: true }).click();
+  await page.getByRole('button', { name: 'Repeat: off', exact: true }).click();
+  await page.getByRole('button', { name: 'Next track', exact: true }).click();
+  await expect.poll(selected).not.toBe(heard[2]);
+  await expect(page.locator('#vela-audio')).toHaveJSProperty('paused', false);
+  expect(errors).toEqual([]);
+});
+
+test('explicit next and duplicate occurrence history survive queue reorder and removal in shuffle', async ({ page }) => {
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await openAdminFixture(page);
+  await findTrack(page, 'Unbroken session');
+  await page.getByRole('button', { name: 'Play Unbroken session', exact: true }).click();
+  for (const title of ['Drift', 'Harbor']) {
+    await findTrack(page, title);
+    await page.getByRole('button', { name: `Add ${title} to playback queue`, exact: true }).click();
+  }
+  await page.getByRole('button', { name: 'Shuffle', exact: true }).click();
+  await findTrack(page, 'Drift');
+  await page.getByRole('button', { name: 'Play Drift next', exact: true }).click();
+  await page.getByRole('button', { name: 'Next track', exact: true }).click();
+  await expect(page.locator('.now-playing strong')).toHaveText('Drift');
+  await findTrack(page, 'Harbor');
+  await page.getByRole('button', { name: 'Play Harbor next', exact: true }).click();
+  const drift = await page.locator('#vela-audio').getAttribute('src');
+  await page.getByRole('button', { name: 'Show playback queue', exact: true }).click();
+  await expect(page.locator('.queue-row .queue-track strong')).toHaveText(['Unbroken session', 'Drift', 'Harbor', 'Drift', 'Harbor']);
+  await page.locator('.queue-row').nth(2).getByRole('button', { name: 'Move track up', exact: true }).click();
+  await expect(page.locator('.queue-row').nth(2)).toHaveClass(/current/);
+  await page.locator('.queue-row').first().getByRole('button', { name: 'Remove queued track', exact: true }).click();
+  await expect(page.locator('.queue-row .queue-track strong')).toHaveText(['Harbor', 'Drift', 'Drift', 'Harbor']);
+  await expect(page.locator('.queue-row').nth(1)).toHaveClass(/current/);
+  await expect(page.locator('#vela-audio')).toHaveAttribute('src', drift);
+  await page.getByRole('button', { name: 'Next track', exact: true }).click();
+  await expect(page.locator('.queue-row').first()).toHaveClass(/current/);
+  await expect(page.locator('.now-playing strong')).toHaveText('Harbor');
+  await page.getByRole('slider', { name: 'Playback position', exact: true }).evaluate(input => { input.value = '0'; input.dispatchEvent(new Event('input', { bubbles: true })); });
+  await page.getByRole('button', { name: 'Previous track', exact: true }).click();
+  await expect(page.locator('.queue-row').nth(1)).toHaveClass(/current/);
+  await expect(page.locator('.now-playing strong')).toHaveText('Drift');
+  await page.getByRole('button', { name: 'Next track', exact: true }).click();
+  await expect(page.locator('.queue-row').first()).toHaveClass(/current/);
+  await page.reload();
+  await page.getByRole('button', { name: 'Show playback queue', exact: true }).click();
+  await expect(page.locator('.queue-row .queue-track strong')).toHaveText(['Harbor', 'Drift', 'Drift', 'Harbor']);
+  await expect(page.locator('.queue-row').first()).toHaveClass(/current/);
+  await expect(page.getByRole('button', { name: 'Shuffle', exact: true }).first()).toHaveAttribute('aria-pressed', 'false');
+  expect(errors).toEqual([]);
 });
 
 test('private job replies cannot reappear after logout and another account signs in', async ({ page }) => {
