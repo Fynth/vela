@@ -1,5 +1,8 @@
 /* The native audio element owns decoding, buffering and platform media controls. */
 (() => {
+  const checkpoint = () => window.dispatchEvent(new Event("vela-checkpoint"));
+  window.addEventListener("pagehide", checkpoint);
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") checkpoint(); });
   const audio = () => document.getElementById("vela-audio");
   const destinations = new Set(["home", "search", "library", "albums", "artists", "favorites", "playlists", "imports", "jobs", "settings"]);
   document.addEventListener("vela-route", ({detail}) => {

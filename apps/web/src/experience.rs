@@ -1,4 +1,5 @@
 //! Listener pages use bounded typed requests and the root-owned playback actions.
+use crate::session::{ContextKind, PlaybackContext};
 use crate::{
     Art, CatalogCover,
     client::{RequestScope, get},
@@ -13,7 +14,7 @@ use vela_domain::*;
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct Actions {
-    pub play: EventHandler<(Vec<Track>, usize)>,
+    pub play: EventHandler<(Vec<Track>, usize, PlaybackContext)>,
     pub queue: EventHandler<(Track, bool)>,
     pub favorite: EventHandler<Track>,
     pub album: EventHandler<AlbumSummary>,
@@ -46,11 +47,11 @@ fn TrackActions(track: Track, actions: Actions) -> Element {
 }
 
 #[component]
-fn TrackCards(tracks: Vec<Track>, actions: Actions) -> Element {
+fn TrackCards(tracks: Vec<Track>, origin: PlaybackContext, actions: Actions) -> Element {
     rsx! { div { class: "home-track-grid", for (at, track) in tracks.iter().cloned().enumerate() {
-        { let context = tracks.clone(); let play = track.clone(); rsx! {
+        { let origin=origin.clone(); let context = tracks.clone(); let play = track.clone(); rsx! {
             article { class: "listening-card", key: "{track.id}",
-                button { class: "listening-card-play", "aria-label": "Play {track.title}", onclick: move |_| actions.play.call((context.clone(), at)),
+                button { class: "listening-card-play", "aria-label": "Play {track.title}", onclick: move |_| actions.play.call((context.clone(), at, origin.clone())),
                     div { class: "listening-cover", Art { track: play } span { class: "cover-play", Icon { name: "play" } } }
                     strong { "{track.title}" } small { "{track.artist}" }
                 }
@@ -149,7 +150,7 @@ pub fn Home(
     rsx! { section { class: "home-page", "aria-label": "Home",
         div { class: "home-hero",
             div { span { class: "eyebrow", "YOURS TO DISCOVER" } h1 { "Hello, {name}." } p { "A little closer to the music you love." }
-                if !playable.is_empty() { button { class: "button cream", onclick: move |_| actions.play.call((playable.clone(), 0)), Icon { name: "play" } "Play new additions" } }
+                if !playable.is_empty() { button { class: "button cream", onclick: move |_| actions.play.call((playable.clone(), 0, PlaybackContext::new(ContextKind::Home,"New in your library"))), Icon { name: "play" } "Play new additions" } }
                 else if !loading() { button { class: "button cream", onclick: move |_| actions.add.call(()), Icon { name: "plus" } "Add your first music" } }
             }
             div { class: "home-artwork", "aria-hidden": "true", if let Some(track) = snapshot.recent.first() { Art { track: track.clone() } } else { div { class: "home-vinyl", span { "v" } } } }
@@ -158,9 +159,9 @@ pub fn Home(
         if !error().is_empty() { div { class: "alert error", role: "alert", "{error}" } }
         if loading() && snapshot.recent.is_empty() { div { class: "loading-skeletons", role: "status", "aria-label": "Loading Home", for _ in 0..4 { div { class: "skeleton-card", "aria-hidden": "true" } } } }
         if !snapshot.recent.is_empty() {
-            section { class: "home-section", "aria-labelledby": "home-additions", div { class: "section-toolbar", h2 { id: "home-additions", "New in your library" } button { class: "text-button", onclick: move |_| actions.navigate.call("library".into()), "Open library" } } TrackCards { tracks: snapshot.recent, actions } }
+            section { class: "home-section", "aria-labelledby": "home-additions", div { class: "section-toolbar", h2 { id: "home-additions", "New in your library" } button { class: "text-button", onclick: move |_| actions.navigate.call("library".into()), "Open library" } } TrackCards { tracks: snapshot.recent, origin:PlaybackContext::new(ContextKind::Home,"New in your library"), actions } }
         } else if !loading() && error().is_empty() { div { class: "empty-state", Icon { name: "music" } h2 { "Make room for your first listen" } p { "Upload music you own or import an authorized audio download. Your library stays private." } button { class: "button primary", onclick: move |_| actions.add.call(()), "Add music" } button { class: "text-button", onclick: move |_| actions.navigate.call("imports".into()), "Import from a URL" } } }
-        if !snapshot.favorites.is_empty() { section { class: "home-section", "aria-labelledby": "home-favorites", div { class: "section-toolbar", h2 { id: "home-favorites", "Your favorites" } button { class: "text-button", onclick: move |_| actions.navigate.call("favorites".into()), "All favorites" } } TrackCards { tracks: snapshot.favorites, actions } } }
+        if !snapshot.favorites.is_empty() { section { class: "home-section", "aria-labelledby": "home-favorites", div { class: "section-toolbar", h2 { id: "home-favorites", "Your favorites" } button { class: "text-button", onclick: move |_| actions.navigate.call("favorites".into()), "All favorites" } } TrackCards { tracks: snapshot.favorites, origin:PlaybackContext::new(ContextKind::Favorites,"Your favorites"), actions } } }
         if !snapshot.albums.is_empty() { section { class: "home-section", "aria-labelledby": "home-albums", h2 { id: "home-albums", "From your albums" } div { class: "home-album-grid", for album in snapshot.albums {
             { let open = album.clone(); rsx! { button { class: "listening-card collection-card", onclick: move |_| actions.album.call(open.clone()), "aria-label": "Open album {album.title} by {album.artist}", CatalogCover { artwork_id: album.artwork_id } strong { "{album.title}" } small { "{album.artist}" } } } }
         } } } }
@@ -277,7 +278,7 @@ pub fn Search(
         if let Some(found) = found {
             if count == 0 { div { class: "empty-state", h2 { "No search results" } p { "Try another title or name, or choose a different category." } } }
             if matches!(selected_category,"all"|"tracks") && !found.tracks.is_empty() { section { class: "search-result-section", "aria-label": "Track results", h2 { "Tracks" } for (at,track) in found.tracks.iter().cloned().enumerate() {
-                { let context = found.tracks.clone(); let row = track.clone(); rsx! { article { class: "search-track-row", key: "{track.id}", button { class: "search-track-main", "aria-label": "Play {track.title}", onclick: move |_| actions.play.call((context.clone(),at)), Art { track: row } div { strong { "{track.title}" } small { "{track.artist} · {track.album}" } } Icon { name: "play" } } TrackActions { track:track.clone(), actions } } } }
+                { let context = found.tracks.clone(); let row = track.clone(); rsx! { article { class: "search-track-row", key: "{track.id}", button { class: "search-track-main", "aria-label": "Play {track.title}", onclick: move |_| actions.play.call((context.clone(),at,PlaybackContext::new(ContextKind::Search,"Search results"))), Art { track: row } div { strong { "{track.title}" } small { "{track.artist} · {track.album}" } } Icon { name: "play" } } TrackActions { track:track.clone(), actions } } } }
             } } }
             if matches!(selected_category,"all"|"albums") && !found.albums.is_empty() { section { class: "search-result-section", "aria-label": "Album results", h2 { "Albums" } div { class: "home-album-grid", for album in found.albums {
                 { let open=album.clone(); rsx! { button { class: "listening-card collection-card", "aria-label": "Open album {album.title} by {album.artist}", onclick: move |_| actions.album.call(open.clone()), CatalogCover { artwork_id: album.artwork_id } strong { "{album.title}" } small { "{album.artist}" } } } }

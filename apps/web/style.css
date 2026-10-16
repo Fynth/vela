@@ -392,3 +392,8 @@
   .more-sheet .icon-button {min-width:44px;height:44px;}
 }
 @media(prefers-reduced-motion:reduce) {*,*::before,*::after {animation:none!important;transition:none!important;scroll-behavior:auto!important;}}
+
+.playback-status {position:fixed;z-index:45;bottom:104px;left:max(16px,calc(50% - 300px));right:max(16px,calc(50% - 300px));display:flex;align-items:center;gap:14px;padding:12px 16px;border:1px solid var(--line);border-radius:12px;background:var(--surface-raised);color:var(--text);box-shadow:var(--shadow);font-size:13px;}
+.playback-status .text-button {flex-shrink:0;min-height:44px;}
+.queue-context {max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:12px;}
+@media(max-width:620px){.playback-status {bottom:calc(153px + env(safe-area-inset-bottom));font-size:12px;flex-wrap:wrap;gap:5px;}.queue-context {max-width:190px;}}

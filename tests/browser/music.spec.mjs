@@ -1104,7 +1104,213 @@ test('explicit next and duplicate occurrence history survive queue reorder and r
   await page.getByRole('button', { name: 'Show playback queue', exact: true }).click();
   await expect(page.locator('.queue-row .queue-track strong')).toHaveText(['Harbor', 'Drift', 'Drift', 'Harbor']);
   await expect(page.locator('.queue-row').first()).toHaveClass(/current/);
-  await expect(page.getByRole('button', { name: 'Shuffle', exact: true }).first()).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.getByRole('button', { name: 'Shuffle', exact: true }).first()).toHaveAttribute('aria-pressed', 'true');
+  expect(errors).toEqual([]);
+});
+
+// RES01–04: actual long PCM and the real account-scoped bookmark, no fake catalog.
+test('RES01 restored duplicate occurrence keeps position context and preferences without autoplay', async ({ page }) => {
+  const errors=[]; page.on('pageerror', e=>errors.push(e.message));
+  await openAdminFixture(page);
+  await findTrack(page,'Drift');
+  await page.getByRole('button',{name:'Play Drift',exact:true}).click();
+  await page.getByRole('button',{name:'Add Drift to playback queue',exact:true}).click();
+  await findTrack(page,'Harbor');
+  await page.getByRole('button',{name:'Add Harbor to playback queue',exact:true}).click();
+  await page.getByRole('button',{name:'Show playback queue',exact:true}).click();
+  await page.locator('.queue-row').nth(1).getByRole('button',{name:'Drift',exact:false}).first().click();
+  await expect(page.locator('#vela-audio')).toHaveJSProperty('paused',false);
+  await expect.poll(()=>page.locator('#vela-audio').evaluate(a=>a.readyState)).toBeGreaterThanOrEqual(2);
+  await page.getByRole('slider',{name:'Playback position',exact:true}).evaluate(e=>{e.value='11';e.dispatchEvent(new Event('input',{bubbles:true}));});
+  await page.getByRole('button',{name:'Pause',exact:true}).click();
+  await page.locator('.queue-row').nth(2).getByRole('button',{name:'Move track up',exact:true}).click();
+  await page.locator('.queue-row').first().getByRole('button',{name:'Remove queued track',exact:true}).click();
+  await expect(page.locator('.queue-row').nth(1)).toHaveClass(/current/);
+  await expect.poll(()=>page.locator('#vela-audio').evaluate(a=>a.currentTime)).toBeGreaterThanOrEqual(11);
+  await page.getByRole('button',{name:'Shuffle',exact:true}).first().click();
+  await page.getByRole('button',{name:'Repeat: off',exact:true}).first().click();
+  await page.getByRole('slider',{name:'Volume',exact:true}).first().evaluate(e=>{e.value='0.37';e.dispatchEvent(new Event('input',{bubbles:true}));});
+  const account=await (await page.request.get('/api/me')).json();
+  const key=`vela.${account.user.id}.playback.v1`;
+  const bookmark=await page.evaluate(key=>JSON.parse(localStorage.getItem(key)),key);
+  expect(bookmark.cursor).toBe(1);expect(bookmark.position).toBeGreaterThanOrEqual(11);expect(bookmark.context.kind).toBe('search');
+  expect(bookmark.volume).toBe(0.37);expect(bookmark.shuffle).toBe(true);expect(bookmark.repeat).toBe('all');
+  expect(JSON.stringify(bookmark)).not.toContain(account.csrf_token);
+  let streams=0;page.on('request',r=>{if(/\/api\/tracks\/[^/]+\/stream$/.test(r.url())) streams++;});
+  await page.reload();
+  await expect(page.locator('.now-playing strong')).toHaveText('Drift');
+  expect(Math.abs(Number(await page.getByRole('slider',{name:'Playback position',exact:true}).inputValue())-bookmark.position)).toBeLessThan(0.2);
+  expect(streams).toBe(0);expect(await page.locator('#vela-audio').getAttribute('src')).toBeNull();
+  await page.getByRole('button',{name:'Show playback queue',exact:true}).click();
+  await expect(page.locator('.queue-row .queue-track strong')).toHaveText(['Harbor','Drift']);
+  await expect(page.locator('.queue-row').nth(1)).toHaveClass(/current/);
+  await expect(page.locator('.queue-context')).toHaveText('Playing from Search results');
+  await expect(page.getByRole('button',{name:'Shuffle',exact:true}).first()).toHaveAttribute('aria-pressed','true');
+  await page.getByRole('button',{name:'Play',exact:true}).click();
+  await expect(page.locator('#vela-audio')).toHaveJSProperty('paused',false);
+  await expect.poll(()=>page.locator('#vela-audio').evaluate(a=>a.currentTime)).toBeGreaterThanOrEqual(11);
+  expect(await page.locator('#vela-audio').evaluate(a=>a.currentTime)).toBeLessThan(15);
+  await page.getByRole('button',{name:'Close playback queue',exact:true}).click();
+  await navigate(page,'Home');await navigate(page,'Library');
+  await expect(page.locator('.now-playing strong')).toHaveText('Drift');
+  await findTrack(page,'Harbor');await page.getByRole('button',{name:'Play Harbor',exact:true}).click();
+  await expect(page.locator('#vela-audio')).toHaveJSProperty('paused',false);
+  expect(await page.locator('#vela-audio').evaluate(a=>a.currentTime)).toBeLessThan(3);
+  expect(errors).toEqual([]);
+});
+
+test('RES02 malformed foreign and oversized bookmarks do not fetch or expose queue data',async({page})=>{
+  await openAdminFixture(page);
+  const account=await (await page.request.get('/api/me')).json();
+  await findTrack(page,'Drift');await page.getByRole('button',{name:'Play Drift',exact:true}).click();
+  await page.getByRole('button',{name:'Pause',exact:true}).click();
+  const key=`vela.${account.user.id}.playback.v1`;
+  const raw=await page.evaluate(k=>localStorage.getItem(k),key);
+  let streams=0;page.on('request',r=>{if(/\/stream$/.test(r.url()))streams++;});
+  await page.addInitScript(()=>{
+    const config=JSON.parse(localStorage.getItem('vela-fixture-bookmark-injection')||'null');
+    if(config){localStorage.removeItem('vela-fixture-bookmark-injection');localStorage.setItem(config.key,config.invalid);localStorage.removeItem(`vela.${config.id}.queue`);localStorage.removeItem(`vela.${config.id}.queue_index`);}
+  });
+  for(const invalid of ['{', JSON.stringify({...JSON.parse(raw),owner_id:randomUUID()}),JSON.stringify({...JSON.parse(raw),cursor:1001}), ' '.repeat(4*1024*1024+1)]){
+    await page.evaluate(config=>localStorage.setItem('vela-fixture-bookmark-injection',JSON.stringify(config)),{key,invalid,id:account.user.id});
+    await page.reload();
+    await expect(page.locator('.now-playing strong')).toHaveText('Ready when you are');
+    await expect(page.getByRole('button',{name:'Play',exact:true})).toBeDisabled();
+    await page.getByRole('button',{name:'Show playback queue',exact:true}).click();
+    await expect(page.locator('.queue-row')).toHaveCount(0);
+    await page.getByRole('button',{name:'Close playback queue',exact:true}).click();
+  }
+  expect(streams).toBe(0);
+});
+
+async function pausedBookmark(page,title='Drift',position=9){
+  await openAdminFixture(page);await findTrack(page,title);
+  await page.getByRole('button',{name:`Play ${title}`,exact:true}).click();
+  await expect.poll(()=>page.locator('#vela-audio').evaluate(a=>a.readyState)).toBeGreaterThanOrEqual(2);
+  await page.getByRole('slider',{name:'Playback position',exact:true}).evaluate((e,p)=>{e.value=String(p);e.dispatchEvent(new Event('input',{bubbles:true}));},position);
+  await page.getByRole('button',{name:'Pause',exact:true}).click();await page.reload();
+  await expect(page.locator('.now-playing strong')).toHaveText(title);
+}
+
+test('NET01 genuine failed transfer recovers via authorized HEAD at the saved seek',async({page})=>{
+  const errors=[];page.on('pageerror',e=>errors.push(e.message));await pausedBookmark(page);
+  let failures=0,heads=0;
+  await page.route('**/api/tracks/*/stream',async route=>{
+    if(route.request().method()==='HEAD'){heads++;await route.continue();}
+    else if(failures++===0){await route.abort('connectionreset');}else{await route.continue();}
+  });
+  await page.getByRole('button',{name:'Play',exact:true}).click();
+  await expect.poll(()=>heads).toBe(1);
+  await expect(page.locator('#vela-audio')).toHaveJSProperty('paused',false);
+  await expect.poll(()=>page.locator('#vela-audio').evaluate(a=>a.currentTime)).toBeGreaterThanOrEqual(9);
+  expect(await page.locator('#vela-audio').evaluate(a=>a.currentTime)).toBeLessThan(14);
+  expect(errors).toEqual([]);
+});
+
+test('NET02 pause and a newer duplicate occurrence cancel held recovery and retries are bounded',async({page})=>{
+  const errors=[];page.on('pageerror',e=>errors.push(e.message));await pausedBookmark(page);
+  let release;const gate=new Promise(resolve=>release=resolve);let seen;const held=new Promise(resolve=>seen=resolve);
+  let gets=0,heads=0;
+  await page.route('**/api/tracks/*/stream',async route=>{
+    if(route.request().method()==='HEAD'){heads++;const response=await route.fetch();seen();await gate;try{await route.fulfill({response});}catch{ /* physically aborted */ }}
+    else if(gets++===0){await route.abort('connectionreset');}else{await route.continue();}
+  });
+  await page.getByRole('button',{name:'Play',exact:true}).click();await held;
+  await page.getByRole('button',{name:'Pause',exact:true}).click();
+  await expect(page.locator('#vela-audio')).toHaveJSProperty('paused',true);
+  await findTrack(page,'Drift');
+  await page.getByRole('button',{name:'Play Drift',exact:true}).click();
+  await expect(page.locator('#vela-audio')).toHaveJSProperty('paused',false);
+  expect(await page.locator('#vela-audio').evaluate(a=>a.currentTime)).toBeLessThan(3);
+  const generation=await page.locator('#vela-audio').getAttribute('data-source-generation');
+  await page.getByRole('slider',{name:'Playback position',exact:true}).evaluate(e=>{e.value='6';e.dispatchEvent(new Event('input',{bubbles:true}));});
+  release();
+  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+  expect(await page.locator('#vela-audio').getAttribute('data-source-generation')).toBe(generation);
+  expect(await page.locator('#vela-audio').evaluate(a=>a.currentTime)).toBeGreaterThanOrEqual(6);
+  expect(heads).toBe(1);
+  await page.getByRole('button',{name:'Pause',exact:true}).click();await page.reload();
+  await page.unroute('**/api/tracks/*/stream');
+  let probes=0;
+  await page.route('**/api/tracks/*/stream',async route=>{if(route.request().method()==='HEAD')probes++;await route.abort('connectionreset');});
+  await page.getByRole('button',{name:'Play',exact:true}).click();
+  await expect(page.getByRole('status').filter({hasText:'Press Play to retry from your saved position'})).toBeVisible({timeout:15000});
+  expect(probes).toBe(3);
+  await page.screenshot({path:'test-results/resume-recovery-desktop.png'});
+  await page.setViewportSize({width:320,height:780});await page.emulateMedia({reducedMotion:'reduce'});
+  for(const theme of ['dark','light']){
+    if(await page.locator('html').getAttribute('data-theme')!==theme)await page.getByRole('button',{name:'Change color theme',exact:true}).click();
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBeTruthy();
+    await expect(page.getByRole('button',{name:'Retry playback',exact:true})).toBeInViewport();
+    expect(await page.getByRole('button',{name:'Retry playback',exact:true}).evaluate(e=>e.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
+    await page.screenshot({path:`test-results/resume-recovery-phone-${theme}.png`});
+  }
+  await page.unroute('**/api/tracks/*/stream');
+  await page.getByRole('button',{name:'Retry playback',exact:true}).click();
+  await expect(page.locator('#vela-audio')).toHaveJSProperty('paused',false);
+  expect(errors).toEqual([]);
+});
+
+test('RES03 stalled metadata recovers and an obsolete transfer cannot replace the resumed occurrence',async({page})=>{
+  const errors=[];page.on('pageerror',e=>errors.push(e.message));await pausedBookmark(page);
+  let release;const gate=new Promise(resolve=>release=resolve);let seen;const held=new Promise(resolve=>seen=resolve);
+  let gets=0,heads=0;
+  await page.route('**/api/tracks/*/stream',async route=>{
+    if(route.request().method()==='HEAD'){heads++;await route.continue();}
+    else if(gets++===0){const response=await route.fetch();seen();await gate;try{await route.fulfill({response});}catch{ /* cancelled old source */ }}
+    else{await route.continue();}
+  });
+  await page.getByRole('button',{name:'Play',exact:true}).click();await held;
+  await expect.poll(()=>heads,{timeout:15000}).toBe(1);
+  await expect(page.locator('#vela-audio')).toHaveJSProperty('paused',false);
+  await expect.poll(()=>page.locator('#vela-audio').evaluate(a=>a.currentTime)).toBeGreaterThanOrEqual(9);
+  const generation=await page.locator('#vela-audio').getAttribute('data-source-generation');release();
+  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+  expect(await page.locator('#vela-audio').getAttribute('data-source-generation')).toBe(generation);
+  expect(await page.locator('#vela-audio').evaluate(a=>a.currentTime)).toBeGreaterThanOrEqual(9);
+  expect(errors).toEqual([]);
+});
+
+test('RES04 playlist row plays its correct duplicate occurrence in the full authorized context',async({page})=>{
+  await openAdminFixture(page);const account=await (await page.request.get('/api/me')).json();
+  const response=await page.request.post('/api/playlists',{headers:{'X-CSRF-Token':account.csrf_token},data:{name:'Resume route'}});
+  expect(response.ok()).toBeTruthy();const playlist=await response.json();
+  for(const title of ['Drift','Drift','Harbor']){
+    const found=await (await page.request.get(`/api/search?q=${title}`)).json();
+    const detail=await (await page.request.get(`/api/playlists/${playlist.id}`)).json();
+    const added=await page.request.post(`/api/playlists/${playlist.id}/items`,{headers:{'X-CSRF-Token':account.csrf_token},data:{track_id:found.tracks.find(t=>t.title===title).id,revision:detail.playlist.revision,mutation_id:randomUUID()}});expect(added.ok()).toBeTruthy();
+  }
+  await navigate(page,'Playlists');await page.locator('.playlist-card').filter({hasText:'Resume route'}).click();
+  await page.locator('.playlist-track').nth(1).getByRole('button',{name:'Play Drift',exact:true}).click();
+  await expect(page.locator('#vela-audio')).toHaveJSProperty('paused',false);
+  await page.getByRole('button',{name:'Show playback queue',exact:true}).click();
+  await expect(page.locator('.queue-row .queue-track strong')).toHaveText(['Drift','Drift','Harbor']);
+  await expect(page.locator('.queue-row').nth(1)).toHaveClass(/current/);
+  await expect(page.locator('.queue-context')).toHaveText('Playing from Resume route');
+  await page.reload();await expect(page.locator('.now-playing strong')).toHaveText('Drift');
+  await page.getByRole('button',{name:'Show playback queue',exact:true}).click();
+  await expect(page.locator('.queue-row').nth(1)).toHaveClass(/current/);
+  await expect(page.locator('.queue-context')).toHaveText('Playing from Resume route');
+  await page.getByRole('button',{name:'Next track',exact:true}).click();
+  await expect(page.locator('.now-playing strong')).toHaveText('Harbor');
+});
+
+test('AUTH01 real revoked session stops the source and clears private playback UI',async({page})=>{
+  const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  // A dedicated real session prevents revoking another scenario's fixture cookie.
+  const response=await page.request.post('/api/login',{data:{username:'admin',password}});
+  expect(response.ok()).toBeTruthy();const account=await response.json();
+  await page.goto('/');await navigate(page,'Search');
+  await findTrack(page,'Drift');await page.getByRole('button',{name:'Play Drift',exact:true}).click();
+  await expect(page.locator('#vela-audio')).toHaveJSProperty('paused',false);
+  await findTrack(page,'Harbor');
+  await page.getByRole('button',{name:'Add Harbor to playback queue',exact:true}).click();
+  const revoked=await page.request.post('/api/logout',{headers:{'X-CSRF-Token':account.csrf_token}});expect(revoked.ok()).toBeTruthy();
+  await page.getByRole('button',{name:'Show playback queue',exact:true}).click();
+  await page.locator('.queue-row').nth(1).getByRole('button',{name:'Harbor',exact:false}).click();
+  await expect(page.locator('#username')).toBeVisible();
+  await expect(page.getByRole('alert').filter({hasText:'Your session expired'})).toBeVisible();
+  await expect(page.locator('#vela-audio')).toHaveCount(0);
   expect(errors).toEqual([]);
 });
 

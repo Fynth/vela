@@ -12,12 +12,12 @@ Audit2026-10-16: actual main HEADb7033e4, version0.4.0; clean initial tree. Base
 | Play next / add last P0 | VERIFIED | web/main.rs; experience.rs | EXP04: occurrence-aware insertion, no interruption | Bounded browser queue; no handoff |
 | Fair occurrence order P0 | VERIFIED | web/playback.rs; root PlaybackUi | PLAY01/02:8 unit tests + playback E2E + mode isolation | Chromium audio; transient history, no native proof |
 | Queue/repeat/shuffle P0 | PARTIAL | web/main.rs | Existing duplicate/reorder E2E; EXP04 | 0.6 bounded fair history/priority model; no drag/drop/save-queue/handoff |
-| Playback resume/reconnect P0 | PARTIAL | web/main.rs | G07 future position/network recovery tests | Queue persists by account; exact position not implemented |
+| Browser resume/reconnect P0 | VERIFIED | web/session.rs, browser_player.rs, main.rs, player.js | RES01–04/NET01–02/AUTH01,3 unit policy tests +7 real browser cases | Paused per-account bookmark; bounded streaming retry; no offline/native/device sync |
 | Library/filters/favorites P0 | VERIFIED | media/filters.rs; web/filters.rs/main.rs | Typed filter/TCP; browser11–13 |50-item pages; no full-library virtualization |
 | Albums/artists P0 | PARTIAL | media/catalog.rs; web/main.rs | G04; existing group/race E2E | Provisional groups; visible-page playback; no editions/biographies |
 | Playlist create/share/collaboration P0 | PARTIAL | core/playlists.rs; web/main.rs | G05; revision/idempotency/revoke TCP/E2E | Named local grants; metadata never grants audio |
 | Upload/URL/folder ingest P0 | VERIFIED | media/imports/scanner; web modules | G01/G10; real audio/SSRF/recovery | Direct authorized files only; no DRM extraction |
-| Jobs/progress P1 | VERIFIED | core/jobs.rs; web/jobs.rs | Existing mixed-page/TCP/browser14/15/23 | Owned jobs; no SSE or global admin queue |
+| Jobs/progress P1 | VERIFIED | core/jobs.rs; web/jobs.rs | Existing mixed-page/TCP/browser14/15/30 | Owned jobs; no SSE or global admin queue |
 | Metadata/artwork P1 | PARTIAL | media/metadata.rs; web/metadata.rs | Existing unchanged-source/revision tests | No write-back/bulk/enrichment/recording matching |
 | Context menus/info P1 | PARTIAL | web/experience.rs (0.5) | EXP04 actual next/last/favorite handlers and technical details; general context menus remain partial | Actual local fields; unavailable actions omitted |
 | Full-screen/right Now Playing P1 | NOT_STARTED | web future playback view | G02 layout/state sync | Persistent bottom bar/queue exist |
@@ -49,8 +49,8 @@ Audit2026-10-16: actual main HEADb7033e4, version0.4.0; clean initial tree. Base
 2. P0 all-category Search (four local categories verified in0.5; full/remote search next) — media/catalog.rs/core/playlists.rs → search API/page; EXP02 owner/grant bounds and delayed queries, G03.
 3. P0 old play-promise callback race (fixed/verified in0.5) — web/main.rs start_audio; EXP05 reject an older play after a successful newer selection/logout.
 4. P0 navigation/mobile shell (Home/Search/five-tab increment verified in0.5) — web/main.rs/style.css; EXP03 five phone tabs plus keyboard More sheet, G13.
-5. P0 queue: next/last verified in0.5; fair shuffle/previous/repeat order model added in0.6 (PLAY01/02); exact resume/recovery next — web/main.rs; EXP04 next/last/duplicates, then state-machine property tests, G07.
-6. P0 resume and offline-network errors lack explicit recovery — web/main.rs/player.js; G07 server restart/seek/session tests before new engines.
+5. P0 queue: next/last verified in0.5; fair shuffle/previous/repeat order model added in0.6 (PLAY01/02); 0.7 adds context/position/preferences restore and bounded recovery — web/session.rs, browser_player.rs/main.rs; EXP04 next/last/duplicates, then state-machine property tests, G07.
+6. P0 browser resume/recovery is verified in0.7 — web/session.rs/browser_player.rs/player.js; retain G07 seek/retry/session regressions. Offline/native and cross-device synchronization remain separate P1 work.
 7. P1 no private listened-event foundation or mixes — crates/core/src/listening.rs and crates/media/src/discovery.rs (proposed), web/experience.rs; G06 deterministic sparse-library radio, history opt-out and dedup first.
 8. P1 no complete Now Playing/lyrics context — web/main.rs; EXP06 root-coordinated desktop/mobile view and real technical fields.
 9. P1 no secure device/offline client layer — web/client.rs, proposed platform/android and platform/ios bridges; G08/G09 real devices, persisted manifests, scoped credentials.
@@ -67,3 +67,7 @@ Executed0.6 evidence:107 Rust tests (the prior99 plus8 playback-model tests),22 
 Playlist response follow-up0.6.1: PLNAV01 is browser20; PLAY01/02 are now21/22, and the private Jobs regression is23. The regression was first run against0.6.0 and reproduced an abandoned detail opening after route return. The patch binds playlist detail/refresh/share UI to session/object/view generations without changing permissions, media rights or schema. Current status/evidence is recorded in PROGRESS after the full rerun.
 
 Final0.6.1 evidence:107 Rust tests and23 real Chromium scenarios including PLNAV01 passed; strict native/WASM Clippy and release builds passed. PLNAV01 is VERIFIED for detail navigation, committed-delete refresh, monotonic same-view revision and share-token presentation across selection changes. Broader social/media-grant/native features remain PARTIAL/NOT_STARTED. The existing account and20 tracks were backed up/restored and retained under schema7; active local assets/binary are now a frozen verified snapshot.
+
+Browser0.7 acceptance: RES01 covers duplicate cursor, queue remapping, real Search provenance, position/preferences and no autoplay/no pre-Play stream; RES02 corrupt/foreign/oversized storage; RES03 actual stalled metadata, watchdog/HEAD recovery and late transfer; RES04 full authorized playlist context at the stable duplicate entry. NET01 aborts a genuine transfer and resumes at the saved seek; NET02 holds a genuine HEAD across pause/new selection, checks the fixed three-attempt budget and manual retry at320px in both themes. AUTH01 revokes a real dedicated session and verifies source/private UI removal. Existing PLAY/PLNAV/EXP and import/share/security tests remain. These are G07 browser subsets, not offline/device/native certification.
+
+Final0.7 evidence:110 Rust tests,30 isolated real Chromium scenarios including the opted-in licensed live import, fmt, strict native/WASM Clippy and native/WASM release builds. Three policy tests cover snapshot bounds/identity/encoding/seek and retries. PROGRESS records exact logs, the corrected initial recovery panic, responsive review and runtime/package checkpoint. History/radio/Now Playing/native/offline/federation are not implied.

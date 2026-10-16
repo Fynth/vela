@@ -186,3 +186,7 @@ On this Ryzen7 8845HS shared host, the100k+100k fixture's nine cases measured p5
 ## Playback-order verification0.6
 
 The new pure order model bounds queue/deck/priorities and traversal history at1000 occurrences. Unit permutation/10000-step checks establish correctness and bounds, not audio CPU or latency measurements. No additional performance claim follows from the shuffle refactor; full-library and audio-start/seek profiling remain outstanding.
+
+## Browser bookmarks/recovery0.7
+
+Snapshots cap serialized output at4MiB and queue size at1000. Media time updates serialize no more than once per5s; explicit edits/seek/pause/lifecycle checkpoints flush immediately. Recovery has three delays,10s HEAD deadlines and an8s watchdog. These are resource-policy bounds, not measured startup/seek/CPU/FPS claims. Browser tests exercise actual decode and position tolerances, not physical audible start latency or playback superiority. Large-queue serialization and cross-browser profiling remain outstanding.
