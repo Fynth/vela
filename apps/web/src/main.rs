@@ -1,4 +1,5 @@
 mod filters;
+mod jobs;
 mod metadata;
 mod scanner;
 use dioxus::prelude::*;
@@ -701,6 +702,7 @@ fn App() -> Element {
     let mut preview = use_signal(|| None::<ImportPreview>);
     let mut import_busy = use_signal(|| false);
     let mut jobs = use_signal(Vec::<ImportJob>::new);
+    let mut legacy_import_generation = use_signal(|| 0_u64);
     let mut playlists = use_signal(Vec::<PlaylistSummary>::new);
     let mut selected_playlist = use_signal(|| None::<PlaylistDetail>);
     let mut playlist_name = use_signal(String::new);
@@ -817,6 +819,7 @@ fn App() -> Element {
         add_music.set(false);
         preview.set(None);
         import_url.set(String::new());
+        jobs.set(Vec::new());
         upload_status.set(String::new());
         new_user.set(String::new());
         new_password.set(String::new());
@@ -866,31 +869,44 @@ fn App() -> Element {
                 }
                 playlists.set(value);
             }
-            if active == "imports"
-                && let Ok(value) = api::<Vec<ImportJob>>("GET", "/api/imports", None, "").await
-            {
-                if auth.peek().as_ref().map(|a| &a.user.id) != Some(&session.user.id) {
-                    return;
-                }
-                jobs.set(value);
-            }
         });
     });
     use_effect(move || {
-        let Some(session) = auth.read().clone() else {
+        let session = auth.read().clone();
+        let active_page = page.read().clone();
+        let generation = legacy_import_generation.peek().wrapping_add(1);
+        legacy_import_generation.set(generation);
+        let Some(session) = session else {
             return;
         };
+        // The mounted job center owns /api/jobs polling and all its actions.
+        // Discard even already-issued legacy replies when entering that page.
+        if active_page == "jobs" {
+            return;
+        }
         spawn_authorized(auth, async move {
             if let Ok(value) = api::<Vec<ImportJob>>("GET", "/api/imports", None, "").await {
-                if auth.peek().as_ref().map(|a| &a.user.id) != Some(&session.user.id) {
+                if token(auth) != session.csrf_token
+                    || *legacy_import_generation.peek() != generation
+                    || page.peek().as_str() == "jobs"
+                {
                     return;
                 }
                 jobs.set(value);
             }
             loop {
                 TimeoutFuture::new(2_000).await;
-                if auth.peek().as_ref().map(|a| &a.user.id) != Some(&session.user.id) {
+                if token(auth) != session.csrf_token
+                    || *legacy_import_generation.peek() != generation
+                    || page.peek().as_str() == "jobs"
+                {
                     break;
+                }
+                if web_sys::window()
+                    .and_then(|w| w.document())
+                    .is_some_and(|d| d.hidden())
+                {
+                    continue;
                 }
                 if jobs.peek().iter().any(|j| {
                     matches!(
@@ -900,9 +916,24 @@ fn App() -> Element {
                 }) && let Ok(value) =
                     api::<Vec<ImportJob>>("GET", "/api/imports", None, "").await
                 {
-                    if auth.peek().as_ref().map(|a| &a.user.id) != Some(&session.user.id) {
+                    if token(auth) != session.csrf_token
+                        || *legacy_import_generation.peek() != generation
+                        || page.peek().as_str() == "jobs"
+                    {
                         break;
                     }
+                    let finished = value.iter().any(|j| {
+                        !matches!(
+                            j.status.as_str(),
+                            "queued" | "running" | "downloading" | "processing"
+                        ) && jobs.peek().iter().any(|old| {
+                            old.id == j.id
+                                && matches!(
+                                    old.status.as_str(),
+                                    "queued" | "running" | "downloading" | "processing"
+                                )
+                        })
+                    });
                     let completed = value.iter().any(|j| {
                         j.status == "completed"
                             && jobs
@@ -911,14 +942,27 @@ fn App() -> Element {
                                 .any(|old| old.id == j.id && old.status != "completed")
                     });
                     jobs.set(value);
-                    if completed {
+                    if finished {
                         catalog_changed(facets_revision);
-                        notice.set("Your import is ready in the library.".into());
+                        notice.set(
+                            if completed {
+                                "Your import is ready in the library."
+                            } else {
+                                "Your import task finished. Music already added is in the library."
+                            }
+                            .into(),
+                        );
                         if matches!(page.peek().as_str(), "albums" | "artists") {
                             catalog_page(None, catalog);
                         }
                         if let Ok(value) = api::<LibraryStats>("GET", "/api/stats", None, "").await
                         {
+                            if token(auth) != session.csrf_token
+                                || *legacy_import_generation.peek() != generation
+                                || page.peek().as_str() == "jobs"
+                            {
+                                break;
+                            }
                             stats.set(Some(value));
                         }
                         if matches!(page.peek().as_str(), "library" | "favorites") {
@@ -951,6 +995,7 @@ fn App() -> Element {
         "artists" => "The voices in your collection",
         "favorites" => "Made for repeat",
         "imports" => "Bring your music home",
+        "jobs" => "Good things in the making",
         "playlists" => "Every mood, a collection",
         "settings" => "Your listening space",
         _ => "Your music. Your space.",
@@ -1000,7 +1045,7 @@ fn App() -> Element {
                     a { class: "brand", href: "#", onclick: move |e| { e.prevent_default(); page.set("library".into()); }, img { src: "/vela.svg", alt: "" } "vela" }
                     span { class: "nav-label", "YOUR SPACE" }
                     nav { "aria-label": "Main navigation",
-                        for (id, symbol, name) in [("library", "◈", "Library"), ("albums", "▣", "Albums"), ("artists", "◌", "Artists"), ("favorites", "♡", "Favorites"), ("playlists", "≡", "Playlists"), ("imports", "↧", "Add music")] {
+                        for (id, symbol, name) in [("library", "◈", "Library"), ("albums", "▣", "Albums"), ("artists", "◌", "Artists"), ("favorites", "♡", "Favorites"), ("playlists", "≡", "Playlists"), ("imports", "↧", "Add music"), ("jobs", "↻", "Jobs")] {
                             button { class: if page() == id { "nav-item active" } else { "nav-item" }, "aria-label": name, "aria-current": if page() == id { "page" } else { "false" }, onclick: move |_| { page.set(id.into()); selected_playlist.set(None); }, span { class: "nav-icon", "{symbol}" } "{name}" }
                         }
                     }
@@ -1187,8 +1232,8 @@ fn App() -> Element {
                             for job in jobs.read().iter().cloned() {
                                 { let cancel_id = job.id.clone(); let retry_id = job.id.clone(); let label = match job.status.as_str() { "queued" => "Queued", "running" | "downloading" => "Downloading", "processing" => "Reading metadata", "completed" => "Ready to listen", "cancelled" => "Cancelled", "failed" => "Needs attention", _ => "Waiting" }; let percent = job.total_bytes.filter(|v| *v > 0).map(|v| (job.downloaded_bytes as f64 * 100.0 / v as f64).clamp(0.0, 100.0)).unwrap_or(0.0);
                                 rsx! { article { class: "job-card", key: "{job.id}", div { class: "job-icon", if job.status == "completed" { "✓" } else { "↧" } } div { class: "job-info", strong { {job.url.split('/').next_back().filter(|s| !s.is_empty()).unwrap_or("Audio download")} } span { class: "job-status", "{label} · {bytes(job.downloaded_bytes)}" } if matches!(job.status.as_str(), "queued" | "running" | "downloading" | "processing") { progress { max: "100", value: "{percent}", "aria-label": "Download progress" } } if let Some(message) = job.error { p { class: "job-error", "{message}" } } }
-                                    if matches!(job.status.as_str(), "queued" | "running" | "downloading") { button { class: "button secondary small", onclick: move |_| { let id = cancel_id.clone(); spawn_authorized(auth, async move { match mutate("POST", &format!("/api/imports/{id}/cancel"), None, &token(auth)).await { Ok(()) => { if let Ok(value) = api::<Vec<ImportJob>>("GET", "/api/imports", None, "").await { jobs.set(value); } } Err(message) => error.set(message) } }); }, "Cancel" } }
-                                    if job.status == "failed" || job.status == "cancelled" { button { class: "button secondary small", onclick: move |_| { let id = retry_id.clone(); spawn_authorized(auth, async move { match mutate("POST", &format!("/api/imports/{id}/retry"), None, &token(auth)).await { Ok(()) => { if let Ok(value) = api::<Vec<ImportJob>>("GET", "/api/imports", None, "").await { jobs.set(value); } } Err(message) => error.set(message) } }); }, "Retry" } }
+                                    if matches!(job.status.as_str(), "queued" | "running" | "downloading") { button { class: "button secondary small", onclick: move |_| { let id = cancel_id.clone(); spawn_authorized(auth, async move { match mutate("POST", &format!("/api/imports/{id}/cancel"), None, &token(auth)).await { Ok(()) => { if page.peek().as_str() == "imports" && let Ok(value) = api::<Vec<ImportJob>>("GET", "/api/imports", None, "").await && page.peek().as_str() == "imports" { jobs.set(value); } } Err(message) => error.set(message) } }); }, "Cancel" } }
+                                    if job.status == "failed" || job.status == "cancelled" { button { class: "button secondary small", onclick: move |_| { let id = retry_id.clone(); spawn_authorized(auth, async move { match mutate("POST", &format!("/api/imports/{id}/retry"), None, &token(auth)).await { Ok(()) => { if page.peek().as_str() == "imports" && let Ok(value) = api::<Vec<ImportJob>>("GET", "/api/imports", None, "").await && page.peek().as_str() == "imports" { jobs.set(value); } } Err(message) => error.set(message) } }); }, "Retry" } }
                                 } } }
                             }
                         }
@@ -1260,6 +1305,17 @@ fn App() -> Element {
                             } }
                     }
 
+                    if page() == "jobs" {
+                        jobs::JobCenter { auth, onchanged: move |_| {
+                            catalog_changed(facets_revision);
+                            invalidate_library(library);
+                            invalidate_catalog(catalog);
+                            spawn_authorized(auth, async move {
+                                if let Ok(value) = api::<LibraryStats>("GET", "/api/stats", None, "").await { stats.set(Some(value)); }
+                            });
+                        }, onopen: move |destination: String| { page.set(destination); selected_playlist.set(None); } }
+                    }
+
                     if page() == "settings" {
                         section { class: "settings-grid", div { class: "panel", h2 { "A space that is yours" } p { "Your library is private. Music files stay on this server, and your session credentials stay in a secure browser cookie." }
                                 dl { dt { "Server version" } dd { "{version}" } dt { "Collection storage" } dd { {stats.read().as_ref().map(|s| bytes(s.size_bytes)).unwrap_or_else(|| "—".into())} } dt { "Playback" } dd { "Original audio · Browser native" } dt { "Federation" } dd { "Disabled" } }
@@ -1300,7 +1356,7 @@ fn App() -> Element {
                     }
                     div { class: "player-right", button { class: if show_queue() { "icon-button selected" } else { "icon-button" }, "aria-label": "Show playback queue", "aria-expanded": show_queue(), onclick: move |_| { show_queue.set(!show_queue()); }, "≡" } span { class: "volume-icon", "◖" } input { r#type: "range", min: "0", max: "1", step: "0.01", value: "{volume}", "aria-label": "Volume", oninput: move |e| { if let Ok(value) = e.value().parse::<f64>() { volume.set(value); if let Some(p) = audio() { p.set_volume(value); } } } } }
                 }
-                nav { class: "mobile-nav", "aria-label": "Mobile navigation", for (id, symbol, label) in [("library", "◈", "Library"), ("albums", "▣", "Albums"), ("artists", "◌", "Artists"), ("favorites", "♡", "Favorites"), ("playlists", "≡", "Playlists"), ("imports", "↧", "Add music"), ("settings", "⚙", "Settings")] { button { class: if page() == id { "active" } else { "" }, "aria-label": label, onclick: move |_| page.set(id.into()), span { "{symbol}" } small { "{label}" } } } }
+                nav { class: "mobile-nav", "aria-label": "Mobile navigation", for (id, symbol, label) in [("library", "◈", "Library"), ("albums", "▣", "Albums"), ("artists", "◌", "Artists"), ("favorites", "♡", "Favorites"), ("playlists", "≡", "Playlists"), ("imports", "↧", "Add music"), ("jobs", "↻", "Jobs"), ("settings", "⚙", "Settings")] { button { class: if page() == id { "active" } else { "" }, "aria-label": label, onclick: move |_| page.set(id.into()), span { "{symbol}" } small { "{label}" } } } }
                 if show_queue() { aside { class: "queue-panel", "aria-label": "Playback queue", div { class: "section-toolbar", div { span { class: "eyebrow", "UP NEXT" } h2 { "Your listening queue" } } button { class: "icon-button", "aria-label": "Close playback queue", onclick: move |_| show_queue.set(false), "×" } }
                         div { class: "queue-playback-controls", button { class: "button secondary small", disabled: current.is_none(), onclick: move |_| advance(-1, queue, index, shuffle(), &repeat(), auth, error), "Previous" } button { class: if shuffle() { "button primary small" } else { "button secondary small" }, "aria-pressed": shuffle(), onclick: move |_| shuffle.set(!shuffle()), "Shuffle" } button { class: "button secondary small", onclick: move |_| repeat.set(match repeat().as_str() { "off" => "all", "all" => "one", _ => "off" }.into()), "Repeat: {repeat}" }
                             label { r#for: "queue-volume", "Volume" } input { id: "queue-volume", r#type: "range", min: "0", max: "1", step: "0.01", value: "{volume}", oninput: move |e| { if let Ok(value) = e.value().parse::<f64>() { volume.set(value); if let Some(p) = audio() { p.set_volume(value); } } } }

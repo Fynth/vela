@@ -1,0 +1,30 @@
+[
+  {
+    "package": "winapi-i686-pc-windows-gnu",
+    "version": "0.4.0",
+    "repository": "https://github.com/retep998/winapi-rs",
+    "commit": "9497609ef44cc9bcd16cd2411c0ee6ccaf5483aa",
+    "subdirectory": "i686",
+    "subtree_sha": "9e53dfcd873fc124c977151ad99a7a18d3ff2233",
+    "truncated": false,
+    "files_compared": 1390,
+    "bytes_compared": 50930577,
+    "mismatches": [],
+    "unmatched": [],
+    "source_tree_url": "https://api.github.com/repos/retep998/winapi-rs/git/trees/9e53dfcd873fc124c977151ad99a7a18d3ff2233?recursive=1"
+  },
+  {
+    "package": "winapi-x86_64-pc-windows-gnu",
+    "version": "0.4.0",
+    "repository": "https://github.com/retep998/winapi-rs",
+    "commit": "9497609ef44cc9bcd16cd2411c0ee6ccaf5483aa",
+    "subdirectory": "x86_64",
+    "subtree_sha": "e29df1b1ae545c4bba28b99a96b961112c7d997c",
+    "truncated": false,
+    "files_compared": 1419,
+    "bytes_compared": 53157228,
+    "mismatches": [],
+    "unmatched": [],
+    "source_tree_url": "https://api.github.com/repos/retep998/winapi-rs/git/trees/e29df1b1ae545c4bba28b99a96b961112c7d997c?recursive=1"
+  }
+]

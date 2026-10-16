@@ -39,6 +39,7 @@ pub struct AppState {
     pub media: MediaService,
     pub imports: ImportService,
     pub scanner: vela_scanner::Scanner,
+    pub jobs: vela_core::jobs::JobService,
     pub playlists: PlaylistService,
     pub config: Config,
     pub shutdown: tokio_util::sync::CancellationToken,
@@ -137,6 +138,7 @@ impl AppState {
         });
         Ok(Self {
             playlists: PlaylistService::new(pool.clone()),
+            jobs: vela_core::jobs::JobService::new(pool.clone()),
             pool,
             auth,
             media,
@@ -346,6 +348,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/artists/{id}", get(artist))
         .route("/api/artists/{id}/tracks", get(artist_tracks))
         .route("/api/stats", get(stats))
+        .route("/api/jobs", get(background_jobs))
         .route("/api/catalog/filters", get(catalog_facets))
         .route("/api/upload", upload)
         .route("/api/tracks/{id}/stream", get(stream))
@@ -535,6 +538,14 @@ async fn catalog_facets(
 }
 async fn stats(State(s): State<AppState>, Auth(auth): Auth) -> Result<Json<LibraryStats>> {
     Ok(Json(s.media.stats(&auth.response.user.id).await?))
+}
+async fn background_jobs(
+    State(s): State<AppState>,
+    Auth(auth): Auth,
+    query: std::result::Result<Query<JobQuery>, axum::extract::rejection::QueryRejection>,
+) -> Result<Json<JobPage>> {
+    let Query(query) = query.map_err(|_| invalid("Invalid task filters or cursor"))?;
+    Ok(Json(s.jobs.list(&auth.response.user, &query).await?))
 }
 fn scanner_admin(auth: &Session) -> Result<&str> {
     if !auth.response.user.is_admin {

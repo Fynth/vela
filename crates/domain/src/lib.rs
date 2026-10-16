@@ -1,6 +1,83 @@
 //! Framework-independent API contracts. IDs are opaque UUID strings.
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum JobKind {
+    Import,
+    Scan,
+}
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum JobStatus {
+    Queued,
+    Downloading,
+    Processing,
+    Scanning,
+    Cancelling,
+    Completed,
+    Failed,
+    Cancelled,
+}
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum JobStateFilter {
+    #[default]
+    All,
+    Active,
+    Failed,
+    Completed,
+    Cancelled,
+}
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct JobQuery {
+    pub cursor: Option<String>,
+    pub limit: Option<u32>,
+    pub kind: Option<JobKind>,
+    pub state: JobStateFilter,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum JobProgress {
+    Import {
+        downloaded_bytes: i64,
+        total_bytes: Option<i64>,
+    },
+    Scan {
+        visited: i64,
+        imported: i64,
+        duplicates: i64,
+        unchanged: i64,
+        skipped: i64,
+        failed_files: i64,
+    },
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BackgroundJob {
+    pub id: String,
+    pub kind: JobKind,
+    pub title: String,
+    pub status: JobStatus,
+    pub progress: JobProgress,
+    pub created_at: i64,
+    pub updated_at: i64,
+    /// A fixed safe explanation; raw worker diagnostics and URLs are omitted.
+    pub error: Option<String>,
+    pub source_id: Option<String>,
+    pub track_id: Option<String>,
+    pub can_cancel: bool,
+    pub can_retry: bool,
+    pub can_rescan: bool,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JobPage {
+    pub items: Vec<BackgroundJob>,
+    pub next_cursor: Option<String>,
+    /// Activity for all visible owned jobs, independently of this page's filters.
+    pub has_active: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StorageRoot {
     pub id: String,

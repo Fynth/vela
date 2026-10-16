@@ -159,6 +159,333 @@ async fn actor(r: Response) -> Actor {
         user: body.user,
     }
 }
+
+#[tokio::test]
+async fn job_center_is_private_validated_and_controls_real_import_jobs() {
+    let app = TestApp::new().await;
+    let member = app.user("tasklistener").await;
+    let unauthenticated = app
+        .client
+        .get(format!("{}/api/jobs", app.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(unauthenticated.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        app.request(Method::GET, "/api/jobs?kind=scan", &member)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    for query in [
+        "kind=other",
+        "state=running",
+        "limit=-1",
+        "limit=4294967296",
+        "unknown=1",
+        "cursor=broken",
+        "cursor=v1:0:00000000000000000000000000000000:import",
+    ] {
+        let r = app
+            .request(Method::GET, &format!("/api/jobs?{query}"), &app.admin)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::BAD_REQUEST, "accepted {query}");
+        assert!(
+            r.headers()["content-type"]
+                .to_str()
+                .unwrap()
+                .starts_with("application/json")
+        );
+        let body: ApiError = r.json().await.unwrap();
+        assert!(body.error.starts_with("Invalid task"));
+    }
+    // No import worker runs in this HTTP fixture. Public literal destinations
+    // validate without DNS or any request to an external audio server.
+    let mut created = Vec::new();
+    for actor in [&app.admin, &member] {
+        let r = app
+            .request(Method::POST, "/api/imports", actor)
+            .json(&ImportRequest {
+                url: "https://8.8.8.8/audio.flac?secret=fixture-only".into(),
+            })
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::OK);
+        created.push(r.json::<ImportJob>().await.unwrap());
+    }
+    let id = &created[0].id;
+    let r = app
+        .request(Method::GET, "/api/jobs", &app.admin)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.headers()["cache-control"], "no-store");
+    let text = r.text().await.unwrap();
+    assert!(
+        !text.contains("secret") && !text.contains("8.8.8.8") && !text.contains(&created[1].id)
+    );
+    let page: JobPage = serde_json::from_str(&text).unwrap();
+    assert!(page.has_active);
+    assert_eq!(page.items.len(), 1);
+    assert_eq!(page.items[0].title, "Audio import");
+    assert_eq!(page.items[0].status, JobStatus::Queued);
+    assert!(page.items[0].can_cancel && !page.items[0].can_retry);
+    let path = format!("/api/imports/{id}/cancel");
+    assert_eq!(
+        app.client
+            .post(format!("{}{path}", app.base))
+            .header("Cookie", &app.admin.cookie)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_ne!(
+        app.request(Method::POST, &path, &member)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        app.request(Method::POST, &path, &app.admin)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    let page: JobPage = app
+        .request(
+            Method::GET,
+            "/api/jobs?state=cancelled&kind=import",
+            &app.admin,
+        )
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(!page.has_active);
+    assert_eq!(page.items[0].status, JobStatus::Cancelled);
+    assert!(!page.items[0].can_cancel && page.items[0].can_retry);
+    let path = format!("/api/imports/{id}/retry");
+    assert_eq!(
+        app.request(Method::POST, &path, &app.admin)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    let filtered: JobPage = app
+        .request(Method::GET, "/api/jobs?state=completed", &app.admin)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(filtered.items.is_empty());
+    assert!(
+        filtered.has_active,
+        "filter must not conceal activity requiring polling"
+    );
+    let private: JobPage = app
+        .request(Method::GET, "/api/jobs", &member)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(private.items.len(), 1);
+    assert_eq!(private.items[0].id, created[1].id);
+    assert!(private.has_active);
+}
+
+#[tokio::test]
+async fn job_center_follows_real_scan_progress_cancel_and_new_pass_history() {
+    let app = TestApp::with_scanner(1024 * 1024, true).await;
+    let source: ScanSource = app
+        .request(Method::POST, "/api/scan-sources", &app.admin)
+        .json(&CreateScanSource {
+            name: "Background archive".into(),
+            root_id: "fixture".into(),
+        })
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let path = format!("/api/scan-sources/{}/scan", source.id);
+    let first: ScanJob = app
+        .request(Method::POST, &path, &app.admin)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let queued: JobPage = app
+        .request(Method::GET, "/api/jobs?kind=scan", &app.admin)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(queued.has_active && queued.items[0].can_cancel);
+    assert_eq!(
+        queued.items[0].source_id.as_deref(),
+        Some(source.id.as_str())
+    );
+    assert_eq!(queued.items[0].title, "Background archive");
+    async fn finish_scan(app: &TestApp, id: &str) -> BackgroundJob {
+        let shutdown = tokio_util::sync::CancellationToken::new();
+        let scanner = app.state.scanner.clone();
+        let token = shutdown.clone();
+        let worker = tokio::spawn(async move { scanner.run(token).await });
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(15);
+        let completed = loop {
+            let page: JobPage = app
+                .request(Method::GET, "/api/jobs?kind=scan", &app.admin)
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            let job = page.items.into_iter().find(|j| j.id == id).unwrap();
+            if job.status == JobStatus::Completed {
+                assert!(!page.has_active);
+                break job;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "scan timed out: {job:?}"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        };
+        shutdown.cancel();
+        worker.await.unwrap().unwrap();
+        completed
+    }
+    let completed = finish_scan(&app, &first.id).await;
+    assert_eq!(
+        completed.progress,
+        JobProgress::Scan {
+            visited: 3,
+            imported: 2,
+            duplicates: 0,
+            unchanged: 0,
+            skipped: 0,
+            failed_files: 0,
+        }
+    );
+    assert!(completed.can_rescan && !completed.can_cancel && !completed.can_retry);
+    let second: ScanJob = app
+        .request(Method::POST, &path, &app.admin)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_ne!(second.id, first.id);
+    let page: JobPage = app
+        .request(Method::GET, "/api/jobs?state=completed", &app.admin)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(page.has_active);
+    assert_eq!(page.items[0].id, first.id);
+    assert!(
+        !page.items[0].can_rescan,
+        "an active pass suppresses all same-source rescan actions"
+    );
+    assert_eq!(
+        app.request(
+            Method::POST,
+            &format!("/api/scans/{}/cancel", second.id),
+            &app.admin
+        )
+        .send()
+        .await
+        .unwrap()
+        .status(),
+        StatusCode::NO_CONTENT
+    );
+    let third: ScanJob = app
+        .request(Method::POST, &path, &app.admin)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let completed = finish_scan(&app, &third.id).await;
+    assert!(matches!(
+        completed.progress,
+        JobProgress::Scan {
+            unchanged: 2,
+            imported: 0,
+            ..
+        }
+    ));
+    let first_page: JobPage = app
+        .request(Method::GET, "/api/jobs?limit=1", &app.admin)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let mut found = vec![first_page.items[0].id.clone()];
+    let mut cursor = first_page.next_cursor;
+    while let Some(next) = cursor {
+        let page: JobPage = app
+            .request(Method::GET, "/api/jobs", &app.admin)
+            .query(&[("limit", "1"), ("cursor", &next)])
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        found.extend(page.items.into_iter().map(|job| job.id));
+        cursor = page.next_cursor;
+    }
+    found.sort();
+    let mut expected = vec![first.id, second.id, third.id];
+    expected.sort();
+    assert_eq!(found, expected);
+    let tracks: TrackPage = app
+        .request(Method::GET, "/api/tracks", &app.admin)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        tracks.items.len(),
+        2,
+        "new scan passes do not duplicate the library"
+    );
+}
 #[tokio::test]
 async fn upload_extract_browse_artwork_stream_and_deduplicate() {
     let app = TestApp::new().await;

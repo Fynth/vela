@@ -6,6 +6,8 @@ Upload real audio files, browse albums/artists with embedded metadata and artwor
 
 Administrators can scan configured read-only music folders in **Settings → Music folders**, watch progress, cancel, and rescan without changing original files or existing catalog edits. Removing a scan source keeps imported music.
 
+**Jobs** brings your URL imports and administrator folder scans into one private, paginated history. Filter by type/state, inspect actual progress, cancel eligible work, retry imports or start a new scan pass. Active tasks refresh while the page is visible; idle history has a Refresh control. Uploads remain in their upload dialog.
+
 Normal music uploads, direct URL imports and configured folder scans use the web interface. No SSH is needed for those workflows after installation. No catalog content is preloaded.
 
 ## Run locally

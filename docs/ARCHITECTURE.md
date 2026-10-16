@@ -5,7 +5,7 @@ Vela is a modular monolith: one Axum/Tokio process, one local SQLite database, i
 | Boundary | Current responsibilities |
 | --- | --- |
 | `vela-domain` | Framework-independent serialized API contracts and opaque IDs |
-| `vela-core` | Configuration, WAL/FK migrations, Argon2id accounts, sessions, private playlist application services |
+| `vela-core` | Configuration, WAL/FK migrations, Argon2id accounts, sessions, private playlist services and bounded background-task read model |
 | `vela-media` | Bounded metadata/image validation, BLAKE3 asset identity, immutable publication, owner-authorized catalog/asset lookup, byte-range selection |
 | `vela-scanner` | Read-only directory capabilities, bounded snapshots, persistent scan sources/jobs/fingerprints |
 | `vela-imports` | Source interface, controlled egress, durable bounded direct downloads and job recovery |
@@ -87,3 +87,11 @@ All pages return at most100 tracks plus one internal sentinel, with50 used by th
 The Dioxus form separates draft values from accepted conditions. Search/filters are committed only when the latest authorized request succeeds; pagination and refresh read that accepted state. Invalid drafts preserve displayed results and invalidate older pending requests. Account changes clear all conditions and suggestions. Facet requests also carry session/revision/generation guards and fetch only while their form is visible. ADR0007 records units, collation and losslessness limits.
 
 Core's build.rs watches the migrations directory, including newly added files, so stable incremental builds rerun SQLx embedding. An integration test checks the embedded filter/covering migrations, and native review packages record/verify their schema version against the created SQLite database. See [SQLx migration recompilation](https://docs.rs/sqlx/0.8.6/sqlx/macro.migrate.html) for the upstream stable-build requirement.
+
+## Unified background tasks
+
+Core JobService projects the existing durable import/scan tables, without owning their execution or duplicating state. Each owner-scoped indexed branch reads limit+1 rows; a bounded merge uses created_at/UUID/kind descending. The cursor includes every tie-breaker and remains valid after its anchor is removed. Migration0007 adds history tie-breakers and owner/status indexes. Rows, joined action hints and filter-independent owned activity share one WAL read snapshot. At most100 jobs are returned (50 in the UI); no OFFSET or whole-history materialization is used.
+
+GET /api/jobs exposes no source URLs/paths/raw diagnostics. Ordinary accounts see only their imports; administrators additionally see their own scans. Import track titles/IDs and scan source names/IDs use owner-constrained joins. Existing services independently authorize cancel/retry/scan-again requests. A new scan is a new pass; the old history is retained until its source is removed.
+
+Dioxus Jobs provides type/state filters, latest/older pages, real byte progress or indeterminate scan counters, errors/stale snapshots and actual mutation/navigation controls. Mounted visible pages poll while any authorized owned work is known active, even if filters hide it. Idle pages require refresh; leaving/logout invalidates timers and pending results. Exact session/generation/selection/lifetime guards prevent stale updates. Legacy import polling stops on Jobs. Catalog aggregates refresh on terminal/active polling so already published files survive cancel/failure visibility. Browser uploads remain in their transfer dialog, not the durable history. See ADR0008 and CONTRACTS.
