@@ -21,6 +21,26 @@ async fn main() -> anyhow::Result<()> {
     let scanner = state.scanner.clone();
     let token = shutdown.clone();
     workers.spawn(async move { ("Scanner", scanner.run(token).await) });
+    let analysis = state.analysis.clone();
+    let token = shutdown.clone();
+    workers.spawn(async move { ("Audio analysis", analysis.run(token).await) });
+    let listening = state.listening.clone();
+    let token = shutdown.clone();
+    workers.spawn(async move {
+        let result: anyhow::Result<()> = async {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                tokio::select! {
+                    biased;
+                    _ = token.cancelled() => return Ok(()),
+                    _ = interval.tick() => { listening.prune().await?; }
+                }
+            }
+        }
+        .await;
+        ("Listening retention", result)
+    });
     tracing::info!(address=%listener.local_addr()?,version=env!("CARGO_PKG_VERSION"),"Vela ready");
     let server_shutdown = shutdown.clone();
     let server=axum::serve(listener,router(state.clone()).into_make_service_with_connect_info::<std::net::SocketAddr>())

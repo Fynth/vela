@@ -1,5 +1,30 @@
 # Reproducible performance measurements
 
+## Local PCM extractor measurement0.9 (2026-10-17)
+
+Actual release example, Rust1.99.0, Symphonia0.6.1/RustFFT6.4.1, Linux x86_64/CachyOS7.2.10-1/glibc2.44, AMD Ryzen7 8845HS (16logical CPUs), approximately14.9GiB RAM. One serial extractor, five measured samples plus one untimed warmup per original generated WAV. Fixture creation, BLAKE3 verification and output serialization are excluded from per-extraction latency. Filesystem caches are warm, other development/browser/compiler activity may be present. No global cache drop or dedicated benchmark isolation was performed.
+
+```bash
+CARGO_BUILD_JOBS=2 cargo build --locked --release -p vela-media --example benchmark_analysis
+target/release/examples/benchmark_analysis --generate --iterations 5
+```
+
+| Actual generated PCM source | p50 ms | p95 ms | p99 ms | Successful / failed |
+| --- | ---: | ---: | ---: | ---: |
+| generated-1s-mono-44100.wav | 0.949 | 0.952 | 0.952 | 5 / 0 |
+| generated-20s-mono-48000.wav | 19.099 | 19.308 | 19.308 | 5 / 0 |
+| generated-20s-8ch-48000.wav | 132.973 | 134.217 | 134.217 | 5 / 0 |
+| generated-120s-mono-48000.wav | 114.081 | 115.283 | 115.283 | 5 / 0 |
+
+All20 measured runs passed descriptor sanity, consistent output and unchanged source hashes. Five samples cannot establish reliable tail percentiles: nearest-rank p95/p99 are simply the maximum measured sample. The120s fixture may be reported as bounded-prefix coverage when the duration ceiling is reached before an EOF read; the result carries that distinction.
+
+A separate Python subprocess/resource.getrusage wrapper measured the entire example process (including generation/warmups/hashing/JSON): 1.811s wall, 1.756s user CPU, 0.047s kernel CPU, peak RSS13164KiB on this Linux host. `/usr/bin/time` was absent; no successful time(1) invocation is claimed. Raw results: target/checks/listening-dsp-benchmark.json and listening-dsp-benchmark-resources.json. Example SHA256: `bc0a2ef3422cb58c1f90ebdff84d26aeb6fe38b9bf0347afbdde5d3830818ae5`; measured binary SHA256: `8799469aef90da79f7f7b1cb9340e28891a0f12c7a5d2ca0527f4678748b11ea`.
+
+Measured engine source SHA256: `fff266b58cc8898f2b9037e9a004f28ec2bc3dce9a357decd5f9c8bc795ffae4`; Cargo.lock SHA256: `79615fff13ddebb74840cc1e7c83ad3892d6b55820884b682975bb47eb05bcf3`.
+
+This measures sequential offline PCM analysis, not server RSS, compressed-codec throughput, audible playback latency, native engines, simultaneous streaming/import contention, radio relevance or superiority over another product. Current single-worker admission remains unchanged; no optimization was justified by these measurements. Existing catalog/job measurements below retain their historical source/hardware scope.
+
+
 ## Experience0.5 verification scope
 
 No new latency/CPU/throughput benchmark is claimed for the0.5 UX slice. The new local aggregate search bounds each SQL result category at8 and cancels obsolete browser requests. Its album/artist/playlist substring predicates are not constant-time/indexed search guarantees and have not been measured at1M groups. Existing measurements below apply only to their recorded query/source scope. Real Chromium checks establish decoded audio/seek and unchanged active media node/source through navigation, not audible-start timing or gapless accuracy.20 production-process clean restarts plus independent worker-failure injections passed; they establish lifecycle regression coverage, not concurrent-user capacity.

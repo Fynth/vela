@@ -1,5 +1,11 @@
 # Authoritative architecture
 
+## Private listening and local audio discovery0.9
+
+Additive migrations0008/0009 preserve existing catalog, playlist and media semantics. Domain listening/audio_analysis modules own framework-free contracts. Core ListeningService owns explicit account/device consent, CAS privacy revisions, cumulative idempotent sessions, private keyset history, export/delete and retention. The server adds authenticated/no-store listening routes, CSRF writes and an hourly supervised physical retention task. Root BrowserPlayer owns a conservative monotonic/media-time collector beside its existing source generations. Source recovery is not a new listening occurrence; actual replay after EOF is. Account changes, consent changes and erasure invalidate pending work and export generations.
+
+Media AnalysisService owns a separate durable versioned derived cache and one bounded blocking Symphonia/RustFFT worker. It does not depend on listening consent or perform automatic network requests. Explicit owner-authorized analysis batches are distinct from streaming. Radio reads at most500 owned candidate feature vectors and actual tags in a SQLite snapshot, diversifies deterministically and returns real track IDs/explanations. The Dioxus radio page receives existing root Actions and never creates audio. Queue/storage/auth/metadata-only playlist permissions remain unchanged. ADR0013/0014, AUDIO_ANALYSIS, RECOMMENDATIONS and CONTRACTS specify limits. Native engines, multi-server/federation and personal recurring mixes remain separate milestones.
+
 ## Listening experience increment (0.5.0)
 
 Keep the seven-crate boundary and schema7. SearchQuery/SearchResults are domain DTOs; media owns bounded track/group matching, core owns collaborator-aware playlist search, and GET /api/search only authenticates/validates/composes. Each category is limited8 in SQL. Group/playlist names use parameterized literal ASCII-case-insensitive substrings; tracks retain FTS. There is no federated/global search or cross-service snapshot guarantee.

@@ -1,5 +1,33 @@
 # Music experience parity
 
+## Current mandate audit2026-10-17
+
+Baseline was re-established at main f6cc845/application ac31d74:110 Rust tests,33 Chromium scenarios; actual loopback0.8.1 supervised runtime and20-track original library, fresh private backup/restore. New0.9 working tree evolves the same seven crates. New G01–G24 IDs are the latest mandate; older G numbers below remain historical. No native/federated completion is implied.
+
+| Feature / priority | Status | Exact implementation | Acceptance | Platform / caveat |
+| --- | --- | --- | --- | --- |
+| Private listening foundation P0 | VERIFIED for web/native server scope | core/src/listening.rs; domain/src/listening.rs; migration0008; server/src/listening.rs; web/src/audible.rs,listening.rs,browser_player.rs | G07-private-history: consent/global+device, actual played time, repeat/EOF, owner/CAS/dedup, export/delete/stale suppression | Browser self-report; no public popularity or physical sound attestation |
+| DSP and durable analysis P0 | VERIFIED for web/native server scope | media/src/analysis.rs,analysis_service.rs; domain/src/audio_analysis.rs; migration0009; server/src/analysis.rs; web/src/radio.rs | G08: known real PCM/FLAC/MP3, finite spectrum, bounded workers/recovery, original preservation/owner ACL | Explicit local analysis,120s prefix; no genre/mood/tempo/LUFS claims |
+| Explained local track radio P0 | VERIFIED for web/native server scope | media/src/discovery.rs; web/src/radio.rs; root Actions | G09: real seed/candidates, measured distance/tag fallback, diversity, actual queue playback |500 newest owned candidates; personal recurring mixes absent |
+| Lawful public network P0 | NOT_STARTED | docs/FEDERATION_PROTOCOL.md,NETWORK_RIGHTS.md only | G11/G12/G14/G15/G22: two real nodes + hostile peer, private negatives, rights/revoke | No federation routes, publication or network catalog |
+| Native audio clients P0 | NOT_STARTED / Apple validation BLOCKED | docs/PLATFORM_MATRIX.md only | G16/G17/G18 real Media3/AVFoundation/desktop engines/device evidence | Browser WASM/native server are not native clients |
+
+Ten highest remaining experience gaps (precise scope, not product-completion promises):
+
+1. P0 personal Home/mixes: core listening aggregates + media discovery ranking and web/experience.rs; G04/G10 consented real taste/favorites, sparse/cold-start, exclusions and durable refresh.
+2. P0 DSP completeness/quality: media/analysis.rs,analysis_service.rs,discovery.rs; G08/G09 evaluate real music relevance, optional validated tempo/chroma, broader lawful codecs, large-catalog candidate index and contention.
+3. P1 history/analysis management: web/listening.rs,radio.rs and core/jobs.rs; G07/G08 device-grant removal, analysis cancel/task-center projection, accurate failure/reconnect UX and browser privacy-race expansion.
+4. P0 lawful origin/publication model: core policy/domain/migrations + server discovery; G11/G22 explicit rights, provenance, private-by-default and revocation.
+5. P0 native Linux/Android engines: future platform bridges and shared playback contracts; G16/G18 actual background/media keys, codec/audio-focus validation.
+6. P0 iOS/macOS toolchain and native implementation: platform/ios/AVFoundation plus Dioxus target features; G17/G18 actual Apple build/device evidence, currently blocked for validation.
+7. P1 multi-server/native catalog adapters: client transport/domain origin IDs; G12/G13 bounded fanout and authorized cross-origin queue, slow/offline peers.
+8. P1 offline/device handoff: durable manifests/journal/device sessions; G13/G19 real offline playback/hash/rights, two-client accepted transfer and no duplicate commands.
+9. P1 social/media grants/rooms: core/playlists and future authenticated events; G06/G20 actual invitations, separate metadata/stream/download grants and authorized synchronized clients.
+10. P1 complete UX/operational hardening: web/shell, context actions, large lists, a11y/en/ru; deploy/scripts/CI; G21/G23/G24 measured contention, full keyboard/screen-reader, restore/container/native matrices.
+
+
+## Historical UX matrix
+
 Audit2026-10-16: actual main HEADb7033e4, version0.4.0; clean initial tree. Baseline rerun:97 Rust tests,16 real Chromium scenarios including the opted-in licensed import, fmt/strict native+WASM Clippy and release builds passed. Existing development data contains one account and was backed up/restored separately. Status applies to the described scope, not the whole reference product. VERIFIED requires executed evidence; PARTIAL means usable subset or current implementation awaiting checks; NOT_STARTED means absent; BLOCKED means an actual external dependency prevents progress. All native desktop/mobile clients below are NOT_STARTED; a tested Linux server is not a desktop client.
 
 Current0.8 increment (2026-10-17): root Now Playing verified with110 Rust tests,33 Chromium scenarios, native/WASM strict checks and responsive images; detailed evidence and remaining platform limits are in PROGRESS. The audit paragraph above is the preserved starting baseline, not the current version.

@@ -1,5 +1,9 @@
 //! Framework-independent API contracts. IDs are opaque UUID strings.
 use serde::{Deserialize, Serialize};
+mod audio_analysis;
+pub use audio_analysis::*;
+mod listening;
+pub use listening::*;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]

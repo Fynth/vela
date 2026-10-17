@@ -8,6 +8,10 @@ Upload real audio files, browse albums/artists with embedded metadata and artwor
 
 Administrators can scan configured read-only music folders in **Settings → Music folders**, watch progress, cancel, and rescan without changing original files or existing catalog edits. Removing a scan source keeps imported music.
 
+**Private listening history** is off until you enable both your account and this browser in Settings. Vela records advancing, unmuted playback rather than downloads or seek distances. Recently played appears on Home after meaningful listens; Listening history provides a private paginated view. Export your synced journal or delete it and disable collection on every device. The browser's bounded pending journal is cleared on sign-out or opt-out; browser throttling can undercount listening.
+
+Open **Track radio** beside a Library track or inside Home/Search audio details. Play a real queue from your own catalog, with a reason for each recommendation. Optional **Analyze seed** or **Analyze up to 50 library tracks** runs bounded local PCM/FFT analysis in a durable background worker, without changing originals or contacting a cloud service. Radio compares measured spectra and signal levels where available and otherwise uses catalog metadata. Coverage is limited to the500 newest other owned tracks. This is not a genre/mood classifier or a weekly/daily personalized mix service.
+
 **Jobs** brings your URL imports and administrator folder scans into one private, paginated history. Filter by type/state, inspect actual progress, cancel eligible work, retry imports or start a new scan pass. Active tasks refresh while the page is visible; idle history has a Refresh control. Uploads remain in their upload dialog.
 
 Normal music uploads, direct URL imports and configured folder scans use the web interface. No SSH is needed for those workflows after installation. No catalog content is preloaded.

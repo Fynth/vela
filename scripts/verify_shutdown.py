@@ -4,6 +4,7 @@ import argparse
 import os
 from pathlib import Path
 import signal
+import shutil
 import sqlite3
 import socket
 import subprocess
@@ -21,10 +22,22 @@ def main():
     if not 1 <= args.runs <= 100:
         parser.error('--runs must be1..100')
     exits = []
+    faults = [('Import', 'import_jobs'), ('Scanner', 'scan_jobs'),
+              ('Audio analysis', 'audio_analysis'), ('Listening retention', 'listening_sessions')] if args.worker_failure else []
     with tempfile.TemporaryDirectory(prefix='vela-shutdown-') as directory:
-        for index in range(args.runs + 2 * int(args.worker_failure)):
+        for index in range(args.runs + len(faults)):
             # Destructive fault injection must never contaminate the next fixture.
             instance_dir = Path(directory) if index < args.runs else Path(directory) / f'fault-{index}'
+            fatal = index >= args.runs
+            failed_worker, failed_table = faults[index - args.runs] if fatal else ('', '')
+            # Retention wakes hourly after its immediate startup pass. Inject its
+            # fault into a disposable copy before that pass, never into user data.
+            before_start = failed_worker == 'Listening retention'
+            if before_start:
+                instance_dir.mkdir()
+                shutil.copy2(Path(directory) / 'vela.db', instance_dir / 'vela.db')
+                with sqlite3.connect(instance_dir / 'vela.db') as db:
+                    db.execute('DROP TABLE listening_sessions')
             with socket.socket() as listener:
                 listener.bind(('127.0.0.1', 0))
                 port = listener.getsockname()[1]
@@ -32,7 +45,7 @@ def main():
             process = subprocess.Popen([str(args.binary.resolve())], env=environment, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
             try:
                 deadline = time.monotonic() + 10
-                while True:
+                while not before_start:
                     try:
                         with urllib.request.urlopen(f'http://127.0.0.1:{port}/health', timeout=1) as response:
                             if response.status == 200:
@@ -41,16 +54,15 @@ def main():
                         if process.poll() is not None or time.monotonic() > deadline:
                             raise RuntimeError('Native server failed readiness')
                         time.sleep(.05)
-                fatal = args.worker_failure and index >= args.runs
-                failed_worker = "Import" if index == args.runs else "Scanner"
-                if fatal:
+                if fatal and not before_start:
                     db=sqlite3.connect(instance_dir/'vela.db')
                     try:
-                        db.execute('DROP TABLE import_jobs' if failed_worker == 'Import' else 'DROP TABLE scan_jobs')
+                        # Static names only, selected above; all DBs are fresh fixtures.
+                        db.execute(f'DROP TABLE {failed_table}')
                         db.commit()
                     finally:
                         db.close()
-                else:
+                elif not fatal:
                     process.send_signal(signal.SIGTERM)
                 output, _ = process.communicate(timeout=20)
                 if fatal:

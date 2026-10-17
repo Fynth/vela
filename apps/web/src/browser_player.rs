@@ -16,6 +16,7 @@ pub struct View {
     pub duration: Signal<f64>,
     pub status: Signal<String>,
     pub expired: Signal<bool>,
+    pub listening: Signal<crate::listening::ListeningView>,
 }
 struct State {
     view: View,
@@ -37,6 +38,7 @@ struct State {
     stall: Option<Timeout>,
     probe: Option<AbortController>,
     lifecycle: Option<Closure<dyn FnMut(web_sys::Event)>>,
+    listening: crate::listening::Collector,
 }
 #[derive(Clone)]
 pub struct BrowserPlayer(Rc<RefCell<State>>);
@@ -62,6 +64,7 @@ impl BrowserPlayer {
             stall: None,
             probe: None,
             lifecycle: None,
+            listening: crate::listening::Collector::new(view.auth, view.listening),
         })));
         let weak = Rc::downgrade(&player.0);
         let callback = Closure::wrap(Box::new(move |_: web_sys::Event| {
@@ -82,6 +85,7 @@ impl BrowserPlayer {
     }
     pub fn destroy(&self) {
         self.bind(String::new(), None);
+        self.0.borrow().listening.destroy();
         if let Some(callback) = self.0.borrow_mut().lifecycle.take()
             && let Some(window) = web_sys::window()
         {
@@ -100,6 +104,10 @@ impl BrowserPlayer {
     }
     pub fn bind(&self, session: String, saved: Option<SavedSession>) {
         self.checkpoint(true);
+        self.0.borrow().listening.bind(
+            &session,
+            saved.as_ref().map(|value| value.owner_id.as_str()),
+        );
         {
             let mut s = self.0.borrow_mut();
             Self::cancel(&mut s);
@@ -218,6 +226,8 @@ impl BrowserPlayer {
         .then_some(element)
     }
     pub fn select(&self, track: &Track) {
+        self.observe_listening(true);
+        self.0.borrow().listening.select(track);
         self.0.borrow_mut().retries.reset();
         self.load(track, 0.0);
     }
@@ -248,6 +258,8 @@ impl BrowserPlayer {
             s.view.status.set(String::new());
             (s.generation, s.saved.as_ref().map_or(0.8, |v| v.volume))
         };
+        self.0.borrow().listening.resume(track);
+        self.0.borrow().listening.discontinuity();
         let _ = element.remove_attribute("data-play-request");
         let _ = element.set_attribute("data-source-generation", &generation.to_string());
         element.set_volume(volume);
@@ -281,6 +293,7 @@ impl BrowserPlayer {
             )
         };
         if let Some(track) = track {
+            self.0.borrow().listening.resume(&track);
             if source.is_empty() || !loaded || audio().is_some_and(|e| e.error().is_some()) {
                 self.0.borrow_mut().retries.reset();
                 self.load(&track, position);
@@ -293,6 +306,7 @@ impl BrowserPlayer {
         }
     }
     pub fn pause(&self) {
+        self.observe_listening(true);
         {
             let mut s = self.0.borrow_mut();
             s.intent = false;
@@ -309,6 +323,8 @@ impl BrowserPlayer {
         self.checkpoint(true);
     }
     pub fn seek(&self, position: f64) {
+        self.observe_listening(true);
+        self.0.borrow().listening.discontinuity();
         let mut s = self.0.borrow_mut();
         let duration = s
             .saved
@@ -404,6 +420,7 @@ impl BrowserPlayer {
         }
     }
     pub fn time(&self, force: bool) {
+        self.observe_listening(force);
         let generation = self.0.borrow().generation;
         let Some(e) = self.valid(generation) else {
             return;
@@ -434,6 +451,8 @@ impl BrowserPlayer {
             self.0.borrow_mut().view.playing.set(value);
             if !value {
                 self.time(true);
+            } else {
+                self.observe_listening(false);
             }
         }
     }
@@ -442,6 +461,8 @@ impl BrowserPlayer {
         if !self.0.borrow().intent || !self.valid(generation).is_some_and(|e| e.ended()) {
             return false;
         }
+        self.observe_listening(true);
+        self.0.borrow().listening.finish();
         {
             let mut s = self.0.borrow_mut();
             s.position = 0.0;
@@ -453,6 +474,8 @@ impl BrowserPlayer {
         true
     }
     pub fn failed(&self) {
+        self.observe_listening(true);
+        self.0.borrow().listening.discontinuity();
         let generation = self.0.borrow().generation;
         let Some(e) = self.valid(generation) else {
             return;
@@ -467,6 +490,25 @@ impl BrowserPlayer {
             );
         } else {
             self.recover();
+        }
+    }
+    pub fn listening(&self) -> crate::listening::Collector {
+        self.0.borrow().listening.clone()
+    }
+    pub fn listening_discontinuity(&self) {
+        self.0.borrow().listening.discontinuity();
+    }
+    pub fn observe_listening(&self, force: bool) {
+        let generation = {
+            let state = self.0.borrow();
+            if !state.loaded || state.pending.is_some() {
+                state.listening.discontinuity();
+                return;
+            }
+            state.generation
+        };
+        if let Some(element) = self.valid(generation) {
+            self.0.borrow().listening.observe(&element, force);
         }
     }
     fn recover(&self) {

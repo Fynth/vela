@@ -411,3 +411,7 @@ mod tests {
         assert!(!valid_hash(&"A".repeat(64)));
     }
 }
+pub mod analysis;
+pub mod analysis_service;
+mod discovery;
+pub use discovery::DiscoveryError;

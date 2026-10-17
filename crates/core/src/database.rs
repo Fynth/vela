@@ -200,6 +200,93 @@ mod tests {
         super::open(dir.path()).await.unwrap().close().await;
     }
     #[tokio::test]
+    async fn schema_seven_upgrade_preserves_catalog_edits_and_playlist_order() {
+        use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+        let directory = tempfile::tempdir().unwrap();
+        let legacy = tempfile::tempdir().unwrap();
+        let migrations = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../migrations");
+        for entry in std::fs::read_dir(migrations).unwrap() {
+            let entry = entry.unwrap();
+            let name = entry.file_name();
+            let name = name.to_str().unwrap();
+            if name.ends_with(".sql") && name[..4].parse::<u32>().unwrap() <= 7 {
+                std::fs::copy(entry.path(), legacy.path().join(name)).unwrap();
+            }
+        }
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(
+                SqliteConnectOptions::new()
+                    .filename(directory.path().join("vela.db"))
+                    .create_if_missing(true)
+                    .foreign_keys(true),
+            )
+            .await
+            .unwrap();
+        sqlx::migrate::Migrator::new(legacy.path())
+            .await
+            .unwrap()
+            .run(&pool)
+            .await
+            .unwrap();
+        sqlx::raw_sql("INSERT INTO users(id,username,password_hash) VALUES('owner','owner','fixture');
+            INSERT INTO media_assets(id,hash,storage_path,content_type,size_bytes) VALUES('asset','unchanged-hash','media/original','audio/flac',1234);
+            INSERT INTO tracks(id,owner_id,media_asset_id,title,artist,album,duration_ms,codec,metadata_revision) VALUES('track','owner','asset','Edited title','Artist','Album',1000,'FLAC',7);
+            INSERT INTO playlists(id,owner_id,name,revision) VALUES('playlist','owner','Old private playlist',4);
+            INSERT INTO playlist_items(id,playlist_id,track_id,position) VALUES('entry','playlist','track',12);
+            INSERT INTO favorites(user_id,track_id) VALUES('owner','track');").execute(&pool).await.unwrap();
+        pool.close().await;
+        let upgraded = super::open(directory.path()).await.unwrap();
+        let track: (String, String, i64) = sqlx::query_as(
+            "SELECT title,media_asset_id,metadata_revision FROM tracks WHERE id='track'",
+        )
+        .fetch_one(&upgraded)
+        .await
+        .unwrap();
+        assert_eq!(track, ("Edited title".into(), "asset".into(), 7));
+        let playlist: (String,i64,i64) = sqlx::query_as("SELECT p.name,p.revision,i.position FROM playlists p JOIN playlist_items i ON i.playlist_id=p.id WHERE p.id='playlist'").fetch_one(&upgraded).await.unwrap();
+        assert_eq!(playlist, ("Old private playlist".into(), 4, 12));
+        assert_eq!(
+            sqlx::query_scalar::<_, String>("SELECT hash FROM media_assets WHERE id='asset'")
+                .fetch_one(&upgraded)
+                .await
+                .unwrap(),
+            "unchanged-hash"
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM favorites")
+                .fetch_one(&upgraded)
+                .await
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM listening_preferences")
+                .fetch_one(&upgraded)
+                .await
+                .unwrap(),
+            0,
+            "upgrade must not opt anyone in"
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM audio_analysis")
+                .fetch_one(&upgraded)
+                .await
+                .unwrap(),
+            0,
+            "upgrade must not automatically queue analysis"
+        );
+        assert!(
+            sqlx::query("PRAGMA foreign_key_check")
+                .fetch_all(&upgraded)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        upgraded.close().await;
+        super::open(directory.path()).await.unwrap().close().await;
+    }
+    #[tokio::test]
     async fn migrations_are_repeatable_and_foreign_keys_enforced() {
         let dir = tempfile::tempdir().unwrap();
         let pool = super::open(dir.path()).await.unwrap();

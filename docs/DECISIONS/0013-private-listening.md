@@ -1,0 +1,11 @@
+# ADR0013: consented private cumulative listening
+
+Accepted2026-10-17; executed evidence belongs in PROGRESS/QA_EVIDENCE.
+
+Additive migration0008 stores independent global/per-device consent, a monotonic privacy revision and owner-bound logical playback sessions. Installation upgrades opt in nobody. Consent changes use BEGIN IMMEDIATE and revision CAS. Each batch reauthorizes current consent, device and every owned track before committing. Equal sequence/payload is idempotent; conflicting reuse, decreasing totals and reopening ended sessions fail. Delete atomically disables every device and invalidates old outboxes before removing the owner's journal. Admin status never grants another account's history.
+
+The root browser player measures advancing media time corroborated by monotonic wall time; muted, paused, stalled, seeking and large-gap intervals do not count. A logical occurrence survives source retries and pause/resume. Explicit selection or replay after actual EOF starts another occurrence. These are conservative self-reported personal statistics, not proof of physical sound, a public popularity measure or an audio-rights grant. No private listening record is sent to peers.
+
+Retain7–365days (default90), at most10000 sessions/account and32 device grants. History is a recent keyset with a maximum50 records; totals/page/export use one owner snapshot. Reads physically prune expired owner data and take a short reserved writer lock; an hourly supervised worker also removes expired sessions. Measure contention before altering that design. The bounded browser outbox retains at most100 cumulative summaries/128KiB, drops its oldest unsynced summary when full, and clears on logout/opt-out. It contains no credentials or media URLs. Abrupt shutdown can lose unsent progress, and sparse/throttled browser observations conservatively undercount.
+
+Settings distinguishes account and device consent, export, retention and explicit delete-and-disable. Async reads/mutations/export must carry physical cancellation, session/lifetime and privacy-generation guards. A held export cannot download after a privacy change. Existing catalog, private playlists, immutable media and legacy bookmark variants remain compatible.

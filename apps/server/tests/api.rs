@@ -7,6 +7,415 @@ use vela_server::{AppState, router};
 
 const AUDIO: &[u8] = include_bytes!("../../../crates/media/tests/fixtures/signal.flac");
 const OTHER_AUDIO: &[u8] = include_bytes!("../../../crates/media/tests/fixtures/beacon.mp3");
+
+#[tokio::test]
+async fn actual_analysis_worker_and_radio_remain_private_and_preserve_original_streams() {
+    let app = TestApp::new().await;
+    let other = app.user("analysis_other").await;
+    let seed = app.upload(&app.admin).await.track;
+    let foreign = app.upload(&other).await.track;
+    let form = reqwest::multipart::Form::new().part(
+        "file",
+        reqwest::multipart::Part::bytes(OTHER_AUDIO.to_vec()).file_name("beacon.mp3"),
+    );
+    let upload: UploadResult = app
+        .request(Method::POST, "/api/upload", &app.admin)
+        .multipart(form)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let detail_path = format!("/api/tracks/{}/analysis", seed.id);
+    let initial: TrackAnalysis = app
+        .request(Method::GET, &detail_path, &app.admin)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(initial.status, AnalysisStatus::NotAnalyzed);
+    let radio_path = format!("/api/tracks/{}/radio?limit=10", seed.id);
+    let initial: TrackRadio = app
+        .request(Method::GET, &radio_path, &app.admin)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(!initial.uses_audio_features);
+    assert_eq!(initial.items.len(), 1);
+    assert_eq!(initial.items[0].track.id, upload.track.id);
+    let mixed = EnqueueAnalysis {
+        track_ids: vec![seed.id.clone(), foreign.id],
+    };
+    assert_eq!(
+        app.request(Method::POST, "/api/audio-analysis", &app.admin)
+            .json(&mixed)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+    let empty: AnalysisLibraryStatus = app
+        .request(Method::GET, "/api/audio-analysis", &app.admin)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(empty.queued, 0);
+    let selected = EnqueueAnalysis {
+        track_ids: vec![seed.id.clone(), upload.track.id.clone()],
+    };
+    assert_eq!(
+        app.client
+            .post(format!("{}/api/audio-analysis", app.base))
+            .header("Cookie", &app.admin.cookie)
+            .json(&selected)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    let receipt: AnalysisReceipt = app
+        .request(Method::POST, "/api/audio-analysis", &app.admin)
+        .json(&selected)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(receipt.queued, 2);
+    let token = tokio_util::sync::CancellationToken::new();
+    let worker = tokio::spawn({
+        let service = app.state.analysis.clone();
+        let token = token.clone();
+        async move { service.run(token).await }
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            let status: AnalysisLibraryStatus = app
+                .request(Method::GET, "/api/audio-analysis", &app.admin)
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            if status.complete == 2 {
+                break;
+            }
+            assert_eq!(status.failed, 0);
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let analysis: TrackAnalysis = app
+        .request(Method::GET, &detail_path, &app.admin)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let features = analysis.features.unwrap();
+    assert_eq!(features.sample_rate, 44100);
+    assert_eq!(features.channels, 1);
+    assert!(features.rms > 0.0 && features.rms < 1.0 && features.peak > features.rms);
+    assert!(features.spectral_centroid_hz.is_some());
+    assert!(features.tempo_bpm.is_none() && features.chroma.is_none());
+    let radio: TrackRadio = app
+        .request(Method::GET, &radio_path, &app.admin)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(radio.uses_audio_features);
+    assert_eq!(radio.items.len(), 1);
+    assert_eq!(radio.items[0].track.id, upload.track.id);
+    let duplicate: AnalysisReceipt = app
+        .request(Method::POST, "/api/audio-analysis", &app.admin)
+        .json(&selected)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(duplicate.queued, 0);
+    for path in [&detail_path, &radio_path] {
+        assert_eq!(
+            app.request(Method::GET, path, &other)
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            app.client
+                .get(format!("{}{path}", app.base))
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::UNAUTHORIZED
+        );
+    }
+    let original = app
+        .request(
+            Method::GET,
+            &format!("/api/tracks/{}/stream", seed.id),
+            &app.admin,
+        )
+        .send()
+        .await
+        .unwrap()
+        .bytes()
+        .await
+        .unwrap();
+    assert_eq!(&original[..], AUDIO);
+    let bad_query = format!("/api/tracks/{}/radio?limit=51", seed.id);
+    assert_eq!(
+        app.request(Method::GET, &bad_query, &app.admin)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+    let extra_query = format!("/api/tracks/{}/radio?owner=other", seed.id);
+    assert_eq!(
+        app.request(Method::GET, &extra_query, &app.admin)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+    token.cancel();
+    worker.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn private_listening_consent_idempotence_export_and_erasure_use_real_http() {
+    let app = TestApp::new().await;
+    let other = app.user("history_other").await;
+    let own = app.upload(&app.admin).await.track;
+    let foreign = app.upload(&other).await.track;
+    let device = uuid::Uuid::new_v4().to_string();
+    let path = format!("/api/listening/preferences?device_id={device}");
+    let response = app
+        .request(Method::GET, &path, &app.admin)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.headers()["cache-control"], "no-store");
+    let initial: ListeningPreferences = response.json().await.unwrap();
+    assert!(!initial.enabled && !initial.device_enabled);
+    assert_eq!(initial.revision, 0);
+    let mut batch = ListeningBatch {
+        device_id: device.clone(),
+        revision: 0,
+        events: vec![ListeningProgress {
+            session_id: uuid::Uuid::new_v4().to_string(),
+            sequence: 1,
+            track_id: own.id.clone(),
+            listened_ms: 1000,
+            position_ms: 1000,
+            started_at: vela_core::now() - 2,
+            ended: true,
+        }],
+    };
+    assert_eq!(
+        app.request(Method::POST, "/api/listening/events", &app.admin)
+            .json(&batch)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    let prefs = UpdateListeningPreferences {
+        revision: 0,
+        enabled: true,
+        retention_days: 90,
+        device_id: device.clone(),
+        device_enabled: true,
+    };
+    assert_eq!(
+        app.client
+            .put(format!("{}/api/listening/preferences", app.base))
+            .header("Cookie", &app.admin.cookie)
+            .json(&prefs)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    let enabled: ListeningPreferences = app
+        .request(Method::PUT, "/api/listening/preferences", &app.admin)
+        .json(&prefs)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    batch.revision = enabled.revision;
+    let accepted: ListeningReceipt = app
+        .request(Method::POST, "/api/listening/events", &app.admin)
+        .json(&batch)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(accepted.accepted, 1);
+    let duplicate: ListeningReceipt = app
+        .request(Method::POST, "/api/listening/events", &app.admin)
+        .json(&batch)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(duplicate.duplicates, 1);
+    let history: ListeningHistoryPage = app
+        .request(Method::GET, "/api/listening/history", &app.admin)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(history.items.len(), 1);
+    assert_eq!(history.items[0].track.id, own.id);
+    assert_eq!(history.total_listens, 1);
+    assert_eq!(history.total_listened_ms, 1000);
+    let empty: ListeningHistoryPage = app
+        .request(Method::GET, "/api/listening/history", &other)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(empty.items.is_empty());
+    // An owned prefix followed by another account's track must roll back as a whole.
+    let mut mixed = batch.clone();
+    mixed.events[0].session_id = uuid::Uuid::new_v4().to_string();
+    let mut second = mixed.events[0].clone();
+    second.session_id = uuid::Uuid::new_v4().to_string();
+    second.track_id = foreign.id;
+    mixed.events.push(second);
+    assert_eq!(
+        app.request(Method::POST, "/api/listening/events", &app.admin)
+            .json(&mixed)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+    let export = app
+        .request(Method::GET, "/api/listening/export", &app.admin)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        export.headers()["content-disposition"],
+        "attachment; filename=\"vela-listening-history.json\""
+    );
+    let exported: ListeningExport = export.json().await.unwrap();
+    assert_eq!(exported.events.len(), 1);
+    assert_eq!(exported.events[0].progress, batch.events[0]);
+    let clear_path = format!("/api/listening/history?device_id={device}");
+    let cleared: ListeningPreferences = app
+        .request(Method::DELETE, &clear_path, &app.admin)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(!cleared.enabled && !cleared.device_enabled);
+    assert!(cleared.revision > batch.revision);
+    let reenable = UpdateListeningPreferences {
+        revision: cleared.revision,
+        ..prefs
+    };
+    assert_eq!(
+        app.request(Method::PUT, "/api/listening/preferences", &app.admin)
+            .json(&reenable)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        app.request(Method::POST, "/api/listening/events", &app.admin)
+            .json(&batch)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::CONFLICT
+    );
+    let empty: ListeningExport = app
+        .request(Method::GET, "/api/listening/export", &app.admin)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(empty.events.is_empty());
+    for path in [
+        "/api/listening/history",
+        "/api/listening/export",
+        "/api/listening/preferences?device_id=invalid",
+    ] {
+        assert_eq!(
+            app.client
+                .get(format!("{}{path}", app.base))
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::UNAUTHORIZED
+        );
+    }
+    for path in [
+        "/api/listening/history?limit=1&owner=other",
+        "/api/listening/history?cursor=secret",
+        "/api/listening/preferences?device_id=invalid",
+    ] {
+        assert_eq!(
+            app.request(Method::GET, path, &app.admin)
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::BAD_REQUEST
+        );
+    }
+}
 struct Actor {
     cookie: String,
     csrf: String,

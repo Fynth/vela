@@ -12,6 +12,8 @@ pub enum ContextKind {
     Library,
     Favorites,
     Home,
+    History,
+    Radio,
     Search,
     Album,
     Artist,

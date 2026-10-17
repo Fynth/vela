@@ -1,3 +1,5 @@
+mod analysis;
+mod listening;
 mod upload_guard;
 use axum::{
     Json, Router,
@@ -41,6 +43,8 @@ pub struct AppState {
     pub scanner: vela_scanner::Scanner,
     pub jobs: vela_core::jobs::JobService,
     pub playlists: PlaylistService,
+    pub listening: vela_core::listening::ListeningService,
+    pub analysis: vela_media::analysis_service::AnalysisService,
     pub config: Config,
     pub shutdown: tokio_util::sync::CancellationToken,
     uploads: Arc<Semaphore>,
@@ -137,6 +141,11 @@ impl AppState {
             ..Default::default()
         });
         Ok(Self {
+            analysis: vela_media::analysis_service::AnalysisService::new(
+                pool.clone(),
+                media.clone(),
+            ),
+            listening: vela_core::listening::ListeningService::new(pool.clone()),
             playlists: PlaylistService::new(pool.clone()),
             jobs: vela_core::jobs::JobService::new(pool.clone()),
             pool,
@@ -340,6 +349,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/login", post(login))
         .route("/api/logout", post(logout))
         .route("/api/me", get(me))
+        .merge(listening::routes())
+        .merge(analysis::routes())
         .route("/api/users", post(create_user))
         .route("/api/tracks", get(tracks))
         .route("/api/albums", get(albums))

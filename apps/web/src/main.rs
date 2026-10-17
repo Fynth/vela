@@ -1,12 +1,15 @@
+mod audible;
 mod browser_player;
 mod client;
 mod experience;
 mod filters;
 mod icons;
 mod jobs;
+mod listening;
 mod metadata;
 mod now_playing;
 mod playback;
+mod radio;
 mod scanner;
 mod session;
 mod shell;
@@ -508,6 +511,7 @@ fn initial_page() -> String {
         "imports",
         "jobs",
         "settings",
+        "history",
     ]
     .contains(&page)
     {
@@ -962,6 +966,7 @@ fn App() -> Element {
     let mut legacy_import_generation = use_signal(|| 0_u64);
     let mut playlists = use_signal(Vec::<PlaylistSummary>::new);
     let mut selected_playlist = use_signal(|| None::<PlaylistDetail>);
+    let mut radio_seed = use_signal(|| None::<Track>);
     let playlist_generation = use_signal(|| 0_u64);
     let mut playlist_name = use_signal(String::new);
     let mut collaborator = use_signal(String::new);
@@ -986,6 +991,7 @@ fn App() -> Element {
     let playback_status = use_signal(String::new);
     let mut playback_expired = use_signal(|| false);
     let context = use_signal(PlaybackContext::default);
+    let listening_view = use_signal(listening::ListeningView::default);
     let engine = use_signal(move || {
         browser_player::BrowserPlayer::new(browser_player::View {
             auth,
@@ -994,6 +1000,7 @@ fn App() -> Element {
             duration,
             status: playback_status,
             expired: playback_expired,
+            listening: listening_view,
         })
     });
     let cleanup = engine.peek().clone();
@@ -1099,6 +1106,11 @@ fn App() -> Element {
                 facets_revision,
                 error,
             )
+        }),
+        radio: EventHandler::new(move |track: Track| {
+            playlist_view.invalidate();
+            radio_seed.set(Some(track));
+            page.set("radio".into());
         }),
         album: EventHandler::new(move |album: AlbumSummary| {
             playlist_view.invalidate();
@@ -1231,6 +1243,7 @@ fn App() -> Element {
         upload_status.set(String::new());
         new_user.set(String::new());
         new_password.set(String::new());
+        radio_seed.set(None);
         collaborator.set(String::new());
         selected_add_playlist.set(String::new());
         show_queue.set(false);
@@ -1489,6 +1502,8 @@ fn App() -> Element {
         "jobs" => "Good things in the making",
         "playlists" => "Every mood, a collection",
         "settings" => "Your listening space",
+        "history" => "A record of your listening",
+        "radio" => "Let the music lead",
         _ => "Your music. Your space.",
     };
 
@@ -1532,7 +1547,7 @@ fn App() -> Element {
             }
         } else {
             div { class: "app-shell",
-                shell::Sidebar { page:page(), user:auth.read().as_ref().unwrap().user.clone(), stats:stats(), playlists:playlists(), onnav:actions.navigate, onplaylist:actions.playlist }
+                shell::Sidebar {radio_available:radio_seed.read().is_some(), page:page(), user:auth.read().as_ref().unwrap().user.clone(), stats:stats(), playlists:playlists(), onnav:actions.navigate, onplaylist:actions.playlist }
                 main { class: "main-content",
                     header { class: "topbar", div { class: "breadcrumb", "YOUR PERSONAL MUSIC CLOUD" }
                         div { class: "topbar-actions", button { class: "icon-button theme-button", title: "Change color theme", "aria-label": "Change color theme", onclick: move |_| { theme.set(if theme() == "dark" { "light".into() } else { "dark".into() }); }, if theme() == "dark" { Icon { name: "sun" } } else { Icon { name: "moon" } } }
@@ -1542,8 +1557,10 @@ fn App() -> Element {
                     if !error().is_empty() { div { class: "alert error", role: "alert", span { "{error}" } button { "aria-label": "Dismiss error", onclick: move |_| error.set(String::new()), Icon { name: "close" } } } }
                     if !notice().is_empty() { div { class: "alert success", role: "status", span { "{notice}" } button { "aria-label": "Dismiss notification", onclick: move |_| notice.set(String::new()), Icon { name: "close" } } } }
                     if page() != "home" {div { class: "page-heading", span { class: "eyebrow", "LISTEN A LITTLE LONGER" } h1 { "{heading}" } }}
-                    if page() == "home" {experience::Home {auth,revision:facets_revision,actions}}
+                    if page() == "home" {experience::Home {auth,revision:facets_revision,actions} listening::History {auth,view:listening_view,actions,compact:true}}
                     if page() == "search" {experience::Search {auth,revision:facets_revision,actions}}
+                    if page() == "history" {listening::History {auth,view:listening_view,actions,compact:false}}
+                    if page() == "radio" {radio::Radio {auth,seed:radio_seed,actions}}
 
                     if page() == "library" || page() == "favorites" {
                         if page() == "library" {
@@ -1590,7 +1607,7 @@ fn App() -> Element {
                                 } }
                             else { div { class: "track-table", div { class: "track-header", span { "#" } span { "TITLE" } span { "ALBUM" } span { "QUALITY" } span { "TIME" } span { "" } }
                                     for (at, track) in tracks.read().iter().cloned().enumerate() {
-                                        { let row_track = track.clone(); let favorited_track = track.clone(); let add_track = track.clone(); let edit_track = track.clone();
+                                        { let row_track = track.clone(); let favorited_track = track.clone(); let add_track = track.clone(); let edit_track = track.clone(); let radio_track = track.clone();
                                         rsx! { div { key: "{track.id}", class: if current.as_ref().is_some_and(|t| t.id == track.id) { "track-row current" } else { "track-row" },
                                             button { class: "track-play", "aria-label": "Play {track.title}", onclick: move |_| play_queue(tracks.peek().clone(), at, view_context(page,catalog,selected_playlist), playback), if current.as_ref().is_some_and(|t| t.id == track.id) && playing() { Icon { name: "music" } } else { Icon { name: "play" } } }
                                             button { class: "track-title", onclick: move |_| play_queue(tracks.peek().clone(), at, view_context(page,catalog,selected_playlist), playback), Art { track: row_track } div { strong { "{track.title}" } small { "{track.artist}" } } }
@@ -1600,6 +1617,7 @@ fn App() -> Element {
                                             div { class: "track-actions", button { class: if track.favorite { "icon-button favorite selected" } else { "icon-button favorite" }, title: if track.favorite { "Remove favorite" } else { "Favorite track" }, "aria-label": if track.favorite { "Remove favorite" } else { "Favorite track" }, "aria-pressed": track.favorite, onclick: move |_| favorite_track(favorited_track.clone(),auth,tracks,queue,catalog.tracks,facets_revision,error), if track.favorite { Icon { name: "heart" } } else { Icon { name: "heart" } } }
                                                 button { class: "icon-button", title: "Add to playback queue", "aria-label": "Add {track.title} to playback queue", onclick: move |_| { enqueue_track(track.clone(),false,playback,notice); }, "+" }
                                                 button { class: "icon-button metadata-edit", "aria-label": "Edit metadata for {edit_track.title}", title: "Edit metadata", onclick: move |_| editing_track.set(Some(edit_track.clone())), Icon { name: "edit" } }
+                                                button { class: "icon-button track-radio", "aria-label": "Start track radio for {radio_track.title}", title: "Track radio", onclick: move |_| actions.radio.call(radio_track.clone()), Icon { name: "radio" } }
                                                 if !selected_add_playlist().is_empty() { button { class: "icon-button", title: "Add to selected playlist", "aria-label": "Add to selected playlist", onclick: move |_| { let track = add_track.clone(); let id = selected_add_playlist(); spawn_authorized(auth, async move {
                                                     match api::<PlaylistDetail>("GET", &format!("/api/playlists/{id}"), None, "").await {
                                                         Ok(detail) => { match mutate("POST", &format!("/api/playlists/{id}/items"), Some(json!({"revision": detail.playlist.revision, "mutation_id": uuid::Uuid::new_v4().to_string(), "track_id": track.id})), &token(auth)).await { Ok(()) => notice.set("Track added to your playlist.".into()), Err(message) => error.set(message) } }
@@ -1798,6 +1816,7 @@ fn App() -> Element {
                                 button { class: "button secondary", onclick: move |_| { spawn_authorized(auth, async move { match mutate("POST", "/api/logout", None, &token(auth)).await { Ok(()) => { engine.peek().bind(String::new(),None); auth.set(None); invalidate_library(library); clear_catalog(catalog); tracks.set(Vec::new()); queue.set(Vec::new()); playlists.set(Vec::new()); selected_playlist.set(None); stats.set(None); jobs.set(Vec::new()); share_url.set(String::new()); page.set("home".into());  error.set(String::new()); username.set(String::new()); } Err(message) => error.set(message) } }); }, "Sign out" }
                             }
                             div { class: "panel", h2 { "Listening controls" } p { "Press Space to play or pause, and the arrow keys to seek 10 seconds. Use your device’s media controls when your browser supports them." } button { class: "button secondary", onclick: move |_| theme.set(if theme() == "dark" { "light".into() } else { "dark".into() }), if theme() == "dark" { "Switch to light theme" } else { "Switch to dark theme" } } small { "Codec support depends on your browser. Files are streamed directly without transcoding." } }
+                            listening::PrivacySettings {auth,view:listening_view,collector:engine.peek().listening(),onhistory:move |_| actions.navigate.call("history".into())}
                             if auth.read().as_ref().is_some_and(|a| a.user.is_admin) { div { class: "panel", h2 { "Invite someone in" } p { "Create an account with its own private library. Share playlists explicitly after they sign in." }
                                     form { onsubmit: move |e| { e.prevent_default(); spawn_authorized(auth, async move { match api::<User>("POST", "/api/users", Some(json!({"username": new_user(), "password": new_password()})), &token(auth)).await { Ok(value) => { notice.set(format!("Account {} created. Share the password privately.", value.username)); new_user.set(String::new()); new_password.set(String::new()); } Err(message) => error.set(message) } }); }, label { r#for: "new-user", "New username" } input { id: "new-user", required: true, maxlength: 64, value: "{new_user}", autocomplete: "off", oninput: move |e| new_user.set(e.value()) } label { r#for: "new-password", "Initial password" } input { id: "new-password", r#type: "password", required: true, minlength: 12, value: "{new_password}", autocomplete: "new-password", oninput: move |e| new_password.set(e.value()) } button { class: "button primary", r#type: "submit", "Create account" } }
                                 } }
@@ -1821,6 +1840,7 @@ fn App() -> Element {
                 audio { id: "vela-audio", preload: "metadata",
                     onplay: move |_| engine.peek().playing(true), onpause: move |_| engine.peek().playing(false),
                     ontimeupdate: move |_|engine.peek().time(false), onseeked: move |_|engine.peek().time(true),
+                    onseeking: move |_|engine.peek().listening_discontinuity(), onvolumechange: move |_|engine.peek().observe_listening(true), onratechange: move |_|engine.peek().listening_discontinuity(),
                     onloadedmetadata: move |_|engine.peek().metadata(), onerror: move |_|engine.peek().failed(),
                     onended: move |_|if engine.peek().ended(){advance(Command::Ended,playback)}
                 }

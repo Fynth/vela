@@ -208,8 +208,9 @@ def seed(database: Path, count: int, owner: Actor, foreign: Actor) -> tuple[dict
     connection = sqlite3.connect(database)
     connection.execute("PRAGMA foreign_keys=ON")
     schema = connection.execute("SELECT max(version) FROM _sqlx_migrations WHERE success=1").fetchone()[0]
-    if schema != 7:
-        raise RuntimeError(f"Expected native-embedded schema7, found {schema}")
+    expected_schema = max(int(path.name.split("_", 1)[0]) for path in (REPOSITORY / "migrations").glob("*.sql"))
+    if schema != expected_schema:
+        raise RuntimeError(f"Expected native-embedded schema{expected_schema}, found {schema}")
     sources = [str(uuid.UUID(int=(9 << 120) | index)) for index in (1, 2)]
     started = time.perf_counter()
     with connection:

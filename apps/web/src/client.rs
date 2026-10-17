@@ -10,6 +10,11 @@ use web_sys::{AbortController, AbortSignal};
 #[derive(Clone, Default)]
 pub(crate) struct RequestScope(Rc<RefCell<Option<AbortController>>>);
 impl RequestScope {
+    /// Capture the exact request for a deadline; replacing the group must not
+    /// let an older timer abort its successor.
+    pub fn controller(&self) -> Option<AbortController> {
+        self.0.borrow().clone()
+    }
     pub fn begin(&self) -> Result<AbortSignal, String> {
         self.cancel();
         let controller = AbortController::new().map_err(|_| {
@@ -44,6 +49,16 @@ pub(crate) async fn api<T: DeserializeOwned>(
     body: Option<Value>,
     csrf: &str,
 ) -> Result<T, String> {
+    api_abortable(method, path, body, csrf, None).await
+}
+
+pub(crate) async fn api_abortable<T: DeserializeOwned>(
+    method: &str,
+    path: &str,
+    body: Option<Value>,
+    csrf: &str,
+    signal: Option<&AbortSignal>,
+) -> Result<T, String> {
     let request = match method {
         "POST" => Request::post(path),
         "PUT" => Request::put(path),
@@ -51,6 +66,7 @@ pub(crate) async fn api<T: DeserializeOwned>(
         "DELETE" => Request::delete(path),
         _ => Request::get(path),
     };
+    let request = request.abort_signal(signal);
     let request = if csrf.is_empty() {
         request
     } else {

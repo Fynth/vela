@@ -1,5 +1,11 @@
 # Vela listening product
 
+## Private listening and local radio0.9
+
+Settings offers separate account/device consent, retention7–365days, real synced JSON export and explicit delete-and-disable. Collection starts off. Listening history lists qualified actual playback sessions and private listened totals; Home shows Recently played only when real entries exist. Seeking/muting/buffering do not invent listened time. The root audio continues through history/settings navigation; repeat after natural EOF creates a fresh logical listen, while pause/retry retain the current one.
+
+Library rows and Home/Search audio-details menus open Track radio from an actual seed. The page offers real Play radio, per-item play/next/last, Refresh, explicit seed/bounded-library analysis, private queue counts and measured audio details. Every result has a measured-signal/tag/library explanation. An unanalyzed or sparse library has an honest metadata/one-track fallback. Analysis remains durable after leaving; page polling stops on departure and cancels stale reads. No cloud inference, fabricated genre/mood prediction, global music catalog or automatic public sharing is implied.
+
 Vela starts with the listener's own authorized music. Home, Search and Library are everyday destinations; storage/users/jobs are secondary administration. All visible music resolves to actual private catalog objects or explicitly labeled playlist metadata access. No fabricated recommendations, history or global catalog.
 
 The0.5 increment evolves the existing Rust/Dioxus app. Home presents bounded new additions/favorites/albums/playlists and honest onboarding. Search queries tracks, artists, albums and permitted playlist names; each category is capped at8 and can be filtered. Opening collections/playlist details uses existing routes/permissions. Track actions play the result context, insert next or append without interrupting current playback.

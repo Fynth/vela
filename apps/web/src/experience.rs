@@ -17,6 +17,7 @@ pub struct Actions {
     pub play: EventHandler<(Vec<Track>, usize, PlaybackContext)>,
     pub queue: EventHandler<(Track, bool)>,
     pub favorite: EventHandler<Track>,
+    pub radio: EventHandler<Track>,
     pub album: EventHandler<AlbumSummary>,
     pub artist: EventHandler<ArtistSummary>,
     pub playlist: EventHandler<String>,
@@ -29,6 +30,7 @@ fn TrackActions(track: Track, actions: Actions) -> Element {
     let next = track.clone();
     let last = track.clone();
     let favorite = track.clone();
+    let radio = track.clone();
     rsx! { div { class: "listening-actions",
         button { class: "icon-button", "aria-label": "Play {track.title} next", title: "Play next", onclick: move |_| actions.queue.call((next.clone(), true)), Icon { name: "next-add" } }
         button { class: "icon-button", "aria-label": "Add {track.title} to playback queue", title: "Add to queue", onclick: move |_| actions.queue.call((last.clone(), false)), Icon { name: "plus" } }
@@ -41,7 +43,7 @@ fn TrackActions(track: Track, actions: Actions) -> Element {
                 if let Some(depth) = track.bit_depth { dt { "Bit depth" } dd { "{depth} bits" } }
                 if let Some(rate) = track.bitrate { dt { "Bitrate" } dd { "{rate} kbps" } }
                 dt { "Duration" } dd { "{seconds(track.duration_ms as f64 / 1000.0)}" }
-            } }
+            } button { class: "button secondary small", "aria-label": "Start track radio for {track.title}", onclick: move |_| actions.radio.call(radio.clone()), Icon { name: "radio" } "Start track radio" } }
         }
     } }
 }
