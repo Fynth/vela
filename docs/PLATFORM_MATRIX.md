@@ -4,8 +4,8 @@ Inspected2026-10-17. A native server executable is not a desktop music client. S
 
 | Target | Actual implementation | Latest established evidence | Status / remaining work |
 | --- | --- | --- | --- |
-| Linux x86_64 server | Axum/SQLite/native binary | Frozen0.8.1 systemd user runtime, health, original20-track library, backup/restore | FUNCTIONAL_TESTED; new0.9 work still under integration |
-| Web Chromium / Firefox Linux | Dioxus WASM, one HTMLMediaElement, Media Session |0.8.1:33 scenarios in each engine; new-session baseline Chromium33 | FUNCTIONAL_TESTED for documented scenarios; physical sound/background/Safari unverified |
+| Linux x86_64 server | Axum/SQLite/native binary | Frozen0.9.0 source bc50564/user runtime, schema9, original20-track library, verified backup/restore | FUNCTIONAL_TESTED for documented server scope |
+| Web Chromium / Firefox Linux | Dioxus WASM, one HTMLMediaElement, Media Session |0.9 exact package:35 scenarios in each engine; responsive history/radio and original player regressions | FUNCTIONAL_TESTED for documented scenarios; physical sound/background/Safari unverified |
 | Linux desktop client | None yet | GTK3.24.52, WebKitGTK2.54.1, ALSA1.2.16.1 available; dx absent | NOT_STARTED; select native audio backend, Dioxus desktop feature separation, MPRIS, packaging and actual playback |
 | Windows desktop | None | No Windows target/runner available | NOT_STARTED; native engine/SMTC and Windows build/runtime required |
 | macOS desktop | None | No Apple host/Xcode | BLOCKED for Apple compilation/runtime; shared-contract work remains possible |
