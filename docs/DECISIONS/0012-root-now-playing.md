@@ -12,4 +12,4 @@ Favorite commits use one authorized path updating matching IDs in library, catal
 
 The additive `now-playing.css` uses existing Vela tokens and native controls, original inline SVG and actual embedded artwork. Explicit server allowlisting and build/package verification include this asset without making arbitrary CSS/files readable. Older archived packages remain verifiable when they do not reference the new asset.
 
-Limitations: browser direct-stream details reflect reported source properties, not proof of decoded losslessness. No lyrics provider, right sidebar, effects, native audio service, offline download, handoff or listening history is implied. Firefox/Safari, screen readers and physical media controls require separate validation.
+Limitations: browser direct-stream details reflect reported source properties, not proof of decoded losslessness. No lyrics provider, right sidebar, effects, native audio service, offline download, handoff or listening history is implied. Later Firefox execution is recorded in PROGRESS; Safari, screen readers and physical media controls require separate validation.

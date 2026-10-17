@@ -12,7 +12,7 @@ Current0.8 increment (2026-10-17): root Now Playing verified with110 Rust tests,
 | Shared shell/navigation P0 | PARTIAL | web/main.rs, shell.rs, icons.rs, style.css | EXP03/G02/G13: persistent audio, keyboard/phone/theme | Original Vela SVG/branding; five mobile tabs + More; broader shell still partial |
 | Browser playback P0 | PARTIAL | web/main.rs; player.js | G01/G04: FLAC/MP3/Ogg decode/seek; EXP03 navigation continuity | HTMLMediaElement, actual browser codec support |
 | Play next / add last P0 | VERIFIED | web/main.rs; experience.rs | EXP04: occurrence-aware insertion, no interruption | Bounded browser queue; no handoff |
-| Fair occurrence order P0 | VERIFIED | web/playback.rs; root PlaybackUi | PLAY01/02:8 unit tests + playback E2E + mode isolation | Chromium audio; transient history, no native proof |
+| Fair occurrence order P0 | VERIFIED | web/playback.rs; root PlaybackUi | PLAY01/02:8 unit tests + playback E2E + mode isolation | Chromium/Firefox audio; transient history, no native proof |
 | Queue/repeat/shuffle P0 | PARTIAL | web/main.rs | Existing duplicate/reorder E2E; EXP04 | 0.6 bounded fair history/priority model; no drag/drop/save-queue/handoff |
 | Browser resume/reconnect P0 | VERIFIED | web/session.rs, browser_player.rs, main.rs, player.js | RES01–04/NET01–02/AUTH01,3 unit policy tests +7 real browser cases | Paused per-account bookmark; bounded streaming retry; no offline/native/device sync |
 | Library/filters/favorites P0 | VERIFIED | media/filters.rs; web/filters.rs/main.rs | Typed filter/TCP; browser11–13 |50-item pages; no full-library virtualization |
@@ -22,7 +22,7 @@ Current0.8 increment (2026-10-17): root Now Playing verified with110 Rust tests,
 | Jobs/progress P1 | VERIFIED | core/jobs.rs; web/jobs.rs | Existing mixed-page/TCP/browser14/15/30 | Owned jobs; no SSE or global admin queue |
 | Metadata/artwork P1 | PARTIAL | media/metadata.rs; web/metadata.rs | Existing unchanged-source/revision tests | No write-back/bulk/enrichment/recording matching |
 | Context menus/info P1 | PARTIAL | web/experience.rs (0.5) | EXP04 actual next/last/favorite handlers and technical details; general context menus remain partial | Actual local fields; unavailable actions omitted |
-| Full Now Playing P0 | VERIFIED | web/now_playing.rs, now-playing.css, root main.rs, player.js | NP01–03/G02/G13: real audio continuity, modal focus, transport/Media Session, metadata/favorites/preview, stale replies; NET02/AUTH01 expiry/recovery | Chromium web; phone full-height/desktop modal; reported source properties, no native certification |
+| Full Now Playing P0 | VERIFIED | web/now_playing.rs, now-playing.css, root main.rs, player.js | NP01–03/G02/G13: real audio continuity, modal focus, transport/Media Session, metadata/favorites/preview, stale replies; NET02/AUTH01 expiry/recovery | Chromium + Playwright Firefox157/Linux; phone full-height/desktop modal; reported source properties, no native certification |
 | Persistent right Now Playing/context panel P1 | NOT_STARTED | future shared shell view | G02 stable panel sizing/context navigation | Full modal and persistent bar exist |
 | History/consent/export P1 | NOT_STARTED | future listening service/migration | G07/G14 event dedup, privacy/delete/export | No fabricated played minutes |
 | Deterministic recommendations/radio P1 | NOT_STARTED | future media application service | G06 sparse library/reasons/authorization | Accessible files only; no paid AI/catalog |
@@ -44,13 +44,13 @@ Current0.8 increment (2026-10-17): root Now Playing verified with110 Rust tests,
 | Listening statistics/yearly story P2 | NOT_STARTED | future listening aggregate service | Real listened-time/dedup/private-share tests | No global popularity/trending counters |
 | ZIP/WebDAV/S3/podcasts P2 | NOT_STARTED | future imports adapters | Bounded trusted-storage/archive tests | Separate public egress policy; legitimate assets |
 | Backup/restore/deployment P0 | PARTIAL | scripts/backup.py; deploy/; Dockerfile | G14;9 Python regressions; extracted packages | Local Linux verified; Docker daemon unavailable at baseline |
-| Accessibility/cross-browser P0 | PARTIAL | web/style.css/player.js; browser tests | G13 keyboard,320px,light/dark/reduced motion | Screen-reader/Firefox/Safari/native unverified |
+| Accessibility/cross-browser P0 | PARTIAL | web/style.css/player.js; browser tests | G13 keyboard,320px,light/dark/reduced motion | Screen-reader/Safari/native unverified;0.8 adds Firefox157/Linux headless |
 
 ## Ten current experience gaps, in order
 
 The baseline Home/local Search/shell, stale-play guard, occurrence order browser resume/recovery and root Now Playing increments are now implemented to the verified scopes above. Keep their EXP/PLAY/RES/NET/AUTH regressions at every merge. The remaining prioritized gaps are:
 
-1. P0 broader playback/accessibility verification — apps/web/src/browser_player.rs, player.js and tests/browser; G07/G13: real Firefox/Safari, keyboard/screen-reader audit, pending seek/expiry/reconnect and large-queue rendering. Current Chromium evidence does not certify these targets.
+1. P0 broader playback/accessibility verification — apps/web/src/browser_player.rs, player.js and tests/browser; G07/G13: WebKit/Safari, stock OS/browser variants, keyboard/screen-reader audit, pending seek/expiry/reconnect and large-queue rendering. Current headless Chromium/Firefox evidence does not certify these targets.
 2. P1 private listened-time foundation — proposed crates/core/src/listening.rs, domain DTOs/migration and root player; G07/G14: consent/opt-out, deduplicated meaningful duration, export/delete, owner isolation and recovery.
 3. P1 personalized Home/radio/mixes — proposed crates/media/src/discovery.rs and apps/web/src/experience.rs; G06: sparse-library deterministic ranking/diversity/reasons from actual accessible IDs, no fake history.
 4. P1 richer catalog/navigation — crates/media/src/catalog.rs, crates/domain/src/lib.rs and web/main.rs; G04: edition/recording/contributor identity, full-context pagination, technical variants and responsive large-list behavior.

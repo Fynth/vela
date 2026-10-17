@@ -194,3 +194,5 @@ Snapshots cap serialized output at4MiB and queue size at1000. Media time updates
 ## Now Playing0.8 measurement scope
 
 The view projects existing root state; it issues no new catalog/stream request on open and materializes at most five preview entries from the bounded queue. NP01 checks actual audio-node/source/generation continuity and zero additional stream requests on open. This is a correctness/resource invariant, not a playback-latency or frame-rate benchmark. No new p50/p95/p99, gapless, CPU or memory performance claim is made for0.8; use the reproducible catalog benchmarks above for their stated SQL-only scope.
+
+The Firefox0.8 follow-up is cross-engine functional validation, not a latency/throughput benchmark. Network fixtures explicitly release the paused test buffer before forcing a cold-source outage, preserve the real bookmark and require failed GETs, an authorized HEAD and a new application source generation. This is separate from production cache behavior and does not measure offline hit rate.

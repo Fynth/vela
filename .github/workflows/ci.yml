@@ -27,12 +27,21 @@ jobs:
         with:
           node-version: 22
       - run: npm ci --prefix tests/browser
-      - run: cd tests/browser && npx playwright install --with-deps chromium && npx playwright test
+      - name: Install isolated browser engines
+        run: cd tests/browser && npx playwright install --with-deps chromium firefox
+      - name: Chromium real-server regression
+        run: cd tests/browser && VELA_TEST_BINARY=target/release/vela-server npx playwright test --browser=chromium
+      - name: Preserve Chromium evidence before the fresh Firefox run
+        run: mv tests/browser/test-results tests/browser/chromium-results
+      - name: Firefox real-server regression
+        run: cd tests/browser && VELA_TEST_BINARY=target/release/vela-server npx playwright test --browser=firefox
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
           name: browser-test-results
-          path: tests/browser/test-results
+          path: |
+            tests/browser/test-results
+            tests/browser/chromium-results
   dependencies:
     runs-on: ubuntu-latest
     steps:

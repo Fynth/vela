@@ -58,7 +58,9 @@ cargo test --locked --workspace -- --test-threads=2
 cargo clippy --locked -p vela-web --target wasm32-unknown-unknown -- -D warnings
 scripts/build-web.sh
 npm ci --prefix tests/browser
-(cd tests/browser && npx playwright install chromium && npx playwright test)
+(cd tests/browser && npx playwright install chromium firefox)
+(cd tests/browser && npx playwright test --browser=chromium)
+(cd tests/browser && npx playwright test --browser=firefox)
 ```
 
 See [experience parity](docs/SPOTIFY_PARITY_MATRIX.md), [product flows](docs/PRODUCT_SPEC.md), [design system](docs/DESIGN_SYSTEM.md), [progress](docs/PROGRESS.md), [architecture](docs/ARCHITECTURE.md), [roadmap](docs/ROADMAP.md), [security](docs/SECURITY.md), [performance](docs/PERFORMANCE.md), [known limitations](docs/KNOWN_LIMITATIONS.md), and [research](docs/RESEARCH.md). CI configuration does not mean CI has run. Native mobile/desktop, offline downloads, multi-server access, OpenSubsonic and federation remain roadmap work.

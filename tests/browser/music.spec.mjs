@@ -1197,19 +1197,34 @@ async function pausedBookmark(page,title='Drift',position=9){
   await page.getByRole('button',{name:`Play ${title}`,exact:true}).click();
   await expect.poll(()=>page.locator('#vela-audio').evaluate(a=>a.readyState)).toBeGreaterThanOrEqual(2);
   await page.getByRole('slider',{name:'Playback position',exact:true}).evaluate((e,p)=>{e.value=String(p);e.dispatchEvent(new Event('input',{bubbles:true}));},position);
-  await page.getByRole('button',{name:'Pause',exact:true}).click();await page.reload();
+  await page.getByRole('button',{name:'Pause',exact:true}).click();
+  // Release this fixture's buffered resource before reload. Firefox can reuse
+  // it without any network request, which would bypass the transport fault.
+  await releaseTestMedia(page);await page.reload();
   await expect(page.locator('.now-playing strong')).toHaveText(title);
+  const saved=Number(await page.getByRole('slider',{name:'Playback position',exact:true}).inputValue());
+  expect(saved).toBeGreaterThanOrEqual(position);expect(saved).toBeLessThan(position+1);
+}
+async function releaseTestMedia(page){
+  await page.locator('#vela-audio').evaluate(a=>{a.pause();a.removeAttribute('src');a.load();});
 }
 
 test('NET01 genuine failed transfer recovers via authorized HEAD at the saved seek',async({page})=>{
   const errors=[];page.on('pageerror',e=>errors.push(e.message));await pausedBookmark(page);
-  let failures=0,heads=0;
+  let failures=0,heads=0,probeGeneration;
   await page.route('**/api/tracks/*/stream',async route=>{
-    if(route.request().method()==='HEAD'){heads++;await route.continue();}
-    else if(failures++===0){await route.abort('connectionreset');}else{await route.continue();}
+    if(route.request().method()==='HEAD'){
+      probeGeneration=await page.locator('#vela-audio').getAttribute('data-source-generation');
+      heads++;await route.continue();
+    }
+    // Keep the genuine transport outage until Vela performs its authorized probe.
+    else if(heads===0){failures++;await route.abort('connectionreset');}else{await route.continue();}
   });
   await page.getByRole('button',{name:'Play',exact:true}).click();
-  await expect.poll(()=>heads).toBe(1);
+  await expect.poll(()=>heads,{timeout:15000}).toBe(1);expect(failures).toBeGreaterThan(0);
+  // Attribute the successful reload to Vela, not a browser-only retry while
+  // the authorized HEAD is still in flight.
+  await expect.poll(()=>page.locator('#vela-audio').getAttribute('data-source-generation')).not.toBe(probeGeneration);
   await expect(page.locator('#vela-audio')).toHaveJSProperty('paused',false);
   await expect.poll(()=>page.locator('#vela-audio').evaluate(a=>a.currentTime)).toBeGreaterThanOrEqual(9);
   expect(await page.locator('#vela-audio').evaluate(a=>a.currentTime)).toBeLessThan(14);
@@ -1222,9 +1237,9 @@ test('NET02 pause and a newer duplicate occurrence cancel held recovery and retr
   let gets=0,heads=0;
   await page.route('**/api/tracks/*/stream',async route=>{
     if(route.request().method()==='HEAD'){heads++;const response=await route.fetch();seen();await gate;try{await route.fulfill({response});}catch{ /* physically aborted */ }}
-    else if(gets++===0){await route.abort('connectionreset');}else{await route.continue();}
+    else if(heads===0){gets++;await route.abort('connectionreset');}else{await route.continue();}
   });
-  await page.getByRole('button',{name:'Play',exact:true}).click();await held;
+  await page.getByRole('button',{name:'Play',exact:true}).click();await held;expect(gets).toBeGreaterThan(0);
   await page.getByRole('button',{name:'Pause',exact:true}).click();
   await expect(page.locator('#vela-audio')).toHaveJSProperty('paused',true);
   await findTrack(page,'Drift');
@@ -1238,7 +1253,7 @@ test('NET02 pause and a newer duplicate occurrence cancel held recovery and retr
   expect(await page.locator('#vela-audio').getAttribute('data-source-generation')).toBe(generation);
   expect(await page.locator('#vela-audio').evaluate(a=>a.currentTime)).toBeGreaterThanOrEqual(6);
   expect(heads).toBe(1);
-  await page.getByRole('button',{name:'Pause',exact:true}).click();await page.reload();
+  await page.getByRole('button',{name:'Pause',exact:true}).click();await releaseTestMedia(page);await page.reload();
   await page.unroute('**/api/tracks/*/stream');
   let probes=0;
   await page.route('**/api/tracks/*/stream',async route=>{if(route.request().method()==='HEAD')probes++;await route.abort('connectionreset');});

@@ -91,3 +91,5 @@ Deferred media/retry/probe work checks the exact active session, source generati
 ## Now Playing isolation0.8
 
 The full player reveals only metadata already in the authenticated root queue. No new media grant, endpoint, credential or path is introduced; favorite writes retain session/CSRF authorization. Root feedback also matches open generation and current occurrence so a held reply cannot overwrite a new track, reopened view or account. A genuine401 still expires the session and clears private player details. Native dialog background inertness is a UI property, never an authorization mechanism. The server permits exactly /now-playing.css; neighboring CSS, SQLite files and traversal remain denied by the static-asset regression.
+
+The0.8 cross-browser follow-up uses fresh isolated Firefox/Chromium profiles and separate temporary server databases. It retains real CSRF/session/revocation/favorite-race checks and never imports a signed-in user profile. Cold-network setup releases only the test element's buffered resource before reload; no production cache/authorization policy, credentials or storage is changed.
