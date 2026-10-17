@@ -119,3 +119,5 @@ browser_player.rs is the single audio adapter, not another UI player or server s
 ## Root Now Playing view (0.8.0)
 
 ADR0012 adds presentation-only now_playing.rs beside the existing browser_player/session/order modules. Root owns its visibility, per-open feedback generation and actions; it neither owns another audio element nor performs HTTP. The bottom bar, native modal and Media Session bridge all control the same source. Native dialog focus/inertness is separate from legacy overlay trapping. Favorite commits update library/catalog/queue consistently while local error/busy feedback matches session, generation and occurrence. now-playing.css is an explicitly allowed static asset included in build/package checks. Schema7, HTTP contracts, storage and upstream pins remain unchanged.
+
+Browser0.8.1 projects the current queued metadata duration during owner-bound sync only while the source is unloaded. After metadata arrives the browser remains authoritative. Both bar/modal consume that single root duration, including pre-load seeking; sync does not start audio, modify generations or reset traversal.

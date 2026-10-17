@@ -48,12 +48,6 @@ pub fn NowPlaying(
     actions: Actions,
 ) -> Element {
     let favorite = track.clone();
-    // An inspected queued item may not have loaded browser metadata yet.
-    let duration = if duration.is_finite() && duration > 0.0 {
-        duration
-    } else {
-        track.duration_ms.max(0) as f64 / 1000.0
-    };
     let count = queue.read().len();
     let toggle_icon = if playing || requested {
         "pause"

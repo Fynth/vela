@@ -1,3 +1,7 @@
+# Local checkpoint0.8.1
+
+Adding a track to an empty queue now gives both the persistent bar and Now Playing its known duration before media is loaded. Seek while paused, then press Play to start at that saved position. The browser's measured duration remains authoritative once loaded; queue/favorite edits preserve active audio and order. Fixes the0.8.0 bar showing0s/max1 while the full player showed the real duration. No schema/API/storage/upstream pin changes. PROGRESS records the reproduced failure and executed checks; packages remain local review artifacts.
+
 # Local checkpoint0.8.0
 
 Now Playing opens from the current track in the persistent player. Its cover, title, artist, album, original-file properties, seek/volume/transport, favorite and bounded saved-order queue preview use actual root state. Selecting a queue occurrence or using Media Session controls keeps the same dialog/audio element. Opening a paused bookmark does not fetch media. Escape/close restores focus; navigation, sign-out and expired sessions clear the view. Favorite feedback ignores superseded track/view/account replies and successful changes agree across catalog, library and queue.

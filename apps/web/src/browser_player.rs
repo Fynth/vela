@@ -150,6 +150,18 @@ impl BrowserPlayer {
         } else {
             s.position
         };
+        // A queued occurrence can be inspected/seeked before any source loads.
+        // Once loaded, preserve the browser's actual duration across queue edits.
+        if !s.loaded {
+            let duration = saved
+                .queue
+                .get(saved.cursor)
+                .map_or(0.0, |track| track.duration_ms.max(0) as f64 / 1000.0);
+            let changed = *s.view.duration.peek() != duration;
+            if changed {
+                s.view.duration.set(duration);
+            }
+        }
         s.saved = Some(saved);
         drop(s);
         self.checkpoint(true);

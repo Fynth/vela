@@ -1,5 +1,10 @@
 # Initial integration contracts
 
+## Unloaded queued duration correction0.8.1
+
+Main owns this small sequential patch. BrowserPlayer::sync projects the current saved occurrence's nonnegative metadata duration to the root duration signal only while no browser source is loaded. Preserve the existing owner/session guard, saved position/pending seek, source generation, intent/retries and PlaybackOrder. Loaded browser duration remains authoritative through favorites/tag/queue edits. No schema/API/storage/dependency pin changes. NP01 must first reproduce root max1 versus modal30 on0.8.0, then verify both ranges30 for a real queued30s WAV, paused seek11 without any source request and explicit Play at11s; retain both full browser suites and Rust/WASM gates. Do not modify the active frozen0.8.0 files while building.
+
+
 ## Now Playing view (0.8.0)
 
 No DB/API/media-storage change. Main owns Cargo/lock, root playback/favorite integration, apps/web/src/now_playing.rs, index/build/JS, E2E and documentation. A CSS contributor delivered apps/web/now-playing.css only; no Cargo, tests/builds or commits. Main owns subsequent integration and height-aware refinements. Reviewer is read-only. Keep the existing root HTMLMediaElement/PlaybackUi/BrowserPlayer and occurrence model; the view must never instantiate audio, resolve URLs or fetch catalog data.
