@@ -16,7 +16,8 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, watch};
 use tokio_util::sync::CancellationToken;
 use url::{Host, Url};
 use vela_domain::{
-    AuthResponse, Credentials, PlaylistDetail, PlaylistSummary, Track, TrackPage, UpdatePlaylist,
+    AlbumPage, AlbumSummary, ArtistPage, ArtistSummary, AuthResponse, Credentials, PlaylistDetail,
+    PlaylistSummary, Track, TrackPage, UpdatePlaylist,
 };
 
 const CANCELED: &str = "Request canceled.";
@@ -293,6 +294,215 @@ impl VelaClient {
                 }
                 drop(sender);
                 writer.await.map_err(|_| AUDIO_ERROR.to_owned())?
+            },
+        )
+        .await
+    }
+
+    pub async fn albums(
+        &self,
+        cursor: Option<&str>,
+        cancel: CancellationToken,
+    ) -> Result<AlbumPage, String> {
+        if cursor.is_some_and(|cursor| !canonical_uuid(cursor)) {
+            return Err("Use a valid album page cursor.".into());
+        }
+        let session = self.session()?;
+        let mut url = endpoint(&self.inner.origin, "/api/albums");
+        url.query_pairs_mut().append_pair("limit", "50");
+        if let Some(cursor) = cursor {
+            url.query_pairs_mut().append_pair("cursor", cursor);
+        }
+        bounded(
+            &cancel,
+            &self.inner.lifetime,
+            Duration::from_secs(20),
+            async {
+                let response = self
+                    .request(Method::GET, url, &session)
+                    .send()
+                    .await
+                    .map_err(|_| NETWORK_ERROR.to_owned())?;
+                if response.status() != StatusCode::OK {
+                    return Err(status_error(response.status()));
+                }
+                let page: AlbumPage = json(response, MAX_JSON_BYTES).await?;
+                if page.items.len() > 50
+                    || page.items.iter().any(|album| !canonical_uuid(&album.id))
+                    || page
+                        .next_cursor
+                        .as_ref()
+                        .is_some_and(|cursor| !canonical_uuid(cursor))
+                {
+                    return Err(INVALID_RESPONSE.into());
+                }
+                Ok(page)
+            },
+        )
+        .await
+    }
+
+    pub async fn album(&self, id: &str, cancel: CancellationToken) -> Result<AlbumSummary, String> {
+        if !canonical_uuid(id) {
+            return Err("Select a valid album.".into());
+        }
+        let session = self.session()?;
+        bounded(
+            &cancel,
+            &self.inner.lifetime,
+            Duration::from_secs(20),
+            async {
+                let response = self
+                    .request(
+                        Method::GET,
+                        endpoint(&self.inner.origin, &format!("/api/albums/{id}")),
+                        &session,
+                    )
+                    .send()
+                    .await
+                    .map_err(|_| NETWORK_ERROR.to_owned())?;
+                if response.status() != StatusCode::OK {
+                    return Err(status_error(response.status()));
+                }
+                let album: AlbumSummary = json(response, MAX_JSON_BYTES).await?;
+                if album.id != id {
+                    return Err(INVALID_RESPONSE.into());
+                }
+                Ok(album)
+            },
+        )
+        .await
+    }
+
+    pub async fn album_tracks(
+        &self,
+        id: &str,
+        cursor: Option<&str>,
+        cancel: CancellationToken,
+    ) -> Result<TrackPage, String> {
+        self.group_tracks("albums", id, cursor, cancel).await
+    }
+
+    pub async fn artists(
+        &self,
+        cursor: Option<&str>,
+        cancel: CancellationToken,
+    ) -> Result<ArtistPage, String> {
+        if cursor.is_some_and(|cursor| !canonical_uuid(cursor)) {
+            return Err("Use a valid artist page cursor.".into());
+        }
+        let session = self.session()?;
+        let mut url = endpoint(&self.inner.origin, "/api/artists");
+        url.query_pairs_mut().append_pair("limit", "50");
+        if let Some(cursor) = cursor {
+            url.query_pairs_mut().append_pair("cursor", cursor);
+        }
+        bounded(
+            &cancel,
+            &self.inner.lifetime,
+            Duration::from_secs(20),
+            async {
+                let response = self
+                    .request(Method::GET, url, &session)
+                    .send()
+                    .await
+                    .map_err(|_| NETWORK_ERROR.to_owned())?;
+                if response.status() != StatusCode::OK {
+                    return Err(status_error(response.status()));
+                }
+                let page: ArtistPage = json(response, MAX_JSON_BYTES).await?;
+                if page.items.len() > 50
+                    || page.items.iter().any(|artist| !canonical_uuid(&artist.id))
+                    || page
+                        .next_cursor
+                        .as_ref()
+                        .is_some_and(|cursor| !canonical_uuid(cursor))
+                {
+                    return Err(INVALID_RESPONSE.into());
+                }
+                Ok(page)
+            },
+        )
+        .await
+    }
+
+    pub async fn artist(
+        &self,
+        id: &str,
+        cancel: CancellationToken,
+    ) -> Result<ArtistSummary, String> {
+        if !canonical_uuid(id) {
+            return Err("Select a valid artist.".into());
+        }
+        let session = self.session()?;
+        bounded(
+            &cancel,
+            &self.inner.lifetime,
+            Duration::from_secs(20),
+            async {
+                let response = self
+                    .request(
+                        Method::GET,
+                        endpoint(&self.inner.origin, &format!("/api/artists/{id}")),
+                        &session,
+                    )
+                    .send()
+                    .await
+                    .map_err(|_| NETWORK_ERROR.to_owned())?;
+                if response.status() != StatusCode::OK {
+                    return Err(status_error(response.status()));
+                }
+                let artist: ArtistSummary = json(response, MAX_JSON_BYTES).await?;
+                if artist.id != id {
+                    return Err(INVALID_RESPONSE.into());
+                }
+                Ok(artist)
+            },
+        )
+        .await
+    }
+
+    pub async fn artist_tracks(
+        &self,
+        id: &str,
+        cursor: Option<&str>,
+        cancel: CancellationToken,
+    ) -> Result<TrackPage, String> {
+        self.group_tracks("artists", id, cursor, cancel).await
+    }
+
+    async fn group_tracks(
+        &self,
+        kind: &str,
+        id: &str,
+        cursor: Option<&str>,
+        cancel: CancellationToken,
+    ) -> Result<TrackPage, String> {
+        if !canonical_uuid(id) || cursor.is_some_and(|cursor| !canonical_uuid(cursor)) {
+            return Err("Select a valid group and page cursor.".into());
+        }
+        let session = self.session()?;
+        let mut url = endpoint(&self.inner.origin, &format!("/api/{kind}/{id}/tracks"));
+        url.query_pairs_mut().append_pair("limit", "50");
+        if let Some(cursor) = cursor {
+            url.query_pairs_mut().append_pair("cursor", cursor);
+        }
+        bounded(
+            &cancel,
+            &self.inner.lifetime,
+            Duration::from_secs(20),
+            async {
+                let response = self
+                    .request(Method::GET, url, &session)
+                    .send()
+                    .await
+                    .map_err(|_| NETWORK_ERROR.to_owned())?;
+                if response.status() != StatusCode::OK {
+                    return Err(status_error(response.status()));
+                }
+                let page: TrackPage = json(response, MAX_JSON_BYTES).await?;
+                validate_page(&page, cursor)?;
+                Ok(page)
             },
         )
         .await
@@ -1111,6 +1321,45 @@ mod tests {
                 .items
                 .len(),
             1
+        );
+        let albums = client.albums(None, CancellationToken::new()).await.unwrap();
+        assert!(!albums.items.is_empty());
+        assert_eq!(
+            client
+                .album(&albums.items[0].id, CancellationToken::new())
+                .await
+                .unwrap()
+                .id,
+            albums.items[0].id
+        );
+        assert!(
+            !client
+                .album_tracks(&albums.items[0].id, None, CancellationToken::new())
+                .await
+                .unwrap()
+                .items
+                .is_empty()
+        );
+        let artists = client
+            .artists(None, CancellationToken::new())
+            .await
+            .unwrap();
+        assert!(!artists.items.is_empty());
+        assert_eq!(
+            client
+                .artist(&artists.items[0].id, CancellationToken::new())
+                .await
+                .unwrap()
+                .id,
+            artists.items[0].id
+        );
+        assert!(
+            !client
+                .artist_tracks(&artists.items[0].id, None, CancellationToken::new())
+                .await
+                .unwrap()
+                .items
+                .is_empty()
         );
         assert!(
             client

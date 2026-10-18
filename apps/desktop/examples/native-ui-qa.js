@@ -132,6 +132,27 @@ try {
   assert(document.querySelectorAll('[data-native-queue-index]').length === 2, 'Playlist playback populates the shared native queue');
   await click('Library');
   await wait(() => document.querySelectorAll('[data-native-track-id]').length === 3, 'Library after playlist playback');
+  await click('Albums');
+  await wait(() => button('Open album Real Fixtures by Vela Test'), 'Real album groups');
+  await click('Open album Real Fixtures by Vela Test');
+  await wait(() => el('[data-testid="native-group-title"]')?.textContent === 'Real Fixtures · Vela Test' && button('Play album'), 'Real album detail');
+  assert(button('Play album'), 'Album detail exposes real grouped tracks');
+  await capture('albums-dark');
+  await click('Play album');
+  await wait(() => (el('.native-player-status small')?.textContent || '').includes('Real Fixtures') && phase() === 'Playing' && position() > 0, 'Album playback context');
+  assert(phase() === 'Playing', 'Album playback starts through native audio');
+  await click('Library');
+  await wait(() => document.querySelectorAll('[data-native-track-id]').length === 3, 'Library after album playback');
+  await click('Artists');
+  await wait(() => button('Open artist Vela Test'), 'Real artist groups');
+  await click('Open artist Vela Test');
+  await wait(() => el('[data-testid="native-group-title"]')?.textContent === 'Vela Test' && button('Play artist'), 'Real artist detail');
+  assert(button('Play artist'), 'Artist detail exposes real grouped tracks');
+  await click('Play artist');
+  await wait(() => (el('.native-player-status small')?.textContent || '').includes('Vela Test') && phase() === 'Playing' && position() > 0, 'Artist playback context');
+  assert(phase() === 'Playing', 'Artist playback starts through native audio');
+  await click('Library');
+  await wait(() => document.querySelectorAll('[data-native-track-id]').length === 3, 'Library after artist playback');
   if (config.closeWhilePlaying) {
     await click('Pause');
     fill('#native-search', 'Native Continuity'); el('.native-search').requestSubmit();

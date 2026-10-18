@@ -111,8 +111,10 @@ The native UI currently covers Library, Queue, transport, theme, sign-in and sig
 Favorites are implemented natively (filtered view, per-row favorite/unfavorite and
 queue-state synchronization). Native playlists support real list/detail metadata, per-entry `can_stream`
 labels, playback of the authorized subset, and owner create/CAS-rename/confirm-delete.
-Entry add/reorder/removal, folders, albums, artists, search history, settings/privacy,
-listening history and recommendations remain browser-web features only. Native listening events
+Albums and artists are browsable natively with read-only grouped detail and playback
+of the owner-authorized tracks. Entry add/reorder/removal, playlist folders, album/
+artist metadata editing, search history, settings/privacy, listening history and
+recommendations remain browser-web features only. Native listening events
 are not sent, so consent/history cannot be inferred from native preparation or
 decoding. MPRIS requires a working session D-Bus and reports bounded public metadata
 only; a failed bus degrades to in-app controls. Android Media3, iOS AVFoundation,

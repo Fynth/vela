@@ -18,10 +18,10 @@ time. The existing server, schema, HTTP API and frozen0.11 runtime are unchanged
 Launch `vela-desktop`, sign in to one Vela origin, page/search the private owned
 library, play an original through the device's native audio output, pause/resume,
 seek, change volume, navigate Library/Favorites/Playlists/Queue without interrupting
-audio, favorite/unfavorite owned tracks, search favorites, browse real playlists,
-play the stream-authorized subset, create/rename/delete own playlists, use
-next/previous/shuffle/repeat, queue duplicates/play-next/remove/reorder, switch
-theme, sign out. MPRIS exposes actual state and forwards play/pause/next/previous/
+audio, favorite/unfavorite owned tracks, search favorites, browse real albums,
+artists and playlists, play album/artist/playlist stream-authorized subsets, create/
+rename/delete own playlists, use next/previous/shuffle/repeat, queue duplicates/
+play-next/remove/reorder, switch theme, sign out. MPRIS exposes actual state and forwards play/pause/next/previous/
 seek/volume where the bus is available.
 
 ## Implemented boundaries
@@ -54,6 +54,11 @@ seek/volume where the bus is available.
   the same authenticated/CSRF/Origin-safe client; success updates the list/detail
   under session/view/selected-id guards. Entry add/reorder and folder mutation remain
   web-only. Bounded entry counts/IDs are validated; a metadata-only entry is labelled.
+- Albums and artists use the existing owner-scoped `GET /api/albums`,
+  `/api/albums/{id}`, `/api/albums/{id}/tracks` and artist equivalents. The native
+  views render real group summaries, open read-only detail, and queue/play the
+  authorized group tracks; unknown/foreign groups, page cursors and IDs are bounded
+  and validated. No edition/recording identity is inferred from a name.
 - `playback.rs` (reused by path from the web crate): bounded occurrence indices,
   fair shuffle deck/history, explicit next priority, repeat semantics. Structural
   queue edits synchronize the order model; metadata does not reset traversal.
@@ -71,7 +76,7 @@ seek/volume where the bus is available.
 This first adapter downloads the whole authorized original before decoding. It is
 not progressive streaming, gapless, offline, a download entitlement, background
 mobile playback, secure credential persistence, device handoff, packaged install,
-playlist entry editing/folders, albums/artists native UI, or a federated source
+playlist entry editing/folders, album/artist editing or a federated source
 resolver. It sends no
 native listening events. Only Linux x86_64 is built/tested on this host; Windows,
 macOS, Android and iOS remain separate targets. Hardware output, screen readers and
@@ -96,6 +101,10 @@ physical media keys are not certified.
   worker still advertised as playable (explicit reconnect now), QA sink assertions
   and a UTF-8 slice panic; the reported test-count discrepancy was resolved by
   enumerating25 actual tests.
+- Album/artist journey passes in the same real window: real album groups, album
+  detail (`Real Fixtures · Vela Test`), `Play album` native audio, artist groups,
+  artist detail, `Play artist` native audio, and Library return. Evidence:
+  `target/checks/native-browse-window3/` (including `native-albums-dark.png`).
 - Playlist journey passes in the same real window against the current0.12 debug
   server: real list card, native create → open → rename → cancel-delete → confirm
   delete, fixture playlist survives, two-entry detail, `Play playlist` starts native

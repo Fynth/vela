@@ -56,6 +56,7 @@ fn Harness() -> Element {
                             | "compact-light"
                             | "favorites-dark"
                             | "playlists-dark"
+                            | "albums-dark"
                     ) {
                         break json!({"ok":false,"failure":"Unknown capture stage"});
                     }
