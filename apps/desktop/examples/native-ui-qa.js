@@ -284,20 +284,31 @@ try {
     fill('#native-origin', config.origin); fill('#native-username', config.username); fill('#native-password', config.password);
     el('.signin-form form').requestSubmit();
     await wait(() => document.querySelectorAll('[data-native-track-id]').length === 3, 'Library after offline sign-in');
-    const offlineTitle = el('[data-native-track-id] .native-track-name strong')?.textContent;
-    assert(offlineTitle, 'Offline fixture track is listed');
-    await click(`Save ${offlineTitle} offline`);
-    await wait(() => (el('.alert.notice')?.textContent || '').includes('Saved for offline listening.'), 'Offline download completed');
-    await wait(() => button(`Play offline ${offlineTitle}`), 'Offline copy listed');
-    assert(el('[data-offline-track-id]'), 'Offline section exposes a private device copy');
+    const offlineTitles = [...document.querySelectorAll('[data-native-track-id] .native-track-name strong')].slice(0, 2).map(node => node.textContent);
+    assert(offlineTitles.length === 2, 'Offline fixtures are listed');
+    for (const title of offlineTitles) {
+      await click(`Save ${title} offline`);
+      await wait(() => button(`Play offline ${title}`), `Offline copy listed: ${title}`);
+    }
+    assert(document.querySelectorAll('[data-offline-track-id]').length === 2, 'Two private device copies are listed');
     dioxus.send({handshake:'server-stop'});
     await dioxus.recv();
     let serverDown = false;
     try { const probe = await fetch(`/health?offline=${Date.now()}`, {cache:'no-store'}); serverDown = !probe.ok; } catch { serverDown = true; }
     assert(serverDown, 'Fixture server is actually stopped before offline playback');
-    await click(`Play offline ${offlineTitle}`);
+    await click(`Play offline ${offlineTitles[1]}`);
     await wait(() => phase() === 'Playing' && position() > 100 && (el('.native-player-status small')?.textContent || '').includes('Offline ·'), 'Offline playback');
     assert(phase() === 'Playing' && (el('.native-player-status small')?.textContent || '').includes('Offline ·'), 'Saved original plays natively with the server stopped');
+    await click('Next');
+    await wait(() => (el('.native-player-status small')?.textContent || '').includes(`Offline · ${offlineTitles[0]}`), 'Offline next');
+    assert((el('.native-player-status small')?.textContent || '').includes(`Offline · ${offlineTitles[0]}`), 'Offline queue advances to the second saved copy');
+    await click('Previous');
+    await wait(() => (el('.native-player-status small')?.textContent || '').includes(`Offline · ${offlineTitles[1]}`), 'Offline previous');
+    assert((el('.native-player-status small')?.textContent || '').includes(`Offline · ${offlineTitles[1]}`), 'Offline queue returns to the first saved copy');
+    await click(`Remove offline copy ${offlineTitles[1]}`);
+    await click(`Confirm remove offline ${offlineTitles[1]}`);
+    await wait(() => !button(`Play offline ${offlineTitles[1]}`), 'Offline copy removed');
+    assert(document.querySelectorAll('[data-offline-track-id]').length === 1, 'Offline removal leaves the other device copy');
     dioxus.send({ok:true, checks});
   }
 } catch(error) { dioxus.send({ok:false, checks, failure:String(error.message)}); }

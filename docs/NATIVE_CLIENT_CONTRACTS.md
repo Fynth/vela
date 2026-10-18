@@ -140,10 +140,13 @@ are100 tracks/2GiB; malformed, mismatched-size or orphaned entries are ignored. 
 credentials, session tokens, audio URLs or listening events are stored.
 
 The Library shows saved copies and **Play offline** decodes the local file through the
-single native engine with context `Offline · <title>`. This is one-track local
-playback: previous/next are disabled offline, and there is no background sync,
-removal UI, queue/download manager, Android/iOS offline or server-side entitlement
-refresh. Sign-out clears in-memory state but retains the account-scoped files; another
+single native engine with context `Offline · <title>`. The offline queue contains all
+saved copies in newest-saved order; Previous/Next move only within that queue and the
+controls disable at its edges. A saved copy can be removed with inline confirmation;
+removing the currently playing copy stops offline playback. Removal deletes only the
+private device copy and manifest, never the server original. There is no background
+sync, automatic download/refresh, bulk storage manager, Android/iOS offline or
+server-side entitlement refresh. Sign-out clears in-memory state but retains the account-scoped files; another
 account cannot see them. The real-window QA stops the fixture server, verifies the HTTP
 health probe fails, plays the saved original to advancing media time, and checks the
 audio/manifest exist at0600.

@@ -63,6 +63,23 @@ pub fn audio_path(account_id: &str, track_id: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 
+pub fn remove(account_id: &str, track_id: &str) -> Result<(), String> {
+    remove_from(&data_root(account_id)?, track_id)
+}
+
+fn remove_from(root: &Path, track_id: &str) -> Result<(), String> {
+    let audio = audio_path_from(root, track_id)?;
+    let manifest = root.join(format!("{track_id}.json"));
+    for path in [audio, manifest] {
+        match fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return Err("The offline copy could not be removed.".into()),
+        }
+    }
+    Ok(())
+}
+
 pub fn save(account_id: &str, track: &Track, prepared: &PreparedAudio) -> Result<(), String> {
     save_to(&data_root(account_id)?, account_id, track, prepared)
 }

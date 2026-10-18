@@ -18,8 +18,8 @@ client is also rebuilt as `vela-desktop 0.12.1` with cached-metadata fallback. S
 adds public preview and per-peer search cursor pagination (20/page), cached-peer age
 and Retry live, and local DSP spectral-3 adds nearest-semitone chroma with a visible
 pitch-class summary; the runtime archive includes spectral-3. The cache age/Retry live and explicit
-one-track offline-copy slices postdate the preserved0.12.2 desktop archive and will
-ship in the next native package.
+offline-copy slices (queue Previous/Next, confirmed removal) postdate the preserved
+0.12.2 desktop archive and will ship in the next native package.
 Exact-package Chromium
 and Firefox each passed40 scenarios with1 live-import skip; the preserved-data
 handover kept schema11 and all original catalog/media counts unchanged.

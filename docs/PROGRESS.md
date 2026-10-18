@@ -21,6 +21,23 @@ correctly shows "Not established"). No schema, server HTTP, native or original-d
 runtime change. The live runtime was subsequently upgraded to0.12.1; existing
 analysis rows remain spectral-1 until explicitly reanalyzed.
 
+## Native offline queue + removal0.12.2 — verified (2026-10-18)
+
+Offline playback now uses all saved copies in newest-saved order: Play offline builds
+the local queue at the selected copy, Previous/Next step only within it, and controls
+disable at the edges. Each saved copy has inline-confirmed removal; removing the
+currently playing copy stops offline playback. Removal deletes only the account-scoped
+device audio+manifest, never the server original.
+
+The real WebKitGTK fixture downloads two tracks, stops the actual server, verifies the
+no-store health probe fails, plays the first saved copy, moves Next then Previous
+through the two-copy offline queue, removes one copy with confirmation while the server
+is still down, and leaves exactly one0600 audio+manifest pair. Evidence:
+`target/checks/native-offline-queue2/`;27/29 desktop tests plus both opt-ins, strict
+Clippy/fmt. No automatic/background offline sync, bulk storage manager, mobile/background
+or entitlement refresh. Source postdates the preserved0.12.2 desktop archive. No
+schema, server HTTP, web or original-data/runtime change.
+
 ## Native explicit offline copies0.12.2 — verified (2026-10-18, `46bd390`)
 
 The native Library now offers an explicit per-track Save offline action. It downloads
