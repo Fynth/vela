@@ -119,7 +119,7 @@ offline launch) and AUD-06 (origin-scoped offline namespace) remain open. AUD-01
 are fixed in `3094754`, AUD-13 in `48b2fa4`.
 
 Offline routing regressions observed during the repair are now fixed in source
-`dbf90c5`: natural EOF advances the device queue instead of server prepare (Repeat-one
+`03b2523`: natural EOF advances the device queue instead of server prepare (Repeat-one
 keeps replay), MPRIS Next/Previous use the offline-aware handlers, Play offline is no
 longer restricted to Library/Favorites, and `cancel_all` cancels `folder_gate`.
 

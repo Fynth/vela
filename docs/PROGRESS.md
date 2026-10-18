@@ -13,7 +13,7 @@ executed for this pass; this entry is a documentation record, not evidence. The 
 package/run logs remain valid for their own dates, and the audit package under
 `docs/PLANS/2026-10-19/` is untouched.
 
-## Offline routing follow-ups — source verified (2026-10-19, `dbf90c5`)
+## Offline routing follow-ups — source verified (2026-10-19, `03b2523`)
 
 Fixed the four regressions observed during the offline repair: natural EOF during
 offline playback now advances the saved-copy queue (Repeat::One keeps the replay
