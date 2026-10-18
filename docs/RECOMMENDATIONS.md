@@ -17,7 +17,7 @@ centroid and rolloff, eight fixed-Hertz energy bands and digital RMS amplitude.
 The normalized distance weights are0.25,0.20,0.40 and0.15 respectively. Frequency
 terms span four octaves and the level term spans48dB. This is a transparent
 descriptor distance; it is not calibrated perceptual similarity, loudness in
-LUFS, a tempo/key model, or a genre/mood classifier. A bounded analyzed prefix can
+LUFS, a calibrated tempo/key model, or a genre/mood classifier. A bounded tempo estimate is descriptive only and does not rank tracks. A bounded analyzed prefix can
 describe that prefix, not every passage in a recording. Silence, missing fields,
 corrupt JSON, incompatible versions and nonfinite/impossible values fall back to
 metadata rather than inventing a spectrum.

@@ -22,7 +22,7 @@ use symphonia::core::{
     meta::MetadataOptions,
 };
 
-pub const EXTRACTOR_VERSION: &str = "vela-pcm-spectral-1";
+pub const EXTRACTOR_VERSION: &str = "vela-pcm-spectral-2";
 const FFT_SIZE: usize = 2048;
 const HOP_SIZE: usize = FFT_SIZE / 2;
 const BIN_COUNT: usize = FFT_SIZE / 2 + 1;
@@ -366,6 +366,73 @@ struct Accumulator {
     input: Vec<Complex<f64>>,
     scratch: Vec<Complex<f64>>,
     power: [f64; BIN_COUNT],
+    previous_power: [f64; BIN_COUNT],
+    flux: Vec<f64>,
+}
+
+/// Estimate tempo from detected onset peaks in the normalized spectral-flux
+/// envelope. Inter-onset intervals are filtered to a 60–200 BPM range and the
+/// median interval sets the BPM; confidence is 1 − normalized median absolute
+/// deviation (bounded by onset count). This is an onset-regularity estimate, not
+/// a beat-tracker/annotation claim.
+fn estimate_tempo(flux: &[f64], hop_hz: f64) -> Option<(f64, f64)> {
+    if flux.len() < 64 {
+        return None;
+    }
+    let mean = flux.iter().sum::<f64>() / flux.len() as f64;
+    let maximum = flux.iter().copied().fold(0.0_f64, f64::max);
+    if mean <= 1e-6 || maximum / mean < 2.0 {
+        return None;
+    }
+    let variance = flux.iter().map(|value| (value - mean).powi(2)).sum::<f64>() / flux.len() as f64;
+    let threshold = mean + variance.sqrt();
+    let min_lag = ((hop_hz * 60.0 / 200.0).floor() as usize).max(2);
+    let max_lag = ((hop_hz * 60.0 / 60.0).ceil() as usize).max(min_lag + 1);
+    let refractory = (min_lag / 2).max(1);
+    let mut onsets = Vec::new();
+    for index in 1..flux.len() - 1 {
+        if flux[index] > threshold
+            && flux[index] >= flux[index - 1]
+            && flux[index] >= flux[index + 1]
+            && onsets
+                .last()
+                .is_none_or(|last: &usize| index.saturating_sub(*last) >= refractory)
+        {
+            onsets.push(index);
+        }
+    }
+    if onsets.len() < 4 {
+        return None;
+    }
+    let mut intervals = onsets
+        .windows(2)
+        .map(|pair| pair[1] - pair[0])
+        .filter(|interval| (min_lag..=max_lag).contains(interval))
+        .collect::<Vec<_>>();
+    if intervals.len() < 3 {
+        return None;
+    }
+    intervals.sort_unstable();
+    let median = intervals[intervals.len() / 2] as f64;
+    if median <= 0.0 {
+        return None;
+    }
+    let deviation = intervals
+        .iter()
+        .map(|interval| (*interval as f64 - median).abs())
+        .sum::<f64>()
+        / intervals.len() as f64;
+    let regularity = (1.0 - deviation / median).clamp(0.0, 1.0);
+    let support = (intervals.len() as f64 / 8.0).min(1.0);
+    let confidence = (regularity * support).clamp(0.0, 1.0);
+    if confidence < 0.2 {
+        return None;
+    }
+    let bpm = 60.0 * hop_hz / median;
+    if !(30.0..=240.0).contains(&bpm) {
+        return None;
+    }
+    Some((bpm, confidence))
 }
 
 impl Accumulator {
@@ -393,6 +460,8 @@ impl Accumulator {
             input: vec![Complex::default(); FFT_SIZE],
             scratch,
             power: [0.0; BIN_COUNT],
+            previous_power: [0.0; BIN_COUNT],
+            flux: Vec::new(),
         }
     }
 
@@ -425,6 +494,7 @@ impl Accumulator {
 
     fn spectrum(&mut self, valid_frames: usize) {
         // A power average per channel avoids cancellation of antiphase stereo.
+        let mut window_power = [0.0_f64; BIN_COUNT];
         for channel in 0..self.channels {
             for index in 0..FFT_SIZE {
                 let sample = if index < valid_frames {
@@ -448,8 +518,26 @@ impl Accumulator {
                 } else {
                     2.0
                 };
-                self.power[bin] += value.norm_sqr() * factor / self.channels as f64;
+                window_power[bin] += value.norm_sqr() * factor / self.channels as f64;
             }
+        }
+        // Half-wave-rectified spectral flux is the onset-strength envelope.
+        // The first window is a start transient, not an onset observation.
+        let magnitude_sum = window_power.iter().map(|power| power.sqrt()).sum::<f64>();
+        let flux = if self.windows == 0 || magnitude_sum <= 0.0 {
+            0.0
+        } else {
+            window_power
+                .iter()
+                .zip(self.previous_power.iter())
+                .map(|(now, before)| (now.sqrt() - before.sqrt()).max(0.0))
+                .sum::<f64>()
+                / magnitude_sum
+        };
+        self.flux.push(flux);
+        self.previous_power = window_power;
+        for (total, window) in self.power.iter_mut().zip(window_power.iter()) {
+            *total += *window;
         }
         self.windows += 1;
     }
@@ -509,6 +597,7 @@ impl Accumulator {
                 .exp();
             flatness = Some((geometric / (mean + epsilon)).clamp(0.0, 1.0));
         }
+        let tempo = estimate_tempo(&self.flux, self.rate as f64 / HOP_SIZE as f64);
         AudioFeatures {
             extractor_version: EXTRACTOR_VERSION.to_owned(),
             sample_rate: self.rate,
@@ -531,8 +620,8 @@ impl Accumulator {
             spectral_rolloff_hz: rolloff,
             spectral_flatness: flatness,
             band_energy: bands,
-            tempo_bpm: None,
-            tempo_confidence: None,
+            tempo_bpm: tempo.map(|(bpm, _)| bpm),
+            tempo_confidence: tempo.map(|(_, confidence)| confidence),
             chroma: None,
         }
     }
@@ -677,8 +766,16 @@ mod tests {
             }
             assert!((bands.iter().sum::<f64>() - 1.0).abs() < 1e-9);
         }
-        assert!(features.tempo_bpm.is_none());
-        assert!(features.tempo_confidence.is_none());
+        if let Some(bpm) = features.tempo_bpm {
+            assert!(bpm.is_finite() && (30.0..=240.0).contains(&bpm));
+            assert!(
+                features
+                    .tempo_confidence
+                    .is_some_and(|confidence| (0.0..=1.0).contains(&confidence))
+            );
+        } else {
+            assert!(features.tempo_confidence.is_none());
+        }
         assert!(features.chroma.is_none());
     }
 
@@ -1290,6 +1387,29 @@ mod tests {
         assert!((centroid - 1000.0).abs() < 1.0, "centroid {centroid}");
         assert!(quiet.spectral_flatness.unwrap() < 1e-3);
         assert_finite_descriptors(&quiet);
+    }
+
+    #[test]
+    fn eight_second_click_train_estimates_120_bpm_with_bounded_confidence() {
+        let rate = 44_100_u32;
+        let frames = rate as usize * 8;
+        let mut clicks = vec![0.0_f32; frames];
+        for index in (0..frames).step_by(22_050) {
+            clicks[index] = 1.0;
+        }
+        let features = accumulate(rate, 1, &clicks).finish(true);
+        let bpm = features.tempo_bpm.expect("periodic clicks expose a tempo");
+        assert!(
+            (115.0..=125.0).contains(&bpm),
+            "expected about120 BPM, measured {bpm}"
+        );
+        let confidence = features.tempo_confidence.unwrap();
+        assert!(
+            (0.25..=1.0).contains(&confidence),
+            "confidence must stay bounded: {confidence}"
+        );
+        assert_eq!(features.chroma, None);
+        assert_finite_descriptors(&features);
     }
 
     /// Non-finite and out-of-bound PCM must fail the push so no descriptor is

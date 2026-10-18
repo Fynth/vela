@@ -244,9 +244,10 @@ fn Measurements(features: AudioFeatures) -> Element {
             dt { "Spectral flatness" } dd { {measurement(features.spectral_flatness, "")} }
             dt { "Zero-crossing fraction" } dd { "{features.zero_crossing_rate:.5}" }
             dt { "FFT windows" } dd { "{features.spectral_windows}" }
+            dt { "Estimated tempo" } dd { match features.tempo_bpm { Some(bpm) => format!("{bpm:.1} BPM · {:.0}% onset regularity", features.tempo_confidence.unwrap_or(0.0) * 100.0), None => "Not established".to_owned() } }
             dt { "Extractor" } dd { "{features.extractor_version}" }
         }
-        small { "RMS and peak describe digital samples. They are not LUFS, ReplayGain or perceived loudness. This extractor does not infer genre, mood, key or musical tempo." }
+        small { "RMS and peak describe digital samples. They are not LUFS, ReplayGain or perceived loudness. Tempo is an onset-regularity estimate, not a calibrated beat annotation. This extractor does not infer genre, mood, key or chroma." }
     } }
 }
 

@@ -5,7 +5,7 @@ The analysis engine lives in `crates/media/src/analysis.rs`. Its synchronous
 immutable managed media asset. The caller must run it on a bounded blocking
 worker. It performs no network access, database writes, media modification or
 playback work. Persist a result under the original asset's content hash and the
-extractor version `vela-pcm-spectral-1`, independently of editable catalog tags.
+extractor version `vela-pcm-spectral-2`, independently of editable catalog tags.
 
 This module is an extraction boundary, not a genre classifier, recommendation
 service, audio playback engine or proof that a track is legally shareable.
@@ -58,6 +58,12 @@ are calculated from that accumulated power spectrum:
 - Band energy: eight normalized physical-frequency bands with upper bounds
   125, 250, 500, 1000, 2000, 4000 and 8000Hz; the last band contains remaining
   frequencies up to Nyquist. Bands beyond Nyquist naturally contain zero energy.
+- Tempo: half-wave-rectified spectral flux between consecutive windows,
+  normalized by the current magnitude sum. Local peaks at least twice the mean
+  envelope are onsets (with a refractory gap). Inter-onset intervals are filtered
+  to 60–200 BPM; the median interval gives the BPM and confidence is
+  `1 − median-absolute-deviation/median`, scaled by interval support. At least64
+  windows,4 onsets and3 intervals are required; otherwise tempo is absent.
 
 Spectral fields are absent for digital silence. A clip shorter than one FFT
 window receives one zero-padded window; RMS/peak/frame counts still use only real
@@ -66,9 +72,11 @@ the spectrum rather than inventing extra samples. Window count and analyzed
 duration are exposed so callers can show coverage. These choices are versioned;
 changing them requires a new extractor version and independent cache entries.
 
-Tempo, tempo confidence and chroma are explicitly absent. Genre, mood, key,
-speech detection, acoustic fingerprint and semantic embeddings are unsupported.
-There is no trained or calibrated model that would justify filling those fields.
+Tempo/tempo confidence are an onset-regularity estimate on the bounded analyzed
+prefix, not a beat-tracked or annotated-tempo model. Chroma, genre, mood, key,
+speech detection, acoustic fingerprint and semantic embeddings remain explicitly
+absent. There is no trained or calibrated model that would justify filling those
+fields.
 
 ## Bounds, cancellation and failure
 

@@ -28,9 +28,11 @@ pub struct AudioFeatures {
     pub spectral_flatness: Option<f64>,
     /// Phase-safe mean-channel power, normalized across the eight fixed-Hz bands.
     pub band_energy: Option<[f64; 8]>,
-    /// Not inferred by this extractor; no calibrated tempo/key/genre model yet.
+    /// Onset-interval estimate; None when the bounded envelope cannot support one.
+    /// Confidence is onset regularity, not a calibrated beat-tracking score.
     pub tempo_bpm: Option<f64>,
     pub tempo_confidence: Option<f64>,
+    /// Not inferred by this extractor; no calibrated key/chroma model yet.
     pub chroma: Option<[f64; 12]>,
 }
 

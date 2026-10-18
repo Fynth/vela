@@ -1,5 +1,25 @@
 # Verified progress
 
+## Bounded onset-tempo DSP spectral-2 — verified (2026-10-18)
+
+The local analysis extractor is now `vela-pcm-spectral-2`. It measures a normalized
+half-wave-rectified spectral-flux envelope, detects onsets at least twice the mean
+with a refractory gap, filters inter-onset intervals to60–200 BPM, and estimates BPM
+from the median interval. Confidence is onset-interval regularity scaled by interval
+support. At least64 windows,4 onsets and3 intervals are required; flat, too-short or
+irregular material returns no tempo. Chroma remains absent and no beat annotation is
+claimed. Existing immutable spectral-1 caches are not reinterpreted.
+
+Evidence:20 analysis tests (including an8-second120 BPM click train measuring within
+115–125 BPM with bounded confidence, and steady/silent/impulse material remaining
+None), full `vela-media` tests, strict media Clippy. The browser Radio measurements
+now display Extractor `vela-pcm-spectral-2`, an "Estimated tempo" row and the honest
+onset-regularity disclaimer. Full Chromium run with the rebuilt web assets:40 passed,
+1 live-import skip in2.0m, including G08/G09, G07 and PC01–02. Screenshot:
+`target/checks/dsp-tempo-v2/radio-1440-dark.png` (Drift is a steady tone, so the row
+correctly shows "Not established"). No schema, server HTTP, native or original-data
+runtime change.
+
 ## Portable Linux desktop package0.12 — verified launch smoke (2026-10-18)
 
 `scripts/package-desktop-linux.sh` built a portable x86_64 Linux desktop archive from
@@ -564,7 +584,7 @@ Three actual specialists contributed nonoverlapping files: private_listening_cor
 
 Seven existing crates evolve to0.9.0; additive migrations0008/0009 preserve old media/catalog/playlist semantics. Private history starts off globally and per device, validates monotonic cumulative logical sessions/idempotency/ownership, supports7–365day retention, owner-only keyset history and JSON export, and atomically erases/disables/invalidates old batches. The browser measures real advancing unmuted playback against a monotonic clock, preserves a session across pause/recovery and creates another at actual EOF replay. Its account-local pending journal is bounded and clears on opt-out/logout. Home/History show real qualified listens and link them to track radio. Old native/source snapshots are untouched.
 
-Explicit analysis enqueues1–50 actual owned track IDs. One supervised blocking Symphonia0.6.1/RustFFT6.4.1 worker measures bounded PCM RMS/peak/ZCR and phase-safe Hann FFT spectrum/bands, caches by immutable asset+extractor version, enforces50-owner/128-global current active jobs, recovers/requeues interruptions and retires obsolete unfinished versions. Source files never change. Radio compares measured descriptors or actual tags over at most500 newest other owned candidates, diversifies deterministically and supplies real IDs/reasons. Its Dioxus view shares the root player and exposes real queue/status/measurement/analysis controls. No cloud inference, inferred mood/genre/tempo/LUFS, public catalog or native audio engine is claimed.
+Explicit analysis enqueues1–50 actual owned track IDs. One supervised blocking Symphonia0.6.1/RustFFT6.4.1 worker measures bounded PCM RMS/peak/ZCR, phase-safe Hann FFT spectrum/bands and an onset-interval tempo estimate (spectral-2), caches by immutable asset+extractor version, enforces50-owner/128-global current active jobs, recovers/requeues interruptions and retires obsolete unfinished versions. Source files never change. Radio compares measured descriptors or actual tags over at most500 newest other owned candidates, diversifies deterministically and supplies real IDs/reasons. Its Dioxus view shares the root player and exposes real queue/status/measurement/analysis controls. No cloud inference, inferred mood/genre/key/chroma/LUFS, calibrated beat annotation, public catalog or native audio engine is claimed.
 
 ### Executed gates and defects
 
