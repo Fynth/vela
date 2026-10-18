@@ -36,8 +36,13 @@ peers plus a third preseeded unreachable saved origin; the real WebKitGTK journe
 returns both live origins and the browse-only cached row, keeps saved origins at three
 (including the cache origin), and still plays/Previous/Next across the live peers.
 Evidence:`target/checks/native-cached-peers3/`;26/28 desktop tests plus both opt-ins,
-strict Clippy/fmt. No schema, server HTTP, web or original-data/runtime change. The
-packaged0.12.1 desktop archive is rebuilt and verified separately.
+strict Clippy/fmt. The portable desktop archive was rebuilt as0.12.1
+(`target/desktop-releases/vela-desktop-0.12.1-linux-x86_64-unknown-linux-gnu.tar.gz`,
+SHA256 `67850b30d3affabbbd59ce16cc26cf53d84a538c2a58d6a4efb68d3329de694f`, BUILD
+commit `a3cb52c`) and `verify_desktop_package.py --launch` passed exact
+manifest/modes, `vela-desktop 0.12.1`, ldd, styled sign-in window screenshot, normal
+close exit0 and zero temporary originals. No schema, server HTTP, web or
+original-data/runtime change.
 
 ## 0.12.1 spectral-2 patch release + preserved-data runtime handover — verified (2026-10-18, `f2c9fdb`)
 

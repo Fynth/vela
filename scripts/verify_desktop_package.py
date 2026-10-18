@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 from pathlib import Path, PurePosixPath
 import signal
 import subprocess
@@ -48,7 +49,8 @@ def main():
         build = dict(line.split('=', 1) for line in (root / 'BUILD.txt').read_text().splitlines() if '=' in line)
         if files != expected:
             raise RuntimeError('Desktop package contents do not match the review manifest')
-        if build.get('version') != '0.12.0':
+        match = re.search(r'vela-desktop-(\d+\.\d+\.\d+)-', args.archive.name)
+        if not match or build.get('version') != match.group(1):
             raise RuntimeError('Unexpected packaged desktop version')
         binary = root / 'bin/vela-desktop'
         if (binary.stat().st_mode & 0o777) != 0o755:

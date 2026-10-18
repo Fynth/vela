@@ -3,7 +3,9 @@
 Local DSP spectral-2 adds a bounded onset-interval tempo estimate with honest
 confidence and Radio UI disclosure. The extractor version change keeps immutable
 spectral-1 caches separate. No schema, HTTP contract or original-data change; this
-is a server/web assets patch for the frozen local runtime. Exact-package Chromium
+is a server/web assets patch for the frozen local runtime; the portable native
+client is also rebuilt as `vela-desktop 0.12.1` with cached-metadata fallback.
+Exact-package Chromium
 and Firefox each passed40 scenarios with1 live-import skip; the preserved-data
 handover kept schema11 and all original catalog/media counts unchanged.
 

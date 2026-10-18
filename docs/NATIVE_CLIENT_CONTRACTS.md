@@ -116,9 +116,11 @@ release binary, `vela-desktop.desktop`, scalable icon, README, LICENSE and BUILD
 `--version`, missing-library check, a real GUI launch/screenshot and normal window
 close with zero temporary originals. This is not a `.deb`/AppImage/Flatpak, signature,
 app-store or physical-audio certification. Evidence:
-`target/desktop-releases/vela-desktop-0.12.0-linux-x86_64-unknown-linux-gnu.tar.gz`
-(SHA256 `4d6c67bb154aa566cf7f19bf9f65de477c86512685fc891a324abc711b85cbad`),
-`target/checks/desktop-package-verify.log` and `desktop-package-screens/`.
+`target/desktop-releases/vela-desktop-0.12.1-linux-x86_64-unknown-linux-gnu.tar.gz`
+(SHA256 `67850b30d3affabbbd59ce16cc26cf53d84a538c2a58d6a4efb68d3329de694f`,
+BUILD commit `a3cb52c`); the prior0.12.0 archive is preserved. Evidence:
+`target/checks/desktop-0.12.1-verify.log`,
+`desktop-package-screens/vela-desktop-0.12.1-package-launch.png`.
 
 ## Verification
 
