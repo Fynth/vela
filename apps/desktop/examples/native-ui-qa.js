@@ -101,7 +101,25 @@ try {
   try { await wait(() => phase() === 'Playing' && position() > 100, 'Real MP3 native decoder advances'); }
   catch { const library = el('.native-library'); throw new Error(`Real MP3 native decoder advances (phase=${phase()} position=${position()} preparing=${!!el('.preparation-progress')} error=${el('.player-error')?.textContent?.trim() || '-'} library=${library ? JSON.stringify(library.dataset) : 'none'} search=${el('#native-search')?.value || '-'} rows=${document.querySelectorAll('[data-native-track-id]').length} api=${JSON.stringify(performance.getEntriesByType('resource').map(e=>e.name).filter(n=>n.includes('/api/tracks')).slice(-3))})`); }
   await click('Playlists');
-  await wait(() => button('Open playlist Native evening'), 'Real playlist list');
+  await wait(() => button('Open playlist Native evening') && button('Create playlist'), 'Real playlist list');
+  assert(button('Open playlist Native evening'), 'Playlist list shows the real fixture playlist');
+  fill('#native-playlist-name', 'Native draft'); await click('Create playlist');
+  await wait(() => button('Open playlist Native draft'), 'Native playlist creation');
+  assert(button('Open playlist Native draft'), 'Native playlist creation acknowledged by the API');
+  await click('Open playlist Native draft');
+  await wait(() => el('#native-playlist-rename')?.value === 'Native draft' && button('Save name'), 'Native playlist detail');
+  fill('#native-playlist-rename', 'Native renamed'); await click('Save name');
+  try { await wait(() => el('[data-testid=\"native-playlist-name\"]')?.textContent === 'Native renamed', 'Native playlist rename'); }
+  catch { throw new Error(`Native playlist rename failed (heading=${el('[data-testid=\"native-playlist-name\"]')?.textContent || '-'} error=${el('.alert.error')?.textContent?.trim() || '-'} input=${el('#native-playlist-rename')?.value || '-'})`); }
+  assert(el('[data-testid=\"native-playlist-name\"]')?.textContent === 'Native renamed', 'Native playlist rename acknowledged by the API');
+  await click('Delete playlist'); await wait(() => button('Confirm delete'), 'Delete confirmation');
+  await click('Cancel');
+  assert(el('[data-testid=\"native-playlist-name\"]')?.textContent === 'Native renamed', 'Cancel preserves the selected playlist');
+  await click('Delete playlist'); await wait(() => button('Confirm delete'), 'Delete confirmation again');
+  await click('Confirm delete');
+  await wait(() => !button('Open playlist Native renamed') && button('Create playlist') && !el('#native-playlist-rename'), 'Native playlist deletion');
+  assert(!button('Open playlist Native renamed'), 'Native playlist deletion removes the card and detail');
+  await wait(() => button('Open playlist Native evening'), 'Fixture playlist survives native deletion');
   await click('Open playlist Native evening');
   await wait(() => button('Play playlist') && document.querySelectorAll('.native-queue-row').length === 2, 'Real playlist detail with two entries');
   assert(document.querySelectorAll('.native-queue-row').length === 2 && button('Play playlist'), 'Playlist detail shows both owned entries');

@@ -28,7 +28,7 @@ SINK = 'vela_native_test_null'
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--server', type=Path, default=ROOT / 'target/runtime/vela-0.11.0/vela-server')
+    parser.add_argument('--server', type=Path, default=ROOT / 'target/debug/vela-server', help='Current source server; build with cargo build -p vela-server')
     parser.add_argument('--driver', type=Path, default=ROOT / 'target/debug/examples/native-ui-qa')
     parser.add_argument('--evidence', type=Path, default=ROOT / 'target/checks/native-window')
     parser.add_argument('--test-audio-engine', action='store_true', help='Also execute the opt-in actual output/seek/EOF test under the owned sink')

@@ -15,7 +15,9 @@ use std::{
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, watch};
 use tokio_util::sync::CancellationToken;
 use url::{Host, Url};
-use vela_domain::{AuthResponse, Credentials, PlaylistDetail, PlaylistSummary, Track, TrackPage};
+use vela_domain::{
+    AuthResponse, Credentials, PlaylistDetail, PlaylistSummary, Track, TrackPage, UpdatePlaylist,
+};
 
 const CANCELED: &str = "Request canceled.";
 const SIGNED_OUT: &str = "Sign in again to continue.";
@@ -374,6 +376,124 @@ impl VelaClient {
         .await
     }
 
+    pub async fn create_playlist(
+        &self,
+        name: &str,
+        cancel: CancellationToken,
+    ) -> Result<PlaylistSummary, String> {
+        let name = playlist_name(name)?;
+        let session = self.session()?;
+        bounded(
+            &cancel,
+            &self.inner.lifetime,
+            Duration::from_secs(20),
+            async {
+                let response = self
+                    .request(
+                        Method::POST,
+                        endpoint(&self.inner.origin, "/api/playlists"),
+                        &session,
+                    )
+                    .json(&serde_json::json!({"name": name}))
+                    .send()
+                    .await
+                    .map_err(|_| NETWORK_ERROR.to_owned())?;
+                if response.status() != StatusCode::OK {
+                    return Err(status_error(response.status()));
+                }
+                let playlist: PlaylistSummary = json(response, MAX_JSON_BYTES).await?;
+                if !canonical_uuid(&playlist.id) {
+                    return Err(INVALID_RESPONSE.into());
+                }
+                Ok(playlist)
+            },
+        )
+        .await
+    }
+
+    pub async fn rename_playlist(
+        &self,
+        id: &str,
+        revision: i64,
+        name: &str,
+        cancel: CancellationToken,
+    ) -> Result<PlaylistSummary, String> {
+        if !canonical_uuid(id) || revision < 0 {
+            return Err("Select a valid playlist revision.".into());
+        }
+        let name = playlist_name(name)?;
+        let session = self.session()?;
+        let update = UpdatePlaylist {
+            revision,
+            mutation_id: uuid::Uuid::new_v4().to_string(),
+            name: name.to_owned(),
+        };
+        bounded(
+            &cancel,
+            &self.inner.lifetime,
+            Duration::from_secs(20),
+            async {
+                let response = self
+                    .request(
+                        Method::PATCH,
+                        endpoint(&self.inner.origin, &format!("/api/playlists/{id}")),
+                        &session,
+                    )
+                    .json(&update)
+                    .send()
+                    .await
+                    .map_err(|_| NETWORK_ERROR.to_owned())?;
+                if response.status() != StatusCode::OK {
+                    return Err(status_error(response.status()));
+                }
+                let playlist: PlaylistSummary = json(response, MAX_JSON_BYTES).await?;
+                if playlist.id != id {
+                    return Err(INVALID_RESPONSE.into());
+                }
+                Ok(playlist)
+            },
+        )
+        .await
+    }
+
+    pub async fn delete_playlist(
+        &self,
+        id: &str,
+        revision: i64,
+        cancel: CancellationToken,
+    ) -> Result<(), String> {
+        if !canonical_uuid(id) || revision < 0 {
+            return Err("Select a valid playlist revision.".into());
+        }
+        let session = self.session()?;
+        let url = endpoint(&self.inner.origin, &format!("/api/playlists/{id}"));
+        let url = {
+            let mut url = url;
+            url.query_pairs_mut()
+                .append_pair("revision", &revision.to_string())
+                .append_pair("mutation_id", &uuid::Uuid::new_v4().to_string());
+            url
+        };
+        bounded(
+            &cancel,
+            &self.inner.lifetime,
+            Duration::from_secs(20),
+            async {
+                let response = self
+                    .request(Method::DELETE, url, &session)
+                    .send()
+                    .await
+                    .map_err(|_| NETWORK_ERROR.to_owned())?;
+                if response.status() == StatusCode::NO_CONTENT {
+                    Ok(())
+                } else {
+                    Err(status_error(response.status()))
+                }
+            },
+        )
+        .await
+    }
+
     pub async fn favorite(
         &self,
         track_id: &str,
@@ -528,6 +648,13 @@ pub(crate) fn canonical_origin(input: &str) -> Result<Url, String> {
         return Err(error());
     }
     Ok(url)
+}
+fn playlist_name(name: &str) -> Result<&str, String> {
+    let name = name.trim();
+    if name.is_empty() || name.chars().count() > 120 || name.chars().any(char::is_control) {
+        return Err("Playlist name must be 1–120 characters.".into());
+    }
+    Ok(name)
 }
 fn endpoint(origin: &Url, path: &str) -> Url {
     let mut url = origin.clone();

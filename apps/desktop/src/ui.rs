@@ -101,6 +101,7 @@ struct Ui {
     catalog_gate: Gate,
     feedback_gate: Gate,
     playlist_gate: Gate,
+    playlist_write_gate: Gate,
     source_gate: Gate,
     logout_gate: Gate,
     epoch: Signal<u64>,
@@ -126,6 +127,9 @@ struct Ui {
     playlist_id: Signal<Option<String>>,
     playlist_loading: Signal<bool>,
     playlist_error: Signal<String>,
+    playlist_name_draft: Signal<String>,
+    playlist_busy: Signal<bool>,
+    playlist_delete_confirm: Signal<bool>,
     queue: Signal<Vec<Track>>,
     order: Signal<PlaybackOrder>,
     shuffle: Signal<bool>,
@@ -177,6 +181,7 @@ impl Ui {
         self.catalog_gate.cancel();
         self.feedback_gate.cancel();
         self.playlist_gate.cancel();
+        self.playlist_write_gate.cancel();
         self.source_gate.cancel();
         self.logout_gate.cancel();
     }
@@ -222,6 +227,9 @@ impl Ui {
         self.playlist_id.set(None);
         self.playlist_loading.set(false);
         self.playlist_error.set(String::new());
+        self.playlist_name_draft.set(String::new());
+        self.playlist_busy.set(false);
+        self.playlist_delete_confirm.set(false);
         self.queue.set(Vec::new());
         self.order.set(PlaybackOrder::default());
         self.shuffle.set(false);
@@ -579,7 +587,138 @@ fn open_playlist(mut ui: Ui, id: String) {
         match result {
             Ok(detail) => {
                 ui.playlist_error.set(String::new());
+                ui.playlist_name_draft.set(detail.playlist.name.clone());
+                ui.playlist_delete_confirm.set(false);
                 ui.playlist.set(Some(detail));
+            }
+            Err(error) => {
+                if !expired(ui.clone(), &error) {
+                    ui.playlist_error.set(error);
+                }
+            }
+        }
+    });
+}
+
+fn create_playlist_ui(mut ui: Ui) {
+    let name = ui.playlist_name_draft.peek().trim().to_string();
+    if name.is_empty() || *ui.playlist_busy.peek() {
+        return;
+    }
+    let Some(account) = ui.account.peek().clone().filter(|_| ui.signed_in()) else {
+        return;
+    };
+    let ticket = ui.playlist_write_gate.begin(account.epoch);
+    ui.playlist_busy.set(true);
+    spawn(async move {
+        let result = account
+            .client
+            .create_playlist(&name, ticket.cancel.clone())
+            .await;
+        if !ticket.current(&ui) || *ui.view.peek() != "playlists" {
+            return;
+        }
+        ui.playlist_busy.set(false);
+        match result {
+            Ok(created) => {
+                ui.playlist_error.set(String::new());
+                ui.playlist_name_draft.set(String::new());
+                ui.playlists.write().insert(0, created);
+                ui.notice.set("Playlist created.".into());
+            }
+            Err(error) => {
+                if !expired(ui.clone(), &error) {
+                    ui.playlist_error.set(error);
+                }
+            }
+        }
+    });
+}
+
+fn rename_selected_playlist(mut ui: Ui) {
+    let Some(detail) = ui.playlist.peek().clone().filter(|_| ui.signed_in()) else {
+        return;
+    };
+    let name = ui.playlist_name_draft.peek().trim().to_string();
+    if name.is_empty() || *ui.playlist_busy.peek() {
+        return;
+    }
+    let Some(account) = ui.account.peek().clone() else {
+        return;
+    };
+    let id = detail.playlist.id;
+    let revision = detail.playlist.revision;
+    let ticket = ui.playlist_write_gate.begin(account.epoch);
+    ui.playlist_busy.set(true);
+    spawn(async move {
+        let result = account
+            .client
+            .rename_playlist(&id, revision, &name, ticket.cancel.clone())
+            .await;
+        if !ticket.current(&ui)
+            || *ui.view.peek() != "playlists"
+            || ui.playlist_id.peek().as_deref() != Some(id.as_str())
+        {
+            return;
+        }
+        ui.playlist_busy.set(false);
+        match result {
+            Ok(updated) => {
+                ui.playlist_error.set(String::new());
+                ui.playlist_name_draft.set(updated.name.clone());
+                if let Some(detail) = ui.playlist.write().as_mut() {
+                    detail.playlist = updated.clone();
+                }
+                if let Some(entry) = ui.playlists.write().iter_mut().find(|list| list.id == id) {
+                    *entry = updated;
+                }
+                ui.notice.set("Playlist renamed.".into());
+            }
+            Err(error) => {
+                if !expired(ui.clone(), &error) {
+                    ui.playlist_error.set(error);
+                }
+            }
+        }
+    });
+}
+
+fn delete_selected_playlist(mut ui: Ui) {
+    let Some(detail) = ui.playlist.peek().clone().filter(|_| ui.signed_in()) else {
+        return;
+    };
+    if *ui.playlist_busy.peek() {
+        return;
+    }
+    let Some(account) = ui.account.peek().clone() else {
+        return;
+    };
+    let id = detail.playlist.id;
+    let revision = detail.playlist.revision;
+    let ticket = ui.playlist_write_gate.begin(account.epoch);
+    ui.playlist_busy.set(true);
+    ui.playlist_delete_confirm.set(false);
+    spawn(async move {
+        let result = account
+            .client
+            .delete_playlist(&id, revision, ticket.cancel.clone())
+            .await;
+        if !ticket.current(&ui)
+            || *ui.view.peek() != "playlists"
+            || ui.playlist_id.peek().as_deref() != Some(id.as_str())
+        {
+            return;
+        }
+        ui.playlist_busy.set(false);
+        match result {
+            Ok(()) => {
+                ui.playlist_error.set(String::new());
+                ui.playlist.set(None);
+                ui.playlist_id.set(None);
+                ui.playlist_name_draft.set(String::new());
+                ui.playlists.write().retain(|list| list.id != id);
+                ui.notice
+                    .set("Playlist deleted. Your tracks and audio are unchanged.".into());
             }
             Err(error) => {
                 if !expired(ui.clone(), &error) {
@@ -1155,6 +1294,18 @@ fn playlists_view(ui: Ui) -> Element {
     let refresh = ui.clone();
     let back = ui.clone();
     let play = ui.clone();
+    let create = ui.clone();
+    let rename = ui.clone();
+    let delete = ui.clone();
+    let busy = ui.playlist_busy;
+    let mut draft = ui.playlist_name_draft;
+    let mut confirm = ui.playlist_delete_confirm;
+    let is_owner = detail.as_ref().is_some_and(|detail| {
+        ui.account
+            .peek()
+            .as_ref()
+            .is_some_and(|account| account.user.id == detail.playlist.owner_id)
+    });
     rsx! {section {class:"native-library","aria-label":"Playlists",
         div {class:"library-intro",div {span {class:"eyebrow","YOUR COLLECTIONS"} h1 {"Playlists, ready to play"} p {"Owner-authorized playlist metadata. Audio still needs the same per-track stream rights as the library."}}
             button {class:"button secondary",disabled:loading,onclick:move |_|{load_playlists(refresh.clone());},Icon {name:"history"} "Refresh playlists"}
@@ -1165,13 +1316,27 @@ fn playlists_view(ui: Ui) -> Element {
             div { class: "library-intro",
                 div {
                     span { class: "eyebrow", "PLAYLIST" }
-                    h1 { "{detail.playlist.name}" }
+                    h1 { "data-testid": "native-playlist-name", "{detail.playlist.name}" }
                     p { "{detail.items.len()} tracks · Revision {detail.playlist.revision}" if detail.playlist.can_edit { " · editable" } else { " · shared" } }
                 }
             }
             div { class: "native-track-actions",
                 button { class: "button secondary small", onclick: move |_| { let mut ui = back.clone(); ui.playlist.set(None); ui.playlist_id.set(None); }, "Back to playlists" }
                 button { class: "button primary small", disabled: !ui.audio_ready() || detail.items.iter().all(|item| !item.can_stream), onclick: move |_| play_playlist(play.clone()), Icon { name: "play" } "Play playlist" }
+            }
+            if is_owner {
+                div { class: "inline-form",
+                    label { class: "sr-only", r#for: "native-playlist-rename", "Playlist name" }
+                    input { id: "native-playlist-rename", maxlength: 120, value: "{draft}", disabled: *busy.read(), oninput: move |event| draft.set(event.value()) }
+                    button { class: "button secondary small", disabled: *busy.read() || draft.read().trim().is_empty(), onclick: move |_| rename_selected_playlist(rename.clone()), if *busy.read() { "Saving…" } else { "Save name" } }
+                    if *confirm.read() {
+                        button { class: "button danger small", disabled: *busy.read(), onclick: move |_| delete_selected_playlist(delete.clone()), "Confirm delete" }
+                        button { class: "button secondary small", onclick: move |_| confirm.set(false), "Cancel" }
+                    } else {
+                        button { class: "button danger small", disabled: *busy.read(), onclick: move |_| confirm.set(true), "Delete playlist" }
+                    }
+                }
+                if *confirm.read() { p { class: "muted", role: "status", "Deleting removes this playlist and its share links. Your original tracks and audio stay." } }
             }
             if detail.items.is_empty() {
                 div { class: "native-empty", Icon { name: "queue" } h2 { "This playlist is empty" } p { "Add tracks from the web app; native playlist editing is not implemented yet." } }
@@ -1187,8 +1352,13 @@ fn playlists_view(ui: Ui) -> Element {
                 }
             }
         } else {
+            form { class: "inline-form", onsubmit: move |event| { event.prevent_default(); create_playlist_ui(create.clone()); },
+                label { class: "sr-only", r#for: "native-playlist-name", "New playlist name" }
+                input { id: "native-playlist-name", maxlength: 120, placeholder: "New playlist name", value: "{draft}", disabled: *busy.read(), oninput: move |event| draft.set(event.value()) }
+                button { class: "button primary small", r#type: "submit", disabled: *busy.read() || draft.read().trim().is_empty(), if *busy.read() { "Creating…" } else { "Create playlist" } }
+            }
             if !loading && lists.is_empty() && error.is_empty() {
-                div { class: "native-empty", Icon { name: "queue" } h2 { "No playlists yet" } p { "Create a playlist in the web app, then refresh here. Native playlist editing is not implemented yet." } }
+                div { class: "native-empty", Icon { name: "queue" } h2 { "No playlists yet" } p { "Create one above with your own account, or create it in the web app." } }
             }
             div { class: "native-queue-list",
                 for list in lists {
@@ -1310,6 +1480,7 @@ pub fn App() -> Element {
         catalog_gate: use_hook(Gate::default),
         feedback_gate: use_hook(Gate::default),
         playlist_gate: use_hook(Gate::default),
+        playlist_write_gate: use_hook(Gate::default),
         source_gate: use_hook(Gate::default),
         logout_gate: use_hook(Gate::default),
         epoch: use_signal(|| 1),
@@ -1335,6 +1506,9 @@ pub fn App() -> Element {
         playlist_id: use_signal(|| None),
         playlist_loading: use_signal(|| false),
         playlist_error: use_signal(String::new),
+        playlist_name_draft: use_signal(String::new),
+        playlist_busy: use_signal(|| false),
+        playlist_delete_confirm: use_signal(|| false),
         queue: use_signal(Vec::new),
         order: use_signal(PlaybackOrder::default),
         shuffle: use_signal(|| false),

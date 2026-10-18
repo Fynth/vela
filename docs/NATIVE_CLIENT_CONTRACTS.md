@@ -19,8 +19,9 @@ Launch `vela-desktop`, sign in to one Vela origin, page/search the private owned
 library, play an original through the device's native audio output, pause/resume,
 seek, change volume, navigate Library/Favorites/Playlists/Queue without interrupting
 audio, favorite/unfavorite owned tracks, search favorites, browse real playlists,
-play the stream-authorized subset, use next/previous/shuffle/repeat, queue
-duplicates/play-next/remove/reorder, switch theme, sign out. MPRIS exposes actual state and forwards play/pause/next/previous/
+play the stream-authorized subset, create/rename/delete own playlists, use
+next/previous/shuffle/repeat, queue duplicates/play-next/remove/reorder, switch
+theme, sign out. MPRIS exposes actual state and forwards play/pause/next/previous/
 seek/volume where the bus is available.
 
 ## Implemented boundaries
@@ -49,8 +50,10 @@ seek/volume where the bus is available.
 - Playlists use the existing `GET /api/playlists` and `GET /api/playlists/{id}`
   reads. The native view lists real owner/granted playlists, shows entry metadata
   and whether each entry is streamable, and queues only the `can_stream` subset under
-  a playlist context. Bounded entry counts/IDs are validated; no playlist mutation,
-  folder or metadata grant is invented, and a metadata-only entry is labelled.
+  a playlist context. Owners can create, CAS-rename and confirm-delete playlists via
+  the same authenticated/CSRF/Origin-safe client; success updates the list/detail
+  under session/view/selected-id guards. Entry add/reorder and folder mutation remain
+  web-only. Bounded entry counts/IDs are validated; a metadata-only entry is labelled.
 - `playback.rs` (reused by path from the web crate): bounded occurrence indices,
   fair shuffle deck/history, explicit next priority, repeat semantics. Structural
   queue edits synchronize the order model; metadata does not reset traversal.
@@ -68,7 +71,8 @@ seek/volume where the bus is available.
 This first adapter downloads the whole authorized original before decoding. It is
 not progressive streaming, gapless, offline, a download entitlement, background
 mobile playback, secure credential persistence, device handoff, packaged install,
-playlist editing/folders, albums/artists native UI, or a federated source resolver. It sends no
+playlist entry editing/folders, albums/artists native UI, or a federated source
+resolver. It sends no
 native listening events. Only Linux x86_64 is built/tested on this host; Windows,
 macOS, Android and iOS remain separate targets. Hardware output, screen readers and
 physical media keys are not certified.
@@ -92,10 +96,12 @@ physical media keys are not certified.
   worker still advertised as playable (explicit reconnect now), QA sink assertions
   and a UTF-8 slice panic; the reported test-count discrepancy was resolved by
   enumerating25 actual tests.
-- Playlist journey passes in the same real window: real list card, two-entry detail,
-  `Play playlist` starts native audio, the shared queue receives both entries, and
-  Library navigation restores the catalog. Evidence:
-  `target/checks/native-playlists-window/` (including `native-playlists-dark.png`).
+- Playlist journey passes in the same real window against the current0.12 debug
+  server: real list card, native create → open → rename → cancel-delete → confirm
+  delete, fixture playlist survives, two-entry detail, `Play playlist` starts native
+  audio, the shared queue receives both entries, and Library navigation restores the
+  catalog. Evidence: `target/checks/native-playlist-edit-window3/` (including
+  `native-playlists-dark.png`) and earlier `native-playlists-window/`.
 - Favorites journey passes in the same real window: the owner favorite API
   acknowledges the row, Favorites shows exactly that track, unfavorite re-reads the
   filtered page to empty, and Library navigation restores all three owned tracks.

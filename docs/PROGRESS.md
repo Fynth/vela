@@ -79,6 +79,7 @@ curl -sS http://127.0.0.1:3210/health
 CARGO_BUILD_JOBS=2 cargo test --locked --workspace -- --test-threads=2
 CARGO_BUILD_JOBS=2 cargo clippy --locked --workspace --all-targets -- -D warnings
 CARGO_BUILD_JOBS=2 cargo clippy --locked -p vela-web --target wasm32-unknown-unknown -- -D warnings
+CARGO_BUILD_JOBS=2 cargo build --locked -p vela-server
 CARGO_BUILD_JOBS=2 cargo build --locked -p vela-desktop --example native-ui-qa --features native-qa
 python3 scripts/verify_native_client.py --evidence target/checks/native-resume-$(date +%s) --test-audio-engine
 CARGO_BUILD_JOBS=2 VELA_WASM_BINDGEN="$PWD/target/tools/wasm-bindgen-0.2.129-x86_64-unknown-linux-musl/wasm-bindgen" scripts/build-web.sh
@@ -177,8 +178,16 @@ sent, so consent/history is not bypassed or inferred.
   playlist context. The fixture creates a two-entry playlist through the real API;
   the window test verifies list→detail→Play playlist→native playback→shared queue
   two entries→Library return (`target/checks/native-playlists-window/`, screenshot
-  `native-playlists-dark.png`). Playlist creation/editing/folders, albums/artists
-  and packaging remain native gaps.
+  `native-playlists-dark.png`).
+- Native playlist lifecycle follow-up: owners can create, CAS-rename and
+  confirm/cancel-delete playlists through the same bounded client (current0.12 debug
+  server), with busy/error/guard handling and list/detail updates. The window journey
+  creates `Native draft`, renames it to `Native renamed`, verifies cancel preserves
+  the detail, confirms deletion removes the card/detail, keeps the fixture playlist,
+  then plays its two entries. Evidence:
+  `target/checks/native-playlist-edit-window3/` and
+  `native-playlist-edit-{clippy,tests}.log`. Entry add/reorder, folders,
+  albums/artists and packaging remain native gaps.
 - The same session's DSP packet added9 deterministic numerical tests (module now19:
   pure/two-tone spectra, silence, sub-window, clipping/oversized PCM, determinism,
   click/ZCR, -60dBFS, non-finite bounds) inside `crates/media/src/analysis.rs`; one

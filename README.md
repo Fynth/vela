@@ -71,6 +71,7 @@ npm ci --prefix tests/browser
 (cd tests/browser && npx playwright test --browser=chromium)
 (cd tests/browser && npx playwright test --browser=firefox)
 # Opt-in real native window + owned Pulse null sink; uses isolated fixture data:
+cargo build --locked -p vela-server
 cargo build --locked -p vela-desktop --example native-ui-qa --features native-qa
 python3 scripts/verify_native_client.py --evidence target/checks/native-window --test-audio-engine
 ```
