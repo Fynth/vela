@@ -14,7 +14,7 @@ Status meanings: implemented=source exists; verified=checks recorded in PROGRESS
 | 7 Playback quality | Partial browser controls | Queue/seek/volume/repeat/fair shuffle/history/next priorities/keys/media-session integration; 0.7 adds browser context/progress restore and bounded reconnect; 0.8 adds shared-state Now Playing; 0.9 adds consented history and explicit local radio;0.12 adds a verified root sleep timer; next optional controlled FFmpeg, quality selection, validated ReplayGain/gapless/crossfade |
 | 8 Native/offline | Partial: Linux desktop slice | Real0.12 Dioxus Linux client with in-memory native HTTP, Rodio/CPAL output thread, MPRIS2, bounded prepared originals and verified Library/Queue playback. **Verified:** portable x86_64 tar package with exact-manifest/`ldd`/real-window launch
 smoke. **Outstanding:** deb/AppImage/signed installer, secure credential persistence,
-native add-from-library/playlist folders, offline manifests/hash/resume/quota, Android Media3 service, iOS AVFoundation background audio, Windows/macOS clients, device transfer/sync; actual device evidence required |
+native playlist-folder UI, offline manifests/hash/resume/quota, Android Media3 service, iOS AVFoundation background audio, Windows/macOS clients, device transfer/sync; actual device evidence required |
 | 9 Interoperability | Planned | OpenSubsonic contracts/client tests, private listening history/stats, authorized lyrics/LRC, typed smart playlists, M3U/export, deterministic recommendations, optional distinct podcasts/radio |
 | 10 Shared experiences | Planned | Authorized WebSocket rooms, clock/latency/reconnect semantics, shared queues, opt-in activity feeds, collection exploration, interoperability |
 | 11 Hardening | Partial | Regression/security/benchmark/backup/deploy work underway; ongoing audits, real container/ARM64 builds, stress/seek/upload/restart tests, accessibility review, release notes |
@@ -47,7 +47,7 @@ queue-state synchronization and a verified empty/unfavorite/Library-return journ
 Native Playlists list/detail, owner create/CAS-rename/confirm-delete and playback,
 album/artist group browsing, playlist entry add/reorder/removal, queue move-down/
 Clear-upcoming, player favorite and direct second-server public-catalog playback are
-verified (loopback debug transport); native playlist folders and album/artist editing remain future work. A real-window
+verified (loopback debug transport); native playlist-folder UI and album/artist editing remain future work. A real-window
 automated journey verified playback, seek, navigation continuity, queue duplicates/
 reorder, light theme,640×700 element bounds and zero temporary directory entries;
 MPRIS and null-sink audio tests also ran.

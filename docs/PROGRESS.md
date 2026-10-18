@@ -21,6 +21,36 @@ correctly shows "Not established"). No schema, server HTTP, native or original-d
 runtime change. The live runtime was subsequently upgraded to0.12.1; existing
 analysis rows remain spectral-1 until explicitly reanalyzed.
 
+## 0.12.4 playlist folders schema12 handover — verified (2026-10-18)
+
+`target/releases/vela-0.12.4-{x86_64-unknown-linux-gnu,source}.tar.gz` and
+`vela-0.12.4-SHA256SUMS` were built from commit `16034b9` (native
+`78616c0957767096d5d8e31d7f7871c2cb1a55eb2f507b3b7c0cc5468b5e9687`, source
+`4faefc31f5cdf27094c3fe0fd947f5f94d41151128a51a0185d0bd93fa784916`) and extracted to
+`target/runtime/vela-0.12.4/` (schema12). `verify_package.py` passed. Exact-package
+Chromium passed41+1 live-import skip in1.9m; Firefox passed41+1 skip in2.3m on a clean
+rerun after its first run hit the known sleep-timer pause flake and stopped the suite.
+Both include the real playlist-folder lifecycle.
+
+A portable native0.12.4 archive was built
+(`target/desktop-releases/vela-desktop-0.12.4-linux-x86_64-unknown-linux-gnu.tar.gz`,
+SHA256 `978a31f9356df3ce3e79c0de61e434f7fde0f64aae49bfcaf900f4fd83891228`, BUILD
+commit `16034b9`) and passed exact manifest/modes, `vela-desktop 0.12.4`, ldd, styled
+sign-in launch, normal close exit0 and zero temporary originals.
+
+`before-0.12.4-20261018T192134Z.tar.gz` (440464314 bytes,0600) was created while the
+live DB was still schema11 and restore-verified in an empty isolated directory
+(integrity/FK ok, schema11,0 playlists). The installer correctly refused to migrate
+implicitly. With the old service stopped, the new runtime was started once on
+127.0.0.1:3211 against the backed-up data, applied schema12, reported health0.12.4 and
+exited0 on SIGTERM. The installer then validated and installed the unit without touching
+media. The0.12.3 unit file was preserved at0600.
+
+Post-handover: health0.12.4; MainPID463860 active/enabled,0 restarts; integrity/FK ok;
+schema12; counts unchanged (1user/20tracks/20assets/20analysis/1artwork/0playlists/
+0folders). Rollback remains the preserved0.12.3 runtime/unit and the schema11 backup
+(forward schema migration means rollback requires restoring that backup).
+
 ## Playlist folders — source verified (2026-10-18, `168c95f`)
 
 Playlist folders add owner-scoped grouping metadata without changing playlist tracks,
@@ -34,8 +64,8 @@ Web Playlists exposes folder creation, filter chips, selected-folder rename, con
 delete and a per-playlist Move-to-folder control. The API test covers duplicate names,
 owner isolation, move/CAS conflicts, folder rename/delete, unfiling and revision bumps.
 Chromium42 scenarios (41 pass1 live-import skip in2.2m) and Firefox42 (41 pass1
-skip in2.6m) include a real folder lifecycle at320px. Source schema12 is newer than the live0.12.3/schema11 runtime and has not been
-deployed; native folder UI is not implemented (the additive summary field is ignored).
+skip in2.6m) include a real folder lifecycle at320px. The runtime was subsequently upgraded to0.12.4/schema12; native folder UI is not
+implemented (the additive summary field is ignored).
 Evidence:`target/checks/browser-folders-chromium.log`,
 `tests/browser/test-results/playlist-folders-phone.png`.
 
@@ -83,7 +113,7 @@ second device grant through the API, Settings listing, 320px layout, confirmatio
 revocation while history/DSP/export/erasure checks remain green. Evidence:
 `target/checks/listening-devices/` (320px privacy screenshot), Chromium40 passed+1
 live-import skip in2.4m, API30 tests, web20 tests, strict core/server/web Clippy/fmt.
-Shipped in the verified0.12.3 runtime. No schema
+Shipped in the verified0.12.4 runtime. No schema
 migration, original-data rewrite or native change.
 
 ## Native offline queue + removal0.12.2 — verified (2026-10-18, `b0bf085`)

@@ -3,7 +3,11 @@
 Owner-scoped playlist folders: create/list, CAS rename/delete, CAS move of owned
 playlists and unfiling on folder deletion. Migration0012 is additive; original playlists
 remain visible and unfiled. Chromium/Firefox each pass42 scenarios (41+1 skip). The
-native client consumes the additive playlist field but has no folder UI yet.
+native client consumes the additive playlist field but has no folder UI yet. Exact-package
+Chromium and Firefox each passed42 scenarios with1 live-import skip (1.9m/2.3m; Firefox
+needed one clean rerun after a sleep-timer pause flake). The schema11 backup was
+restore-verified, then the new runtime applied schema12 on an isolated temporary port
+after the installer correctly refused implicit migration; counts were unchanged.
 
 # 0.12.3 — privacy device revocation + native offline checkpoint
 
