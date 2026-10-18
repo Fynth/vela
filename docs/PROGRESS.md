@@ -211,6 +211,12 @@ sent, so consent/history is not bypassed or inferred.
   swaps the two fixture entries, restores order, removes one entry and verifies
   list/detail counts (`target/checks/native-playlist-editing/`). Adding library
   tracks to a playlist, folders/albums/artists editing and packaging remain gaps.
+- Native queue/favorite parity follow-up: queue rows now support move-down and a
+  Clear-upcoming action that preserves the current occurrence and earlier rows, while
+  the player bar exposes the current track's favorite state through the same owner
+  API and queue synchronization. The window journey verifies move-down/current,
+  move-up restore, Clear-upcoming to one row and a real player favorite mutation
+  (`target/checks/native-queue-favorite3/`).
 - Native album/artist browse follow-up `1634f1d`: the desktop client reads the owner-scoped
   album/artist list, summary and track APIs, renders real grouped lists/detail and
   plays the authorized group tracks through the same native engine and queue. The

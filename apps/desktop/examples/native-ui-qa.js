@@ -62,6 +62,9 @@ try {
   await capture('library-dark');
   await click('Play Native Continuity');
   await wait(() => phase() === 'Playing' && position() > 400, 'Native playback clock advances');
+  el('[data-testid="native-player-favorite"]').click();
+  await wait(() => el('[data-testid="native-player-favorite"]')?.getAttribute('aria-label') === 'Remove Native Continuity from favorites', 'Player favorite mutation');
+  assert(el('[data-testid="native-player-favorite"]')?.getAttribute('aria-label') === 'Remove Native Continuity from favorites', 'Player favorite control updates the shared queue state');
   const gen = generation(); const before = position();
   await click('Queue'); await sleep(450);
   assert(generation() === gen && position() > before, 'Navigation preserves native source and advancing position');
@@ -84,6 +87,15 @@ try {
   assert(document.querySelectorAll('[data-native-queue-index]').length === 5, 'Duplicate queue occurrences retained');
   await click('Move queue occurrence 4 up'); await click('Remove queue occurrence 4');
   assert(document.querySelectorAll('[data-native-queue-index]').length === 4, 'Queue reorder and removal');
+  await click('Move queue occurrence 0 down');
+  try { await wait(() => document.querySelector('.native-queue-row:nth-child(2)')?.classList.contains('current'), 'Native queue move-down'); }
+  catch { throw new Error(`Native queue move-down failed rows=${JSON.stringify([...document.querySelectorAll('.native-queue-row')].map(row => [row.className, row.textContent.trim()]))}`); }
+  assert(document.querySelector('.native-queue-row:nth-child(2)')?.classList.contains('current'), 'Queue move-down follows the current occurrence');
+  await click('Move queue occurrence 1 up');
+  await wait(() => document.querySelector('.native-queue-row:nth-child(1)')?.classList.contains('current'), 'Native queue move-up restore');
+  await click('Clear upcoming');
+  await wait(() => document.querySelectorAll('[data-native-queue-index]').length === 1, 'Native clear upcoming');
+  assert(document.querySelectorAll('[data-native-queue-index]').length === 1, 'Clear upcoming keeps only the current occurrence');
   await resizeCompact();
   assert(innerWidth >= 620 && innerWidth <= 660, `Compact native viewport is 640px (actual ${innerWidth}px, dpr ${dpr()}, trace ${JSON.stringify(window.__velaResizeTrace || [])})`);
   const queueBounds = [...document.querySelectorAll('[data-native-queue-index]')].map(node => node.getBoundingClientRect());

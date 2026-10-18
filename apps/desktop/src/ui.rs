@@ -937,6 +937,69 @@ fn toggle_favorite(mut ui: Ui, catalog: Catalog, track: Track) {
     });
 }
 
+fn toggle_library_favorite(mut ui: Ui, track: Track) {
+    if !ui.signed_in() || !ui.favorite_busy.peek().is_empty() {
+        return;
+    }
+    let Some(account) = ui.account.peek().clone() else {
+        return;
+    };
+    let desired = !track.favorite;
+    let ticket = ui.feedback_gate.begin(account.epoch);
+    ui.favorite_busy.set(track.id.clone());
+    spawn(async move {
+        let result = account
+            .client
+            .favorite(&track.id, desired, ticket.cancel.clone())
+            .await;
+        if !ticket.current(&ui) {
+            return;
+        }
+        if *ui.favorite_busy.peek() == track.id {
+            ui.favorite_busy.set(String::new());
+        }
+        match result {
+            Ok(()) => {
+                for item in ui.queue.write().iter_mut() {
+                    if item.id == track.id {
+                        item.favorite = desired;
+                    }
+                }
+                let current_catalog = ui.catalog.peek().clone();
+                if let Some(catalog) = current_catalog {
+                    let mut page = (*catalog.page).clone();
+                    let mut changed = false;
+                    for item in &mut page.items {
+                        if item.id == track.id {
+                            item.favorite = desired;
+                            changed = true;
+                        }
+                    }
+                    if changed {
+                        ui.catalog.set(Some(Catalog {
+                            page: Arc::new(page),
+                            ..catalog
+                        }));
+                    }
+                }
+                ui.notice.set(
+                    if desired {
+                        "Added to favorites."
+                    } else {
+                        "Removed from favorites."
+                    }
+                    .into(),
+                );
+            }
+            Err(error) => {
+                if !expired(ui.clone(), &error) {
+                    ui.source_error.set(error);
+                }
+            }
+        }
+    });
+}
+
 fn play_catalog(mut ui: Ui, catalog: Catalog, at: usize) {
     if !ui.catalog_current(&catalog) {
         ui.catalog_error
@@ -1273,6 +1336,32 @@ fn queue_edit(mut ui: Ui, at: usize, remove: bool) {
             return;
         }
         ui.queue.write().swap(at, at - 1);
+    }
+}
+
+fn queue_move_down(mut ui: Ui, at: usize) {
+    if !ui.signed_in() || at + 1 >= ui.queue.peek().len() {
+        return;
+    }
+    if ui.order.write().swap(at, at + 1) {
+        ui.queue.write().swap(at, at + 1);
+    }
+}
+
+fn queue_clear_upcoming(mut ui: Ui) {
+    if !ui.signed_in() {
+        return;
+    }
+    let Some(current) = ui.order.peek().current() else {
+        return;
+    };
+    let keep = current + 1;
+    while ui.queue.peek().len() > keep {
+        let last = ui.queue.peek().len() - 1;
+        if !ui.order.write().remove(last) {
+            break;
+        }
+        ui.queue.write().remove(last);
     }
 }
 
@@ -1694,16 +1783,19 @@ fn queue_view(ui: Ui) -> Element {
     let queue_len = queue.len();
     let current = ui.order.read().current();
     let clear = ui.clone();
+    let clear_upcoming = ui.clone();
+    let has_upcoming = current.is_some_and(|current| current + 1 < queue_len);
     rsx! {section {class:"native-queue","aria-label":"Playback queue",
         div {class:"library-intro",div {span {class:"eyebrow","ROOM FOR YOUR NEXT LISTEN"} h1 {"Your listening queue"} p {"{queue_len} of 1,000 places · Duplicate tracks keep their own place."}}
-            button {class:"button secondary",disabled:queue_empty,onclick:move |_|clear_queue(clear.clone()),"Clear queue"}
+            div {class:"inline-form",button {class:"button secondary",disabled:!has_upcoming,title:if has_upcoming {"Remove only the queued occurrences after the current one."} else {"Nothing is queued after the current occurrence."},onclick:move |_|queue_clear_upcoming(clear_upcoming.clone()),"Clear upcoming"} button {class:"button secondary",disabled:queue_empty,onclick:move |_|clear_queue(clear.clone()),"Clear queue"}}
         }
         if queue_empty {div {class:"native-empty",Icon {name:"queue"} h2 {"A little room for what comes next"} p {"Play a library result, use Play next, or add tracks to your queue."}}}
         else {div {class:"native-queue-list",for (at,track) in queue.into_iter().enumerate() { {
-            let select=ui.clone();let up=ui.clone();let remove=ui.clone();
+            let select=ui.clone();let up=ui.clone();let down=ui.clone();let remove=ui.clone();
             rsx! {article {class:if current==Some(at){"native-queue-row current"}else{"native-queue-row"},key:"{at}-{track.id}","data-native-queue-index":"{at}",
                 button {class:"native-queue-select",disabled:!ui.audio_ready(),"aria-label":"Play queue occurrence {at}: {track.title}",onclick:move |_|select_queue(select.clone(),at),span {class:"queue-number","{at+1}"} div {class:"neutral-cover","aria-hidden":"true",Icon {name:"music"}} div {strong {"{track.title}"} small {"{track.artist}"}} if current==Some(at){span {class:"queue-current","Current"}}}
                 button {class:"icon-button",disabled:at==0,"aria-label":"Move queue occurrence {at} up",title:"Move up",onclick:move |_|queue_edit(up.clone(),at,false),Icon {name:"up"}}
+                button {class:"icon-button",disabled:at+1>=queue_len,"aria-label":"Move queue occurrence {at} down",title:if at+1>=queue_len {"Already the last queued occurrence."} else {"Move down"},onclick:move |_|queue_move_down(down.clone(),at),Icon {name:"down"}}
                 button {class:"icon-button",disabled:current==Some(at),"aria-label":"Remove queue occurrence {at}",title:if current==Some(at){"Current occurrence cannot be removed; clear the queue to stop it"}else{"Remove from queue"},onclick:move |_|queue_edit(remove.clone(),at,true),Icon {name:"close"}}
             } }
         } } } }
@@ -1757,8 +1849,20 @@ fn player(ui: Ui) -> Element {
         Repeat::All => "Repeat all",
         Repeat::One => "Repeat one",
     };
+    let favorite_disabled = track
+        .as_ref()
+        .is_some_and(|track| ui.favorite_busy.read().as_str() == track.id);
     rsx! {footer {class:"native-player","aria-label":"Native music player","data-audio-phase":"{snapshot.phase:?}","data-audio-generation":"{snapshot.generation}",
-        div {class:"player-track",div {class:"neutral-cover player-cover","aria-hidden":"true",Icon {name:"music"}} div {if let Some(track)=track {strong {"{track.title}"} small {"{track.artist}"}}else{strong {"Ready when you are"} small {"Choose something you love"}}}}
+        div {class:"player-track",
+            div {class:"neutral-cover player-cover","aria-hidden":"true",Icon {name:"music"}}
+            div {if let Some(track)=track.clone() {strong {"{track.title}"} small {"{track.artist}"}}else{strong {"Ready when you are"} small {"Choose something you love"}}}
+            if let Some(favorite_track)=track.clone() {
+                {
+                    let favorite_ui=ui.clone();
+                    rsx! { button {class:if favorite_track.favorite {"icon-button selected"}else{"icon-button"},"data-testid":"native-player-favorite","aria-pressed":favorite_track.favorite,disabled:favorite_disabled,"aria-label":if favorite_track.favorite {format!("Remove {} from favorites",favorite_track.title)} else {format!("Favorite {}",favorite_track.title)},title:if favorite_disabled {"Updating this favorite…"} else if favorite_track.favorite {"Remove from favorites"} else {"Add to favorites"},onclick:move |_|toggle_library_favorite(favorite_ui.clone(),favorite_track.clone()),Icon {name:"heart"}} }
+                }
+            }
+        }
         div {class:"player-controls",div {class:"transport",
             button {class:if shuffle{"icon-button selected"}else{"icon-button"},"aria-label":"Shuffle","aria-pressed":shuffle,disabled:blocked,onclick:move |_|{let mut ui=shuffle_ui.clone();let next=!*ui.shuffle.peek();ui.shuffle.set(next);let repeat=*ui.repeat.peek();ui.order.write().configure(next,repeat);},Icon {name:"shuffle"}}
             button {class:"icon-button","aria-label":"Previous",disabled:blocked,onclick:move |_|advance(previous.clone(),Command::Previous),Icon {name:"previous"}}

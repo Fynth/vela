@@ -59,6 +59,10 @@ seek/volume where the bus is available.
   views render real group summaries, open read-only detail, and queue/play the
   authorized group tracks; unknown/foreign groups, page cursors and IDs are bounded
   and validated. No edition/recording identity is inferred from a name.
+- Queue controls include move-up/move-down and a Clear-upcoming action that keeps the
+  current occurrence and earlier rows, removing only the suffix through the shared
+  order model. The player bar exposes the current track's favorite state with the same
+  owner-only mutation and queue synchronization as library rows.
 - `playback.rs` (reused by path from the web crate): bounded occurrence indices,
   fair shuffle deck/history, explicit next priority, repeat semantics. Structural
   queue edits synchronize the order model; metadata does not reset traversal.
@@ -101,6 +105,10 @@ physical media keys are not certified.
   worker still advertised as playable (explicit reconnect now), QA sink assertions
   and a UTF-8 slice panic; the reported test-count discrepancy was resolved by
   enumerating25 actual tests.
+- Queue/favorite checks pass: move-down follows the current occurrence, move-up
+  restores it, Clear-upcoming leaves only the current row, and the player heart
+  acknowledges the API and updates the shared queue state. Evidence includes
+  `target/checks/native-queue-favorite3/`.
 - Album/artist journey passes in the same real window: real album groups, album
   detail (`Real Fixtures · Vela Test`), `Play album` native audio, artist groups,
   artist detail, `Play artist` native audio, and Library return. Evidence:
