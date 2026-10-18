@@ -21,7 +21,7 @@ correctly shows "Not established"). No schema, server HTTP, native or original-d
 runtime change. The live runtime was subsequently upgraded to0.12.1; existing
 analysis rows remain spectral-1 until explicitly reanalyzed.
 
-## Native offline BLAKE3 manifests — source verified (2026-10-18)
+## Native offline BLAKE3 manifests — source verified (2026-10-18, `eb68780`)
 
 Offline copies now write v2 manifests carrying the BLAKE3 digest of the copied device
 bytes. Play offline re-hashes the file and refuses a same-size tampered copy before
