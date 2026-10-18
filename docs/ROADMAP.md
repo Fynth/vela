@@ -86,3 +86,5 @@ The full VELA_MUSIC_OMEGA_AUTONOMOUS_ENGINEERING_SPEC.md supplied2026-10-18 supe
 ## Cross-cutting acceptance
 
 Every slice includes validation, permission/error/loading/empty/cancellation/recovery states, bounded concurrency and data portability. Large catalogs use bounded pages now; evaluate virtualization when list views grow. Profile before optimization and publish only reproducible measurements. Preserve private defaults; no automatic external metadata requests, federation, public user lists or listening activity. No credential fabrication, DRM bypass, privileged automatic self-update or external publishing.
+
+- Масштабирование, мульти-origin федерация и легальный контент: см. [RESILIENT_SCALE_PLAN.md](RESILIENT_SCALE_PLAN.md).
