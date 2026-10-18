@@ -211,7 +211,7 @@ sent, so consent/history is not bypassed or inferred.
   swaps the two fixture entries, restores order, removes one entry and verifies
   list/detail counts (`target/checks/native-playlist-editing/`). Adding library
   tracks to a playlist, folders/albums/artists editing and packaging remain gaps.
-- Native queue/favorite parity follow-up: queue rows now support move-down and a
+- Native queue/favorite parity follow-up `60915e6`: queue rows now support move-down and a
   Clear-upcoming action that preserves the current occurrence and earlier rows, while
   the player bar exposes the current track's favorite state through the same owner
   API and queue synchronization. The window journey verifies move-down/current,
