@@ -141,3 +141,29 @@ web PersonalMixes inside existing Home owns only presentation and guarded
 requests. Playback remains the single root HTMLMediaElement. ADR0015 and
 CONTRACTS define bounds and ownership; daily/weekly refresh and remote/native
 recommendations remain independent milestones.
+
+
+## Explicit public catalog0.11
+
+Core owns stable singleton origin settings and administrator CAS. Media owns the
+owner-bound publication ledger, quotas, license/provenance validation and independent
+public metadata/stream/download authorization. Server owns anonymous read routes,
+HTTP Range transport and bounded peer inspection; imports supplies controlled egress.
+Domain network DTOs remain framework-free. Dioxus Network is presentation over these
+services and invokes the existing root player only for owned originals. Remote
+media links target an explicitly granted origin endpoint; they do not enter a second
+player or become owned tracks. Shared private history/DSP/recommendation services do
+not participate in publication or rights decisions.
+
+Migration0011 adds tables/indexes only. Core initialization creates an unadvertised
+server UUID with enabledfalse; no existing track or consent is changed. Public IDs
+are independent and permanently retired on revocation. Read transactions bind
+enablement and ownership to projected metadata/assets. Immutable physical files and
+all prior library/playlist IDs remain intact. ADR0016/FEDERATION_PROTOCOL define the
+limited version1 profile and unfinished standards-based federation work.
+
+The persistent user-service installer changes supervision of an already frozen,
+exactly matching schema/build only. It validates archives/source/migration hashes,
+original-data ownership/locks and actual served bytes before writing a private unit,
+with bounded readiness and rollback. It is separate from the backed-up schema upgrade
+procedure and never configures public exposure, root permissions or linger.

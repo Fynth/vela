@@ -12,6 +12,7 @@ import tarfile
 import tempfile
 import time
 import urllib.request
+import urllib.error
 
 
 def main():
@@ -59,6 +60,17 @@ def main():
                 with sqlite3.connect(f'file:{root / "data/vela.db"}?mode=ro', uri=True) as database:
                     actual = database.execute('SELECT MAX(version) FROM _sqlx_migrations WHERE success=1').fetchone()[0]
                     assert actual == int(build['schema_version']), 'Packaged binary is missing an expected migration'
+                    if int(build['schema_version']) >= 11:
+                        assert database.execute('SELECT enabled,origin,revision FROM network_settings').fetchall() == [(0, None, 0)]
+                        assert database.execute('SELECT COUNT(*) FROM publications').fetchone()[0] == 0
+                if int(build['schema_version']) >= 11:
+                    for route in ['/.well-known/vela', '/api/public/catalog', '/api/public/catalog?limit=invalid']:
+                        try:
+                            urllib.request.urlopen(base + route, timeout=2)
+                        except urllib.error.HTTPError as error:
+                            assert error.code == 404
+                        else:
+                            raise AssertionError('Packaged public catalog must remain disabled')
             with urllib.request.urlopen(base + '/api/setup', timeout=2) as response:
                 assert json.load(response)['needs_setup'] is True
             for path, expected in [('/', b'bootstrap.js'), ('/bootstrap.js', b'vela_web.js')]:

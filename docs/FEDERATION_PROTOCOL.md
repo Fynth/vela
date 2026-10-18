@@ -1,11 +1,54 @@
-# Federation integration checkpoint
+# Network interoperability boundary
 
-Status2026-10-17: NOT_IMPLEMENTED, disabled. This is an implementation boundary for the next network slice, not a claim of ActivityPub or Funkwhale interoperability.
+0.11 implements an optional read-only public catalog profile. Full ActivityPub,
+WebFinger, HTTP message signatures, signed inbox/outbox, replay-safe events,
+follows, peer blocks, durable delivery and Funkwhale interoperability remain
+NOT_IMPLEMENTED. Do not advertise federation compatibility from these GET routes.
 
-Preserve three separate layers: standards-based identity/social delivery; versioned catalog capability negotiation; origin-authorized media access. [ActivityPub](https://www.w3.org/TR/activitypub/) defines actor/inbox/outbox and activity delivery; it does not supply a music redistribution grant. [HTTP Message Signatures, RFC9421](https://www.rfc-editor.org/rfc/rfc9421.html) defines signed message components; a selected interoperability profile must also fix key discovery, covered components, digest handling, freshness, replay storage and rotation. Both primary specifications were checked this session. WebFinger discovery and existing Funkwhale profiles require a separate compatibility review before implementation.
+The server is private by default. Enabling public discovery publishes no tracks.
+The owner must separately create an explicit licensed publication; metadata,
+streaming and downloads are distinct grants. See NETWORK_RIGHTS and ADR0016.
 
-Do not enable anonymous outbound crawling or reuse browser session cookies for peers. Reuse the importer destination-policy concepts with explicit per-hop DNS pinning, public-address policy, no ambient proxies/credentials, bounded responses/redirects/deadlines and no recursive object fetching. Trusted-local two-instance test routing must be test-only, never an ordinary-user SSRF bypass.
+## Read-only public catalog profile1
 
-Objects need canonical HTTPS origin plus stable origin object IDs, independent of local cache IDs. Cache remote metadata separately from owned tracks/assets. Process idempotent event IDs, reject foreign object updates, use durable bounded deliveries, and reauthorize playback at origin. Enabling federation must publish nothing until separately authorized publication records and NETWORK_RIGHTS acceptance exist.
+`GET /.well-known/vela` returns protocol_version1, stable server_id, configured
+canonical origin, name, software_version and public_artworkfalse. Origin is an
+HTTPS DNS name on443 with root path, never derived from incoming Host. UUID is a
+peer claim; remote identity is scoped by canonical origin, not UUID alone.
 
-Next executable network slice: opt-in stable identity and capabilities, explicit per-object rights/publication model, then actual two-instance discovery plus private negative controls. Inbox/signature/replay and lawful audio delivery are independent acceptance steps; do not advertise them early. Public directory/central service and private-history disclosure are prohibited defaults.
+`GET /api/public/catalog?limit=20&cursor=<publication UUID>&q=<literal text>`
+returns server_id/origin/items/next_cursor. Default20, max50; bounded literal
+text filter and ascending publication UUID keyset. A nonnull next_cursor is the
+last returned ID and means another page existed in that read snapshot.
+`GET /api/public/catalog/{id}` returns one current PublicTrack: public ID/revision,
+bounded title/artist/album/genre/year/duration/codec, declared license/attribution,
+and can_stream/can_download. No owned track IDs, artwork, URLs, provenance,
+physical hashes, user identity, favorites, private history or analysis descriptors.
+
+`GET/HEAD /api/public/media/{id}/stream` requires that current public record's
+stream grant. `/download` additionally requires its download grant. Standard
+Range/If-Range/ETag behavior reuses original streaming with bounded file buffers;
+attachment names use only the canonical public UUID. Disabled/revoked/foreign/
+missing/metadata-only records give404. Every response is no-store; previously
+received bytes cannot be recalled. Public reads confer no authority on private
+`/api/tracks/{local-id}/stream` or artwork endpoints.
+
+Authenticated/CSRF-protected `POST /api/network/preview {origin}` fetches only
+well-known + first20 catalog records. Max2 concurrent previews/5s; bodies16KiB and
+128KiB. Validate same origin/server identity, version, sorted unique canonical IDs,
+matching cursor, text/numeric/license/grant bounds. DNS answers must all be public,
+addresses pinned for actual connection; each redirect revalidated and same-origin.
+No ambient proxy/cookies/authorization/referrer; no automatic recursive fetch,
+remote writes, audio proxy/download, metadata cache, saved peer or credentials.
+System DNS workers have a separate4-task admission budget held through actual
+blocking completion after timeout; HTTP futures cancel on deadline.
+
+Tests may route exact fixture hostnames to real independent loopback Axum servers
+through a `cfg(test)`-only pin. No production flag/API/environment permits private
+peers. This proves the HTTP/catalog/rights boundary; it does not validate Internet
+TLS, a public deployment, signatures or a standards-based federation network.
+
+Next network acceptance: durable origin-scoped peer records/blocks, standards-based
+actor identity/signature verification and replay-safe delivery, separate authorized
+remote catalog adapters and a root-coordinated remote queue. No public directory or
+central service is mandatory; private history must never enter public popularity.

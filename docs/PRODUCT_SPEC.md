@@ -42,3 +42,22 @@ Turning account history off removes its ranking/suppression influence while
 retaining the journal until explicit erase. All playback and queue commands use
 root actions; navigation preserves the active audio occurrence. Coverage details
 are optional disclosure. These are on-demand sets; no daily/weekly promise.
+
+
+## Network public-catalog workflow0.11
+
+Network is a real navigation destination on desktop and mobile More. Members see
+discovery state, own publication form/records and public-server preview; only admins
+edit name/origin/enablement. Enabling alone reveals no music. Owner searches existing
+tracks, selects one, declares license/attribution/private evidence, chooses separate
+audio grants and confirms rights. Successful create refreshes owner records; stale
+CAS or uncertain timeout offers explicit refresh. Original preview uses the same
+root player. Revocation keeps original music/audit metadata, retires public ID and
+blocks new public transfers. Previously delivered bytes/licenses cannot be recalled.
+
+Preview accepts one public HTTPS DNS origin and presents bounded actual catalog
+metadata with source/declared-license/grant labels; absent audio grants have no
+active stream/download link. This is external-origin access, not saved connections,
+federated social search or remote tracks in the private root queue. Unsupported
+features have no decorative controls. No automatic publish, evidence fetch, remote
+audio import or private history disclosure is part of this flow.

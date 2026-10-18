@@ -2,6 +2,7 @@
 mod catalog;
 mod filters;
 mod metadata;
+mod publications;
 mod range;
 pub mod search;
 mod validation;
@@ -9,6 +10,7 @@ mod validation;
 pub use catalog::InvalidCatalogCursor;
 pub use filters::InvalidTrackFilter;
 pub use metadata::CatalogMetadataError;
+pub use publications::PublicationError;
 pub use range::{RangeError, select_range};
 
 use std::{

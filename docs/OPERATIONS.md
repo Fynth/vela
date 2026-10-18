@@ -2,7 +2,7 @@
 
 ## Installation and access
 
-See README for local build and Compose. Application management currently covers initial account setup, local user creation, upload/batch upload, direct imports, configured folder scans, the private Jobs center, catalog editing, typed library filters, favorites and playlists. Storage/public URLs are administrator environment configuration; the full no-console health/storage/invitation wizard remains roadmap work.
+See README for local build and Compose. Application management currently covers initial account setup, local user creation, upload/batch upload, direct imports, configured folder scans, the private Jobs center, catalog editing, typed library filters, favorites and playlists. Storage roots are administrator environment configuration; public catalog origin/enablement and explicit owner publication are managed in Network; the full no-console health/storage/invitation wizard remains roadmap work.
 
 A native deployment uses one binary, built web assets, writable private local data directory and systemd unit in deploy/vela.service. Install an unprivileged `vela` account and copy the binary/web files into /opt/vela; systemd StateDirectory creates /var/lib/vela. SQLite must use local storage with working locks; network filesystems and multi-process use are unsupported.
 
@@ -82,7 +82,10 @@ Migration0007 rebuilds the import/scan owner-history indexes with UUID tie-break
 
 This increment keeps schema7, media ownership, original files, HTTP APIs and upstream pins. Replace binary and complete generated web assets together; index.html now references now-playing.css and the matching server explicitly permits that path. Never partially update a running frozen directory or delete target/runtime, target/releases or target/upgrade-backups during development. Extract each package into a new versioned directory, verify its hashes, gracefully stop the owned old process, take/restore-check a private backup, and start the new binary/assets against the original data directory. Validate health/version/setup state and compare database/media integrity. Retain the matching old package and backup for rollback; restoration is tested in a new fixture directory, never over the live library. See PROGRESS for the actual current PID/source/evidence.
 
-## Local review process supervision
+## Historical transient review supervision (superseded by0.11 installer)
+
+The following describes the earlier review setup. Current supervision is recorded
+in PROGRESS;0.11 adds the persistent same-build USER_SERVICE workflow below.
 
 A tool-owned foreground process can end independently of a source/build checkpoint. Reinspect health, executable and original data before starting another process; never assume a recorded PID is still current. The local review instance can be run as the current user's transient systemd unit vela-local-development.service, pointing at one frozen versioned binary/asset directory and the original private data directory, bound only to127.0.0.1:3210. Its Restart=on-failure policy is bounded to3 starts per60s with a2s delay. SIGTERM/20s shutdown still uses the application’s normal worker cleanup.
 
@@ -101,3 +104,20 @@ backup and restore it into a disposable empty directory; compare all logical row
 and media checksums. Keep all older archives/snapshots and original data. Details
 and actual backup paths are in PROGRESS. Production persistent systemd/Compose
 installation remains administrator-controlled; no public deployment occurred.
+
+
+## Persistent local review supervision
+
+See [USER_SERVICE.md](USER_SERVICE.md) for the validation-first same-build user
+installer. It compares the frozen executable/assets with retained native/source
+archives and the existing database's exact migration checksums before replacing
+a supported transient review unit. It binds loopback only and does not migrate,
+configure root/linger or publish music. The unit is enabled with the existing user
+manager, normally at login; boot/logout behavior needs independent host validation.
+
+Upgrade this pinned service separately: inspect current process/unit/data, retain
+the private old unit, stop normally, make and restore-test a fresh backup, verify
+a new frozen package, replace only its executable/assets references, then start
+and check migration/row/media preservation. Do not run the same-build installer
+against an older schema or silently retarget its unit. No in-place schema downgrade
+or backup restore over original user data is supported.

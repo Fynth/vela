@@ -5,7 +5,7 @@
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") checkpoint(); });
   const modalOpen = () => document.querySelector('dialog[open], [role="dialog"]:not(dialog)');
   const audio = () => document.getElementById("vela-audio");
-  const destinations = new Set(["home", "search", "library", "albums", "artists", "favorites", "playlists", "imports", "jobs", "settings", "history", "radio"]);
+  const destinations = new Set(["home", "search", "library", "albums", "artists", "favorites", "playlists", "imports", "jobs", "network", "settings", "history", "radio"]);
   document.addEventListener("vela-route", ({detail}) => {
     if (destinations.has(detail) && location.hash !== "#" + detail) history.pushState(null, "", "#" + detail);
     document.querySelectorAll("details.track-info-menu[open]").forEach(menu => menu.removeAttribute("open"));

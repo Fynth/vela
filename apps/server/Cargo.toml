@@ -26,6 +26,7 @@ uuid.workspace = true
 tempfile.workspace = true
 blake3.workspace = true
 url.workspace = true
+reqwest.workspace = true
 
 multer = "3.1.0"
 

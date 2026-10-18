@@ -1,5 +1,20 @@
 # Music experience parity
 
+## Public catalog0.11 — verified source scope
+
+| Feature / priority | Status | Exact implementation | Acceptance / tests | Platform and rights scope |
+| --- | --- | --- | --- | --- |
+| Explicit origin and per-track publication P0 | VERIFIED for documented source scope | domain/network.rs; core/network.rs; media/publications.rs; migration0011; server/network.rs | Chromium39/PN01; API ownership/CSRF/CAS/grants, legacy10 preservation, no auto publication | Native server + web; supported declared CC0/BY/BY-SA only, not legal verification |
+| Public catalog preview / authorized media P0 | VERIFIED for read-only source profile | server/network.rs + network/tests.rs; imports/egress.rs; web/network.rs | 200 Rust; actual independent A/B HTTP, malicious/slow peer, DNS/redirect/size limits, Range/HEAD/download/revoke; Chromium39/PN02 | Read-only profile1; no AP/signatures/follows/cache/unified remote queue; latest G11/G14/G15/G22 subsets |
+| Durable local supervision P1 | VERIFIED for same-build local scope | scripts/install-user-service.py; tests/test_user_service.py; docs/USER_SERVICE.md |22 Python tests incl13 installer; actual frozen0.10 install/readiness and validation-only recheck | Linux user systemd enabled, private loopback; no root/linger/reboot or native audio claim |
+
+Next actual experience gaps: standards-based signed/blocked peers and saved origin
+adapters; native Linux/Android playback and offline manifests; Apple toolchain and
+native bridges; device handoff; room authorization; scheduled/calibrated mixes;
+public provenance moderation; richer catalog editions/organization; accessibility;
+large public-catalog/concurrent streaming measurement. Do not mark the entire
+network or platform milestone verified from this first profile.
+
 ## Personal discovery checkpoint0.10 — source902dd47, verified2026-10-18
 
 | Feature / priority | Status | Exact implementation | Acceptance / evidence | Platform / caveat |
@@ -22,7 +37,7 @@ Baseline was re-established at main f6cc845/application ac31d74:110 Rust tests,3
 | Private listening foundation P0 | VERIFIED for web/native server scope | core/src/listening.rs; domain/src/listening.rs; migration0008; server/src/listening.rs; web/src/audible.rs,listening.rs,browser_player.rs | G07-private-history: consent/global+device, actual played time, repeat/EOF, owner/CAS/dedup, export/delete/stale suppression | Browser self-report; no public popularity or physical sound attestation |
 | DSP and durable analysis P0 | VERIFIED for web/native server scope | media/src/analysis.rs,analysis_service.rs; domain/src/audio_analysis.rs; migration0009; server/src/analysis.rs; web/src/radio.rs | G08: known real PCM/FLAC/MP3, finite spectrum, bounded workers/recovery, original preservation/owner ACL | Explicit local analysis,120s prefix; no genre/mood/tempo/LUFS claims |
 | Explained local track radio P0 | VERIFIED for web/native server scope | media/src/discovery.rs; web/src/radio.rs; root Actions | G09: real seed/candidates, measured distance/tag fallback, diversity, actual queue playback |500 newest owned candidates; personal recurring mixes absent |
-| Lawful public network P0 | NOT_STARTED | docs/FEDERATION_PROTOCOL.md,NETWORK_RIGHTS.md only | G11/G12/G14/G15/G22: two real nodes + hostile peer, private negatives, rights/revoke | No federation routes, publication or network catalog |
+| Lawful public network P0 | PARTIAL:0.11 source under verification | server/network.rs; media/publications.rs; web/network.rs | G11/G14/G15/G22 subsets; actual two-node/hostile/rights/revoke and PN01/PN02 | Read-only opt-in public profile; full social federation remains unfinished |
 | Native audio clients P0 | NOT_STARTED / Apple validation BLOCKED | docs/PLATFORM_MATRIX.md only | G16/G17/G18 real Media3/AVFoundation/desktop engines/device evidence | Browser WASM/native server are not native clients |
 
 Historical0.9 ten-gap inventory (current0.10 implementation/evidence above supersedes the personal baseline entry):

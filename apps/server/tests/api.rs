@@ -3513,3 +3513,6 @@ async fn malformed_library_filter_queries_are_bounded_json_errors() {
         assert!(response.json::<serde_json::Value>().await.unwrap()["error"].is_string());
     }
 }
+
+#[path = "support/publications.rs"]
+mod publication_tests;

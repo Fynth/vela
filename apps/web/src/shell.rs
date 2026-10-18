@@ -30,6 +30,7 @@ pub fn Sidebar(
             if radio_available { button { class:if page=="radio" {"nav-item active"} else {"nav-item"}, "aria-label":"Track radio", "data-destination":"radio", onclick:move |_| onnav.call("radio".into()), Icon {name:"radio"} "Track radio" } }
             button {class:"nav-item", "aria-label":"Add music", "data-destination":"imports", onclick:move |_| onnav.call("imports".into()), Icon {name:"imports"} "Add music"}
             if user.is_admin {button {class:if page=="jobs" {"nav-item active"} else {"nav-item"}, "aria-label":"Jobs", "data-destination":"jobs", onclick:move |_| onnav.call("jobs".into()), Icon {name:"jobs"} "Jobs"}}
+            button {class:if page=="network" {"nav-item active"} else {"nav-item"}, "aria-label":"Network", "data-destination":"network", "aria-current":if page=="network" {"page"} else {"false"}, onclick:move |_| onnav.call("network".into()), Icon {name:"network"} "Network"}
             button {class:if page=="settings" {"nav-item active"} else {"nav-item"}, "aria-label":"Settings", "data-destination":"settings", onclick:move |_| onnav.call("settings".into()), Icon {name:"settings"} "Settings"}
             div {class:"account", div {class:"avatar", "{user.username.chars().next().unwrap_or('V').to_ascii_uppercase()}"} div {strong {"{user.username}"} small { if let Some(stats)=stats {"{stats.tracks} private tracks"} else {"Private library"} }} }
         }
@@ -48,7 +49,7 @@ pub fn MobileNavigation(page: String, administrator: bool, onnav: EventHandler<S
         }
         if more() {div {class:"more-backdrop", onclick:move |_|more.set(false), div {class:"more-sheet", role:"dialog", "aria-modal":"true", "aria-labelledby":"more-title", onclick:move |e|e.stop_propagation(), onkeydown:move |e| {if e.key()==Key::Escape {e.stop_propagation();more.set(false);}},
             div {class:"section-toolbar", h2 {id:"more-title", "More from your library"} button {class:"icon-button", "aria-label":"Close navigation", "data-dialog-dismiss":"true", onclick:move |_|more.set(false), Icon {name:"close"}}}
-            nav {"aria-label":"More destinations", for (id,label,icon) in [("albums","Albums","albums"),("artists","Artists","artists"),("favorites","Favorites","heart"),("history","Listening history","history"),("imports","Add music","imports"),("jobs","Jobs","jobs"),("settings","Settings","settings")] {
+            nav {"aria-label":"More destinations", for (id,label,icon) in [("albums","Albums","albums"),("artists","Artists","artists"),("favorites","Favorites","heart"),("history","Listening history","history"),("imports","Add music","imports"),("jobs","Jobs","jobs"),("network","Network","network"),("settings","Settings","settings")] {
                 if id!="jobs"||administrator {button {class:"more-destination", "aria-label":label, onclick:move |_| {more.set(false);onnav.call(id.into());}, Icon {name:icon} span {"{label}"}}}
             }}
         }}}

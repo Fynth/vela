@@ -58,3 +58,32 @@ current scale benchmark uses unique added timestamps and at most50 qualified
 fixture sessions, so tied-time and10000-session latency remain unmeasured. Stable
 repeated inputs return stable mixes; Refresh reloads current data rather than
 pretending to regenerate an independently scheduled or random taste model.
+
+
+## Public catalog0.11 scope
+
+Public discovery is optional and off by default; no original account music is
+published by upgrade. Only explicit per-track CC0/BY/BY-SA declarations are supported.
+Evidence is owner-only and unverified; artwork is not public. Public tracks require
+a positive known duration of at most7days; unusual years become unknown and public
+text has bounded/control-free projections without changing owner tags. Stream/download grants
+are separate API policy, not DRM or a guarantee recipients cannot save streamed
+bytes. Revoking access cannot revoke received licenses or recall copies. Retained
+revoked records count toward quotas; no purge/edit UI is implemented (revoke and
+republish creates a new ID). Public metadata follows current owner catalog edits.
+
+The Network view previews one HTTPS DNS origin's first20 published tracks; it does
+not save peers, fan out search, follow users, mirror music, proxy audio or integrate
+remote tracks into the root queue. Public links open the granted origin separately.
+No IP origins, custom HTTPS ports, signed inbox/activity, HTTP signatures, replay
+protection, peer blocklist, WebFinger, remote cache/tombstones or Funkwhale compatibility
+are implemented. Two-node tests use a production-absent exact test hostname pin;
+Internet TLS/public deployments and standards interoperability remain unverified.
+OS DNS resolution cannot be forcibly canceled, but occupied workers retain bounded
+admission until actual completion. Public-catalog load/latency remains unmeasured.
+
+Persistent user supervision starts with the existing Linux user manager, normally
+at login; boot-before-login/logout behavior is unverified and no linger is enabled.
+The installer is a same-build handover, not an updater; schema upgrades require a
+verified backup and the separate upgrade process. Native clients/offline/device
+handoff and Apple/Android hardware validation remain unfinished.

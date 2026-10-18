@@ -40,3 +40,18 @@ Executed0.10 visual evidence: exact package37scenarios in each Chromium/Firefox,
 to avoid intermediate theme colors; full functional playback/race tests retain
 normal app behavior. Main inspected actual desktop/phone images. Square-cover
 and document-width assertions pass; screen-reader/Safari/native remain unverified.
+
+
+## Network0.11
+
+Use existing Vela navigation, surfaces, type, icons and theme tokens. The Network
+page separates administrator discovery policy, owner publication declarations,
+retained records and peer preview. Administrator controls are absent for ordinary
+members. Every rights/audio permission starts unchecked, metadata-only state is
+explicit, changing the declaration clears rights confirmation, and revoke asks
+for an inline confirmation with a Keep action. The original root player remains
+active across navigation. External public links display origin and actual grants.
+Responsive layouts collapse form/card columns, preserve labels and focus styles,
+wrap provenance text and support320px plus light/dark/reduced motion. PN02 captures
+actual320/1440 theme states; screenshot inspection and exact results belong in
+QA_EVIDENCE. No licensed cover art is fetched to decorate public records.

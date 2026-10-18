@@ -28,7 +28,7 @@ cp -R docs "$package_dir/docs"
 cp -R deploy "$package_dir/deploy"
 cp LICENSE README.md "$package_dir/"
 mkdir "$package_dir/scripts"
-cp scripts/backup.py "$package_dir/scripts/"
+cp scripts/backup.py scripts/install-user-service.py "$package_dir/scripts/"
 # A commit is required so source and binary can be compared against a checkpoint.
 if [[ -n "$(git status --porcelain)" ]]; then
   echo 'Commit the verified checkpoint before packaging its source archive.' >&2

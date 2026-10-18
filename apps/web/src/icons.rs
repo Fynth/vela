@@ -13,6 +13,9 @@ pub fn Icon(name: &'static str) -> Element {
         "playlists" | "queue" => "M3 5h13M3 10h13M3 15h8m5-1 6 4-6 4Z",
         "imports" | "upload" => "M12 16V3m-5 5 5-5 5 5M4 15v6h16v-6",
         "jobs" => "M4 12h4l3-8 4 16 3-8h3",
+        "network" => {
+            "M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0ZM3 12h18M12 3c4 4 4 14 0 18-4-4-4-14 0-18Z"
+        }
         "radio" => {
             "M5 5a10 10 0 0 0 0 14M8 8a6 6 0 0 0 0 8m11-11a10 10 0 0 1 0 14m-3-11a6 6 0 0 1 0 8m-3-4h.01M12 12v9"
         }

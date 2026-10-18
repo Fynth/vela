@@ -7,6 +7,7 @@ mod icons;
 mod jobs;
 mod listening;
 mod metadata;
+mod network;
 mod now_playing;
 mod personal_mixes;
 mod playback;
@@ -511,6 +512,7 @@ fn initial_page() -> String {
         "playlists",
         "imports",
         "jobs",
+        "network",
         "settings",
         "history",
     ]
@@ -1501,6 +1503,7 @@ fn App() -> Element {
         "search" => "Find your next listen",
         "imports" => "Bring your music home",
         "jobs" => "Good things in the making",
+        "network" => "Shared by choice",
         "playlists" => "Every mood, a collection",
         "settings" => "Your listening space",
         "history" => "A record of your listening",
@@ -1811,13 +1814,20 @@ fn App() -> Element {
                         }, onopen: move |destination: String| actions.navigate.call(destination) }
                     }
 
+                    if page() == "network" {
+                        network::Network { auth, actions }
+                    }
+
                     if page() == "settings" {
                         section { class: "settings-grid", div { class: "panel", h2 { "A space that is yours" } p { "Your library is private. Music files stay on this server, and your session credentials stay in a secure browser cookie." }
-                                dl { dt { "Server version" } dd { "{version}" } dt { "Collection storage" } dd { {stats.read().as_ref().map(|s| bytes(s.size_bytes)).unwrap_or_else(|| "—".into())} } dt { "Playback" } dd { "Original audio · Browser native" } dt { "Federation" } dd { "Disabled" } }
+                                dl { dt { "Server version" } dd { "{version}" } dt { "Collection storage" } dd { {stats.read().as_ref().map(|s| bytes(s.size_bytes)).unwrap_or_else(|| "—".into())} } dt { "Playback" } dd { "Original audio · Browser native" } dt { "Signed federation" } dd { "Not implemented" } }
                                 button { class: "button secondary", onclick: move |_| { spawn_authorized(auth, async move { match mutate("POST", "/api/logout", None, &token(auth)).await { Ok(()) => { engine.peek().bind(String::new(),None); auth.set(None); invalidate_library(library); clear_catalog(catalog); tracks.set(Vec::new()); queue.set(Vec::new()); playlists.set(Vec::new()); selected_playlist.set(None); stats.set(None); jobs.set(Vec::new()); share_url.set(String::new()); page.set("home".into());  error.set(String::new()); username.set(String::new()); } Err(message) => error.set(message) } }); }, "Sign out" }
                             }
                             div { class: "panel", h2 { "Listening controls" } p { "Press Space to play or pause, and the arrow keys to seek 10 seconds. Use your device’s media controls when your browser supports them." } button { class: "button secondary", onclick: move |_| theme.set(if theme() == "dark" { "light".into() } else { "dark".into() }), if theme() == "dark" { "Switch to light theme" } else { "Switch to dark theme" } } small { "Codec support depends on your browser. Files are streamed directly without transcoding." } }
                             listening::PrivacySettings {auth,view:listening_view,collector:engine.peek().listening(),onhistory:move |_| actions.navigate.call("history".into())}
+                            div { class: "panel", h2 { "Shared by choice" } p { "Manage explicit track publications and preview public servers. Enabling a public catalog does not publish your private library." }
+                                button { class: "button secondary", onclick: move |_| actions.navigate.call("network".into()), "Open Network" }
+                            }
                             if auth.read().as_ref().is_some_and(|a| a.user.is_admin) { div { class: "panel", h2 { "Invite someone in" } p { "Create an account with its own private library. Share playlists explicitly after they sign in." }
                                     form { onsubmit: move |e| { e.prevent_default(); spawn_authorized(auth, async move { match api::<User>("POST", "/api/users", Some(json!({"username": new_user(), "password": new_password()})), &token(auth)).await { Ok(value) => { notice.set(format!("Account {} created. Share the password privately.", value.username)); new_user.set(String::new()); new_password.set(String::new()); } Err(message) => error.set(message) } }); }, label { r#for: "new-user", "New username" } input { id: "new-user", required: true, maxlength: 64, value: "{new_user}", autocomplete: "off", oninput: move |e| new_user.set(e.value()) } label { r#for: "new-password", "Initial password" } input { id: "new-password", r#type: "password", required: true, minlength: 12, value: "{new_password}", autocomplete: "new-password", oninput: move |e| new_password.set(e.value()) } button { class: "button primary", r#type: "submit", "Create account" } }
                                 } }

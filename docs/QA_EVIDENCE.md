@@ -1,3 +1,33 @@
+# Public catalog0.11 source integration
+
+Current working-tree source; immutable package acceptance is separate.200 Rust tests, strict native/all-target+WASM Clippy, release native/WASM,
+fmt,22 Python, JS syntax/diff and locked dependency policy passed.20 real clean
+restarts and4 independent worker faults passed. `target/checks/publication-*` holds
+commands/logs; the failed NUL projection run is preserved separately from corrected
+whole-workspace evidence. Source Chromium39/39 passed in2.5m, licensed live import; screenshot/evidence paths
+are in PROGRESS. No native/public-TLS/ActivityPub compatibility claim.
+
+| Feature | Exact paths | Latest verified source | Evidence command | Result | Next | Owner |
+| --- | --- | --- | --- | --- | --- | --- |
+| Origin/private publication/independent grants | core/network.rs; media/publications.rs; domain/network.rs; migration0011; server/network.rs | Working tree | cargo test --locked --workspace -- --test-threads=2:200 | PASS | Exact package/regressions | main/media |
+| Two independent origins + hostile peer | server/src/network/tests.rs | Working tree | Same Rust run: actual B HTTP preview calls actual A HTTP, Range/HEAD/revoke, slow/oversized/spoofed identity/grants/IDs | PASS for read-only profile | Standards signatures/replay/blocks remain NOT_RUN | main |
+| Controlled DNS/redirects and stream capacity | imports/egress.rs; server/network/tests.rs | Working tree | Real two-listener no-dial redirect controls, barrier cancellation retaining4DNS slots,8 public bodies drop/reserved owner capacity | PASS | Public load measurements | main/reviewers |
+| Network UI/source guards | web/network.rs; tests/browser/music.spec.mjs | Working tree | Chromium39/39 with live import, PN01/PN02; main inspected Network1440dark/320light, no overflow | PASS for source Chromium | Exact packaged two-engine runs | web/main |
+| Same-build persistent user service | scripts/install-user-service.py; tests/test_user_service.py; docs/USER_SERVICE.md | Working tree + frozen902dd47 runtime |22 Python incl13 installer; actual --replace-transient --install and --dry-run recheck | PASS | Preserve pinned upgrade process | devops/main |
+
+Independent readonly QA signed off the implemented permission/projection/peer/DNS/
+UI boundaries and checked retained logs. No release-blocking defect found; exact
+package/two-engine acceptance still follows. Private playlist sharing remains
+metadata-only even though separate public publication now has explicit audio grants.
+
+Latest mandate mapping: G01/G24 additive10→11 legacy-row and backup safeguards;
+G11 independent origin/catalog + permitted original public stream subset; G14
+bounded hostile/slow/SSRF/metadata subset (forged actors/signature replay NOT_RUN);
+G15 removal/stream-revocation subset (no federated recommendation/cache);
+G22 declaration/provenance/unknown-rights/private defaults subset. PN01/PN02 are
+new named acceptance; preserve all EXP/PLAY/PLNAV/RES/NET/AUTH/NP/PC/history/DSP
+regressions. No entire golden scenario becomes green from a partial subset.
+
 # Verified0.10 package/runtime checkpoint
 
 Application/source 902dd47f9dca2d9b6f405cd50c21bf4dab5a73d8. Exact extracted binary passed37Chromium +37Firefox

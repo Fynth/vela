@@ -411,6 +411,139 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn schema_ten_upgrade_preserves_all_private_rows_without_publishing_anything() {
+        use sqlx::{
+            Row,
+            sqlite::{SqliteConnectOptions, SqlitePoolOptions},
+        };
+        let directory = tempfile::tempdir().unwrap();
+        let legacy = tempfile::tempdir().unwrap();
+        let migrations = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../migrations");
+        for entry in std::fs::read_dir(migrations).unwrap() {
+            let entry = entry.unwrap();
+            let name = entry.file_name();
+            let name = name.to_str().unwrap();
+            if name.ends_with(".sql") && name[..4].parse::<u32>().unwrap() <= 10 {
+                std::fs::copy(entry.path(), legacy.path().join(name)).unwrap();
+            }
+        }
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(
+                SqliteConnectOptions::new()
+                    .filename(directory.path().join("vela.db"))
+                    .create_if_missing(true)
+                    .foreign_keys(true),
+            )
+            .await
+            .unwrap();
+        sqlx::migrate::Migrator::new(legacy.path())
+            .await
+            .unwrap()
+            .run(&pool)
+            .await
+            .unwrap();
+        sqlx::raw_sql("INSERT INTO users(id,username,password_hash) VALUES('owner','owner','fixture');
+            INSERT INTO media_assets(id,hash,storage_path,content_type,size_bytes) VALUES('asset','old-hash','media/original','audio/flac',1234);
+            INSERT INTO tracks(id,owner_id,media_asset_id,title,duration_ms,codec,metadata_revision) VALUES('track','owner','asset','Preserved',1000,'FLAC',3);
+            INSERT INTO playlists(id,owner_id,name,revision) VALUES('playlist','owner','Preserved list',5);
+            INSERT INTO playlist_items(id,playlist_id,track_id,position) VALUES('entry','playlist','track',42);
+            INSERT INTO listening_preferences(user_id,enabled,retention_days,revision,updated_at) VALUES('owner',1,90,7,111);
+            INSERT INTO listening_devices(user_id,device_id,enabled) VALUES('owner','device',1);
+            INSERT INTO listening_sessions(user_id,session_id,device_id,track_id,sequence,listened_ms,position_ms,started_at,updated_at,qualified,ended) VALUES('owner','session','device','track',2,1000,1000,100,111,1,1);
+            INSERT INTO audio_analysis(media_asset_id,extractor_version,status,features_json,created_at,updated_at) VALUES('asset','legacy-extractor','complete','{}',100,111);").execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO recommendation_exclusions(user_id,track_id,created_at) VALUES('owner','track',111)").execute(&pool).await.unwrap();
+        let tables = [
+            "users",
+            "media_assets",
+            "tracks",
+            "playlists",
+            "playlist_items",
+            "listening_preferences",
+            "listening_devices",
+            "listening_sessions",
+            "audio_analysis",
+            "recommendation_exclusions",
+        ];
+        let mut snapshots = Vec::new();
+        for table in tables {
+            let columns = sqlx::query(&format!("PRAGMA table_info({table})"))
+                .fetch_all(&pool)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|row| {
+                    format!(
+                        "quote(\"{}\")",
+                        row.get::<String, _>("name").replace('"', "\"\"")
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(" || '|' || ");
+            let query = format!("SELECT {columns} FROM {table} ORDER BY rowid");
+            let rows = sqlx::query_scalar::<_, String>(&query)
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+            snapshots.push((query, rows));
+        }
+        pool.close().await;
+        let upgraded = super::open(directory.path()).await.unwrap();
+        for (query, rows) in snapshots {
+            assert_eq!(
+                sqlx::query_scalar::<_, String>(&query)
+                    .fetch_all(&upgraded)
+                    .await
+                    .unwrap(),
+                rows,
+                "migration changed existing logical rows"
+            );
+        }
+        let consent: (i64, i64) = sqlx::query_as(
+            "SELECT enabled,revision FROM listening_preferences WHERE user_id='owner'",
+        )
+        .fetch_one(&upgraded)
+        .await
+        .unwrap();
+        assert_eq!(consent, (1, 7));
+        assert_eq!(
+            sqlx::query_scalar::<_, String>("SELECT title FROM tracks WHERE id='track'")
+                .fetch_one(&upgraded)
+                .await
+                .unwrap(),
+            "Preserved"
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT position FROM playlist_items WHERE id='entry'")
+                .fetch_one(&upgraded)
+                .await
+                .unwrap(),
+            42
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT count(*) FROM publications")
+                .fetch_one(&upgraded)
+                .await
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT count(*) FROM network_settings")
+                .fetch_one(&upgraded)
+                .await
+                .unwrap(),
+            0
+        );
+        assert!(
+            sqlx::query("PRAGMA foreign_key_check")
+                .fetch_all(&upgraded)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
     async fn migrations_are_repeatable_and_foreign_keys_enforced() {
         let dir = tempfile::tempdir().unwrap();
         let pool = super::open(dir.path()).await.unwrap();

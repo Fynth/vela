@@ -47,3 +47,16 @@ confirmed restore and private exclusion export. Responsive shots cover
 and logout, using its own disposable login session; no catalog replies are
 fabricated. G07 additionally verifies two actual qualified listens in Home's
 rotation. Existing fixture sessions and the production login limiter remain.
+
+
+Public catalog0.11 adds PN01/PN02 before the suite's destructive shared-session
+logout. PN01 enables only the3217 disposable fixture, uses existing generated PCM,
+checks unchecked declarations/audio grants, owner root-node playback continuity,
+metadata-only negatives, actual public Range/stream/no-download, genuine held POST
+across theme rerender, explicit revoke and unchanged private original. It restores
+fixture discovery disabled and retains audit records. PN02 checks real private-
+origin rejection, physically aborted genuine owner reads across navigation, mobile
+More and320/1440 dark/light Network screenshots. It reuses only the suite's own
+cookies, with no added login-limit exception. Independent A/B/hostile peer HTTP and
+controlled DNS/redirect cases are Rust tests; local browser preview does not claim
+public Internet TLS, a signed federation network or a unified remote queue.

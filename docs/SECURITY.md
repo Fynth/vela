@@ -36,7 +36,7 @@ Metadata parsing validates container structure/properties, not every decoded aud
 
 Private browser metadata/queue state is scoped by account but still resides in that browser's local storage. Browser/session compromise is outside server authorization protections. Query strings in download URLs may be sensitive; URLs are needed for durable retries and are stored privately, never logged or reflected in shared data. The public downloader cannot prove redistribution rights; users must use available authorized downloadable content. Commercial playlist metadata adapters and native credential storage are not implemented.
 
-There is no separate stream/download share grant yet: audio is owner-only. Named playlist viewers can see titles their owner explicitly shares; artwork may remain unauthorized and falls back to a neutral UI cover. All future federation data leaving a server must be separately opted in, signed/origin-verified, limited and authorized; private libraries must never become public merely because federation is enabled. Remote administrators/backups cannot be guaranteed to retract disclosed content.
+Private playlist sharing has no stream/download grant: those playlist entries remain owner-only. Explicit public publications use the separate0.11 policy below. Named playlist viewers can see titles their owner explicitly shares; artwork may remain unauthorized and falls back to a neutral UI cover. All future federation data leaving a server must be separately opted in, signed/origin-verified, limited and authorized; private libraries must never become public merely because federation is enabled. Remote administrators/backups cannot be guaranteed to retract disclosed content.
 
 ## Regression requirements
 
@@ -114,3 +114,49 @@ analysis is introduced. Dioxus cancels obsolete requests and checks privacy
 epoch/revision/busy, session and lifetime before rendering or acting on a mix.
 Ordinary history/catalog freshness cannot discard an unsettled feedback receipt.
 Tests and exact executed evidence are in PROGRESS/QA_EVIDENCE.
+
+
+## Explicit publication and controlled discovery0.11
+
+No upload, scan, recommendation, listening consent, collaboration or server-enable
+action implicitly creates a public record. Owner publication is an authenticated
+CSRF/Origin-protected mutation with explicit unchecked rights confirmation; the
+administrator independently controls discovery. Selected supported licenses and
+private evidence are declarations, never copyright verification. Public artwork
+is absent. Public DTO construction selects only allowlisted metadata: no owner IDs,
+paths, physical hashes, private provenance, history or taste vectors. Text is bounded,
+controls removed in public catalog projections and escaped in Dioxus; owner tags stay
+unchanged. Duration/year/grant/license bounds are enforced at both producer and peer.
+
+Serialized transactions enforce1000 retained publications per owner,10000 global,
+one active record per owner/track, composite owner foreign keys and revisioned
+revocation. Metadata access cannot authorize audio. Every new GET/HEAD/range/download
+checks current enablement and grant; revoked IDs404 even if later republished under
+a new ID. Ordinary private streams/artwork keep existing authentication. Revocation
+cannot erase delivered bytes or undo licenses already granted; stream recipients can
+retain bytes even without a separate download endpoint permission.
+
+Anonymous transfers admit at most8 inside the existing16-stream total. Body-drop
+releases both permits; owner capacity remains available under anonymous admission
+saturation. General request admission stays64. Public endpoints return no-store;
+only the exact registered well-known route passes the static allowlist.
+
+Peer preview requires authentication+CSRF and canonical HTTPS DNS origin on443,
+max2 concurrent/5s, two documents16KiB/128KiB, max20 records. Every request/redirect
+validates all DNS addresses, pins actual dialing, rejects special/private targets
+and cross-origin/downgrade redirects, and sends no ambient proxies/cookies/auth/
+referrer. Global4-slot DNS admission is held inside the real blocking resolver even
+if its caller cancels. A stalled OS resolver cannot be forcibly stopped; admission
+remains occupied until it finishes. HTTP futures cancel on timeout. No production
+private-network escape flag exists. Test hostname pins are cfg(test)-only.
+
+The current read-only profile has no signed activity/inbox/cache. Peer origin+ID is
+remote identity scope; a claimed UUID is not trusted global identity. Full signature,
+replay, blocklist, social delivery and Internet interoperability acceptance remain
+unfinished. A local two-server fixture is not a public deployment or license proof.
+
+The user-service installer verifies same-user frozen binaries/assets and exact
+source migration checksums before touching supervision. No symlink/control paths,
+unrelated/drop-in services or schema upgrades are accepted. Private unit write,
+readiness and previous-unit rollback are tested separately from actual installation;
+user-manager start behavior is not reboot/logout/device validation.

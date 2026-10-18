@@ -1,5 +1,6 @@
 mod analysis;
 mod listening;
+mod network;
 mod recommendations;
 mod upload_guard;
 use axum::{
@@ -46,10 +47,13 @@ pub struct AppState {
     pub playlists: PlaylistService,
     pub listening: vela_core::listening::ListeningService,
     pub analysis: vela_media::analysis_service::AnalysisService,
+    pub network: vela_core::network::NetworkService,
+    peers: network::PeerClient,
     pub config: Config,
     pub shutdown: tokio_util::sync::CancellationToken,
     uploads: Arc<Semaphore>,
     streams: Arc<Semaphore>,
+    public_streams: Arc<Semaphore>,
     requests: Arc<Semaphore>,
     login_limit: Arc<Mutex<LoginLimiter>>,
     _data_lock: Arc<vela_core::database::DataLock>,
@@ -141,7 +145,10 @@ impl AppState {
             max_storage_bytes: config.max_storage_bytes,
             ..Default::default()
         });
+        let network = vela_core::network::NetworkService::initialize(pool.clone()).await?;
         Ok(Self {
+            network,
+            peers: network::PeerClient::default(),
             analysis: vela_media::analysis_service::AnalysisService::new(
                 pool.clone(),
                 media.clone(),
@@ -158,6 +165,7 @@ impl AppState {
             shutdown: tokio_util::sync::CancellationToken::new(),
             uploads: Arc::new(Semaphore::new(2)),
             streams: Arc::new(Semaphore::new(16)),
+            public_streams: Arc::new(Semaphore::new(8)),
             requests: Arc::new(Semaphore::new(64)),
             login_limit: Arc::new(Mutex::new(LoginLimiter::new())),
             _data_lock: data_lock,
@@ -273,6 +281,11 @@ async fn protection(State(state): State<AppState>, req: Request, next: Next) -> 
             .get::<axum::extract::MatchedPath>()
             .is_some())
         && path != "/health"
+        && !(path == "/.well-known/vela"
+            && req
+                .extensions()
+                .get::<axum::extract::MatchedPath>()
+                .is_some())
         && !frontend_asset
     {
         return HttpError(StatusCode::NOT_FOUND, "Not found".into()).into_response();
@@ -353,6 +366,7 @@ pub fn router(state: AppState) -> Router {
         .merge(listening::routes())
         .merge(analysis::routes())
         .merge(recommendations::routes())
+        .merge(network::routes())
         .route("/api/users", post(create_user))
         .route("/api/tracks", get(tracks))
         .route("/api/albums", get(albums))
@@ -914,6 +928,26 @@ async fn stream(
         .asset(&auth.response.user.id, &id)
         .await?
         .ok_or(HttpError(StatusCode::NOT_FOUND, "Track not found".into()))?;
+    serve_asset(&s, asset, method, headers, false).await
+}
+async fn serve_asset(
+    s: &AppState,
+    asset: vela_media::MediaAsset,
+    method: Method,
+    headers: HeaderMap,
+    public: bool,
+) -> Result<Response> {
+    // Anonymous transfers cannot consume the entire authenticated streaming budget.
+    let public_permit = if public {
+        Some(s.public_streams.clone().try_acquire_owned().map_err(|_| {
+            HttpError(
+                StatusCode::TOO_MANY_REQUESTS,
+                "Public stream limit reached".into(),
+            )
+        })?)
+    } else {
+        None
+    };
     let permit = s
         .streams
         .clone()
@@ -971,10 +1005,15 @@ async fn stream(
     let len = end - start + 1;
     // The stream state owns the semaphore permit until the body completes or is dropped.
     let reader = ReaderStream::with_capacity(file.take(len), 64 * 1024);
-    let stream =
-        futures_util::stream::unfold((reader, permit), |(mut reader, permit)| async move {
-            reader.next().await.map(|chunk| (chunk, (reader, permit)))
-        });
+    let stream = futures_util::stream::unfold(
+        (reader, permit, public_permit),
+        |(mut reader, permit, public_permit)| async move {
+            reader
+                .next()
+                .await
+                .map(|chunk| (chunk, (reader, permit, public_permit)))
+        },
+    );
     let mut response = Response::new(Body::from_stream(stream));
     *response.status_mut() = status;
     let h = response.headers_mut();

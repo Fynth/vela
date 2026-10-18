@@ -4,6 +4,7 @@ pub mod config;
 pub mod database;
 pub mod jobs;
 pub mod listening;
+pub mod network;
 pub mod playlists;
 
 use thiserror::Error;

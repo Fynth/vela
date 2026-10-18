@@ -1784,6 +1784,237 @@ test('AUTH01 real revoked session stops the source and clears private playback U
   expect(errors).toEqual([]);
 });
 
+test('PN01 explicit publication separates private playback, metadata, streaming and revocation', async ({page,browser}) => {
+  test.setTimeout(90000);
+  const errors=[];page.on('pageerror',error=>errors.push(error.message));
+  await openAdminFixture(page);
+  // The suite owns this disposable loopback server. Never enable a real origin.
+  expect(new URL(page.url()).origin).toBe('http://127.0.0.1:3217');
+  const me=await(await page.request.get('/api/me')).json();
+  const headers={'X-CSRF-Token':me.csrf_token};
+  const original=await(await page.request.get('/api/network/settings')).json();
+  expect(original.enabled).toBe(false);expect(original.origin).toBeNull();
+  expect((await(await page.request.get('/api/publications?limit=20')).json()).items).toEqual([]);
+  const library=(await(await page.request.get('/api/tracks?limit=100')).json()).items;
+  // Long WAVs in this suite are generated PCM, never the optional licensed import.
+  const track=library.find(item=>item.codec==='WAV audio'&&item.duration_ms>=20000);
+  expect(track).toBeDefined();
+  const privateBefore=JSON.stringify(track);
+  await page.locator('#vela-audio').evaluate(audio=>{window.publicationAudioNode=audio;});
+  const anonymous=await browser.newContext();
+  const publicUrl=path=>new URL(path,page.url()).href;
+  const anonymousGet=(path,options)=>anonymous.request.get(publicUrl(path),options);
+  const created=[];
+  try {
+    expect((await anonymousGet('/api/public/catalog')).status()).toBe(404);
+    expect((await anonymousGet('/.well-known/vela')).status()).toBe(404);
+    await navigate(page,'Network');
+    const network=page.getByRole('region',{name:'Network',exact:true});
+    await expect(network.getByTestId('network-enabled-state')).toHaveText('Public catalog disabled');
+    await expect(network.getByLabel('Enable public catalog',{exact:true})).not.toBeChecked();
+    await expect(network.getByLabel('Confirm publication rights',{exact:true})).not.toBeChecked();
+    await expect(network.getByLabel('Allow public streaming',{exact:true})).not.toBeChecked();
+    await expect(network.getByLabel('Allow public downloads',{exact:true})).not.toBeChecked();
+    await expect(network.getByLabel('Allow public downloads',{exact:true})).toBeDisabled();
+    await expect(network.getByRole('button',{name:'Create publication',exact:true})).toBeDisabled();
+    await network.getByLabel('Public server name',{exact:true}).fill('Vela isolated browser rights fixture');
+    await network.getByLabel('Public HTTPS origin',{exact:true}).fill('https://music.example.org');
+    await network.getByLabel('Enable public catalog',{exact:true}).check();
+    const saved=page.waitForResponse(response=>new URL(response.url()).pathname==='/api/network/settings'&&response.request().method()==='PUT');
+    await network.getByRole('button',{name:'Save public catalog settings',exact:true}).click();
+    const enabled=await saved;expect(enabled.ok()).toBeTruthy();
+    expect((await enabled.json()).revision).toBe(original.revision+1);
+    await expect(network.getByTestId('network-enabled-state')).toHaveText('Public catalog enabled');
+    const emptyCatalog=await(await anonymousGet('/api/public/catalog')).json();
+    expect(emptyCatalog.origin).toBe('https://music.example.org');expect(emptyCatalog.items).toEqual([]);
+    expect((await(await page.request.get('/api/publications?limit=20')).json()).items).toEqual([]);
+
+    const selectTrack=async()=>{
+      await network.getByLabel('Search your tracks',{exact:true}).fill(track.title);
+      await network.getByRole('button',{name:'Find my tracks',exact:true}).click();
+      const choice=network.locator(`.network-track-choice[data-track-id="${track.id}"]`);
+      await expect(choice).toBeVisible();await choice.click();
+      await expect(network.getByTestId('publication-selected-track')).toContainText(track.title);
+    };
+    const fillDeclaration=async()=>{
+      await network.getByLabel('Declared public license',{exact:true}).selectOption('CC-BY-4.0');
+      await network.getByLabel('Public attribution',{exact:true}).fill(`${track.title} — generated PCM by the Vela project, browser rights fixture`);
+      await network.getByLabel('Rights evidence HTTPS URL',{exact:true}).fill('https://example.org/vela-generated-pcm-license');
+      await expect(network.getByLabel('Confirm publication rights',{exact:true})).not.toBeChecked();
+      await expect(network.getByRole('button',{name:'Create publication',exact:true})).toBeDisabled();
+    };
+    await selectTrack();await fillDeclaration();
+    await network.getByLabel('Allow public streaming',{exact:true}).check();
+    await expect(network.getByLabel('Allow public downloads',{exact:true})).toBeEnabled();
+    await network.getByLabel('Allow public downloads',{exact:true}).check();
+    await network.getByLabel('Allow public streaming',{exact:true}).uncheck();
+    await expect(network.getByLabel('Allow public downloads',{exact:true})).not.toBeChecked();
+    await expect(network.getByLabel('Allow public downloads',{exact:true})).toBeDisabled();
+    await network.getByRole('button',{name:`Play my original ${track.title}`,exact:true}).click();
+    await expect.poll(()=>page.locator('#vela-audio').evaluate(audio=>!audio.paused&&audio.currentTime>0&&audio.error===null)).toBeTruthy();
+    expect(await page.locator('#vela-audio').evaluate(audio=>audio===window.publicationAudioNode)).toBeTruthy();
+    await expect(page.locator('audio')).toHaveCount(1);
+    await expect(page.locator('#vela-audio')).toHaveAttribute('src',new RegExp(`/api/tracks/${track.id}/stream`));
+    await page.getByRole('button',{name:'Pause',exact:true}).click();
+    const source=await page.locator('#vela-audio').getAttribute('src');
+    await network.getByLabel('Confirm publication rights',{exact:true}).check();
+    const metadataResponse=page.waitForResponse(response=>new URL(response.url()).pathname==='/api/publications'&&response.request().method()==='POST');
+    await network.getByRole('button',{name:'Create publication',exact:true}).click();
+    const metadataReply=await metadataResponse;expect(metadataReply.ok()).toBeTruthy();
+    const metadata=await metadataReply.json();created.push(metadata.id);
+    expect(metadata.track.id).toBe(track.id);expect(metadata.id).not.toBe(track.id);
+    expect(metadata.allow_stream).toBe(false);expect(metadata.allow_download).toBe(false);
+    const record=network.locator(`[data-publication-id="${metadata.id}"]`);
+    await expect(record).toBeVisible();await expect(record).toContainText('Metadata only');
+    await expect(network.getByLabel('Confirm publication rights',{exact:true})).not.toBeChecked();
+    const publicMetadata=await(await anonymousGet(`/api/public/catalog/${metadata.id}`)).json();
+    expect(publicMetadata.title).toBe(track.title);expect(publicMetadata.license).toBe('CC-BY-4.0');
+    expect(publicMetadata.can_stream).toBe(false);expect(publicMetadata.can_download).toBe(false);
+    const publicText=JSON.stringify(publicMetadata);
+    expect(publicText).not.toContain(track.id);expect(publicText).not.toContain('rights_evidence');expect(publicText).not.toContain('asset_id');expect(publicText).not.toContain('owner_id');
+    expect((await anonymousGet(`/api/public/media/${metadata.id}/stream`)).status()).toBe(404);
+    expect((await anonymousGet(`/api/public/media/${metadata.id}/download`)).status()).toBe(404);
+    expect((await anonymousGet(`/api/tracks/${track.id}/stream`)).status()).toBe(401);
+    expect(await page.locator('#vela-audio').getAttribute('src')).toBe(source);
+
+    await record.getByRole('button',{name:`Revoke publication ${track.title}`,exact:true}).click();
+    const confirmation=network.getByRole('group',{name:'Confirm publication revocation',exact:true});
+    await confirmation.getByRole('button',{name:'Keep publication',exact:true}).click();
+    expect((await anonymousGet(`/api/public/catalog/${metadata.id}`)).ok()).toBeTruthy();
+    await record.getByRole('button',{name:`Revoke publication ${track.title}`,exact:true}).click();
+    const revokedMetadata=page.waitForResponse(response=>new URL(response.url()).pathname===`/api/publications/${metadata.id}/revoke`);
+    await confirmation.getByRole('button',{name:'Confirm revoke publication',exact:true}).click();
+    expect((await revokedMetadata).ok()).toBeTruthy();
+    await expect(network.locator(`[data-publication-id="${metadata.id}"] .network-status`)).toHaveText('Revoked');
+    expect((await anonymousGet(`/api/public/catalog/${metadata.id}`)).status()).toBe(404);
+
+    await selectTrack();await fillDeclaration();
+    await network.getByLabel('Confirm publication rights',{exact:true}).check();
+    await network.getByLabel('Allow public streaming',{exact:true}).check();
+    await expect(network.getByLabel('Confirm publication rights',{exact:true})).not.toBeChecked();
+    await expect(network.getByLabel('Allow public downloads',{exact:true})).not.toBeChecked();
+    await network.getByLabel('Confirm publication rights',{exact:true}).check();
+    // Hold an actual committed POST while a root theme update rerenders the page.
+    let release;const gate=new Promise(resolve=>release=resolve);let held=false,delivered=false;
+    const handler=async route=>{
+      if(route.request().method()!=='POST'){await route.continue();return;}
+      const response=await route.fetch({timeout:3000});expect(response.ok()).toBeTruthy();held=true;
+      await gate;await route.fulfill({response});delivered=true;
+    };
+    await page.route('**/api/publications',handler);
+    let streamed;
+    try{
+      const streamedReply=page.waitForResponse(response=>new URL(response.url()).pathname==='/api/publications'&&response.request().method()==='POST');
+      await network.getByRole('button',{name:'Create publication',exact:true}).click();
+      await expect.poll(()=>held,{timeout:3000}).toBeTruthy();
+      await expect(network.getByRole('button',{name:'Refresh publications',exact:true})).toBeDisabled();
+      await page.getByRole('button',{name:'Change color theme',exact:true}).click();
+      release();const response=await streamedReply;expect(response.ok()).toBeTruthy();
+      streamed=await response.json();created.push(streamed.id);
+      await expect.poll(()=>delivered,{timeout:3000}).toBeTruthy();
+    }finally{release();await page.unroute('**/api/publications',handler);}
+    expect(streamed.id).not.toBe(metadata.id);expect(streamed.allow_stream).toBe(true);expect(streamed.allow_download).toBe(false);
+    const streamingRecord=network.locator(`[data-publication-id="${streamed.id}"]`);
+    await expect(streamingRecord).toContainText('Streaming only');
+    const range=await anonymousGet(`/api/public/media/${streamed.id}/stream`,{headers:{Range:'bytes=0-31'}});
+    expect(range.status()).toBe(206);expect((await range.body()).length).toBe(32);
+    expect((await anonymousGet(`/api/public/media/${streamed.id}/download`)).status()).toBe(404);
+    const catalog=await(await anonymousGet('/api/public/catalog')).json();
+    expect(catalog.items.map(item=>item.id)).toEqual([streamed.id]);
+    expect(catalog.items[0].can_stream).toBe(true);expect(catalog.items[0].can_download).toBe(false);
+    await streamingRecord.getByRole('button',{name:`Revoke publication ${track.title}`,exact:true}).click();
+    const revokedStream=page.waitForResponse(response=>new URL(response.url()).pathname===`/api/publications/${streamed.id}/revoke`);
+    await confirmation.getByRole('button',{name:'Confirm revoke publication',exact:true}).click();
+    expect((await revokedStream).ok()).toBeTruthy();
+    await expect(network.locator(`[data-publication-id="${streamed.id}"] .network-status`)).toHaveText('Revoked');
+    for(const suffix of ['catalog/'+streamed.id,'media/'+streamed.id+'/stream','media/'+streamed.id+'/download']) {
+      expect((await anonymousGet('/api/public/'+suffix)).status()).toBe(404);
+    }
+    expect((await(await anonymousGet('/api/public/catalog')).json()).items).toEqual([]);
+    const latest=(await(await page.request.get('/api/tracks?limit=100')).json()).items.find(item=>item.id===track.id);
+    expect(JSON.stringify(latest)).toBe(privateBefore);
+    expect(await page.locator('#vela-audio').evaluate(audio=>audio===window.publicationAudioNode)).toBeTruthy();
+    expect(await page.locator('#vela-audio').getAttribute('src')).toBe(source);
+    await network.getByLabel('Enable public catalog',{exact:true}).uncheck();
+    const disabled=page.waitForResponse(response=>new URL(response.url()).pathname==='/api/network/settings'&&response.request().method()==='PUT');
+    await network.getByRole('button',{name:'Save public catalog settings',exact:true}).click();
+    expect((await disabled).ok()).toBeTruthy();
+    await expect(network.getByTestId('network-enabled-state')).toHaveText('Public catalog disabled');
+    expect((await anonymousGet('/api/public/catalog')).status()).toBe(404);
+    expect(errors).toEqual([]);
+  }finally{
+    // Restore only the disposable fixture's server policy, retaining audit records.
+    const owned=await(await page.request.get('/api/publications?limit=100')).json();
+    for(const record of owned.items.filter(item=>(created.includes(item.id)||item.rights_evidence==='https://example.org/vela-generated-pcm-license')&&item.revoked_at===null)) {
+      expect((await page.request.post(`/api/publications/${record.id}/revoke`,{headers,data:{revision:record.revision}})).ok()).toBeTruthy();
+    }
+    const current=await(await page.request.get('/api/network/settings')).json();
+    expect((await page.request.put('/api/network/settings',{headers,data:{revision:current.revision,enabled:false,origin:original.origin||'',name:original.name}})).ok()).toBeTruthy();
+    await anonymous.close();
+  }
+});
+
+test('PN02 public preview rejects private origins and obsolete publication reads stay cancelled across responsive navigation',async({page})=>{
+  const errors=[];page.on('pageerror',error=>errors.push(error.message));
+  await openAdminFixture(page);
+  expect(new URL(page.url()).origin).toBe('http://127.0.0.1:3217');
+  await navigate(page,'Network');
+  const network=page.getByRole('region',{name:'Network',exact:true});
+  await expect(network.getByTestId('network-enabled-state')).toHaveText('Public catalog disabled');
+  const preview=network.getByRole('region',{name:'Preview a public server',exact:true});
+  await preview.getByLabel('Public server HTTPS origin',{exact:true}).fill('https://127.0.0.1');
+  const denied=page.waitForResponse(response=>new URL(response.url()).pathname==='/api/network/preview'&&response.request().method()==='POST');
+  await preview.getByRole('button',{name:'Preview public server',exact:true}).click();
+  expect((await denied).status()).toBe(400);
+  await expect(preview.getByRole('alert')).toBeVisible();
+  await expect(preview.getByTestId('network-peer-result')).toHaveCount(0);
+  await expect(preview.getByRole('link',{name:/Open public stream|Open public download/})).toHaveCount(0);
+  await preview.getByLabel('Public server HTTPS origin',{exact:true}).fill('http://127.0.0.1:3217');
+  await preview.getByRole('button',{name:'Preview public server',exact:true}).click();
+  await expect(preview.getByRole('alert')).toContainText('public HTTPS origin');
+  // Take a real owned-record read, hold its delivery, then physically leave its page.
+  let release;const gate=new Promise(resolve=>release=resolve);let held=false,active=0;
+  const handler=async route=>{
+    active++;
+    try{
+      const response=await route.fetch({timeout:3000});expect(response.ok()).toBeTruthy();held=true;
+      await gate;try{await route.fulfill({response});}catch{/* Teardown aborts the real obsolete read. */}
+    }finally{active--;}
+  };
+  await page.route('**/api/publications?*',handler);
+  try{
+    await network.getByRole('button',{name:'Refresh publications',exact:true}).click();
+    await expect.poll(()=>held,{timeout:3000}).toBeTruthy();
+    const aborted=page.waitForEvent('requestfailed',{predicate:request=>new URL(request.url()).pathname==='/api/publications'});
+    await navigate(page,'Search');await aborted;
+    release();await expect.poll(()=>active,{timeout:3000}).toBe(0);
+    await expect(page.getByRole('region',{name:'Network',exact:true})).toHaveCount(0);
+    await expect(page.locator('#global-search')).toBeVisible();
+  }finally{release();await page.unroute('**/api/publications?*',handler);}
+  await navigate(page,'Network');
+  await expect(network.getByTestId('network-enabled-state')).toHaveText('Public catalog disabled');
+  const owned=await(await page.request.get('/api/publications?limit=20')).json();
+  expect(owned.items.length).toBeGreaterThanOrEqual(2);
+  expect(owned.items.every(record=>record.revoked_at!==null)).toBeTruthy();
+  await expect(network.locator('[data-publication-id]')).toHaveCount(owned.items.length);
+  await page.addStyleTag({content:'*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}'});
+  for(const [width,theme] of [320,1440].flatMap(width=>['dark','light'].map(theme=>[width,theme]))) {
+    await page.setViewportSize({width,height:900});
+    await page.locator('html').evaluate((element,value)=>element.setAttribute('data-theme',value),theme);
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBeTruthy();
+    await network.locator('.network-hero').scrollIntoViewIfNeeded();
+    await page.screenshot({path:`test-results/network-${width}-${theme}.png`,animations:'disabled'});
+    if(width===320){
+      await navigate(page,'Settings');await navigate(page,'Network');
+      await expect(network.getByTestId('network-enabled-state')).toHaveText('Public catalog disabled');
+      await network.locator('.network-publication-form').scrollIntoViewIfNeeded();
+      expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBeTruthy();
+      await page.screenshot({path:`test-results/network-publication-${width}-${theme}.png`,animations:'disabled'});
+    }
+  }
+  expect(errors).toEqual([]);
+});
+
 test('private job replies cannot reappear after logout and another account signs in', async ({ page }) => {
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));

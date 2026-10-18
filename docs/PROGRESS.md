@@ -1,5 +1,66 @@
 # Verified progress
 
+## Public catalog0.11.0 — verified source before packaging (2026-10-18)
+
+Started clean main8abba45/application902dd47, original frozen0.10 unit PID34675,
+schema10/quick_check ok/FK0/20 tracks and20 analysis rows. Fresh private0600
+before-publication-20261018T062341Z.tar.gz restored into a separate disposable
+directory before additive0011; see publication-backup.json. No original music
+was published, copied away, reset or deleted. Three actual specialist agents
+implemented media policy/tests, Network UI/browser acceptance, and a validated
+user-service installer; main owns contracts/schema/HTTP/review/build integration,
+max2 compilerjobs. The media agent independently reviewed network security and
+implemented a bounded DNS correction; the installer agent added redirect tests.
+
+Source implements stable optional origin identity, explicit owner license/private
+provenance declarations, metadata/stream/download grants, retained CAS revocation,
+redacted bounded public catalog, authorized Range/HEAD/download and bounded HTTPS
+peer preview. Real independent A/B Axum HTTP plus hostile/slow peer tests run under
+production-absent exact fixture routing. This is read-only profile1, not ActivityPub,
+HTTP signatures, a public directory, native clients or a unified remote queue.
+Dioxus Network uses the existing root audio only for private original preview;
+remote links reflect actual public grants. Rights/stream/download default false.
+
+Current executed source gates:200 Rust tests, strict native/all-target and WASM
+Clippy, fmt, native release and WASM builds;22 Python tests incl13 installer,
+JS syntax/diff and locked dependency policy passed.20 real clean SIGTERM/restarts
+and4 independent worker infrastructure faults passed. Existing6 metadata-only
+license notices remain. Evidence: publication-rust-corrected.log,
+publication-final-clippy.log, publication-wasm-clippy.log, publication-native.log,
+publication-web.log, publication-final-python.log, publication-deny.log,
+publication-shutdown.log and publication-notices.log under target/checks/.
+
+The first full projection test failed because SQLite substr(TEXT) terminates at
+embedded NUL. Bounded BLOB extraction + safe UTF8/control projection fixed the
+actual bug while preserving the failing assertion and private owner tags; the
+corrected complete200-test run passes. Failed publication-final-rust.log is kept.
+Review also caught/fixed the exact discovery route's protection allowlist, disabled
+malformed-query responses, unrelated/backward peer cursors and real blocking DNS
+admission after cancellation. No production private-network escape was added.
+
+Actual same-build local-service handover passed against frozen0.10/original data.
+Unit is now persistent/enabled, Transientno, active/running PID46997,0restarts;
+private prior configuration retained in the user's unit directory. Install/dry-run/
+recheck and schema10 row fingerprints are in publication-service-*. Original data
+still has1user/20tracks/assets/20analysis, no consent/events/exclusions/publications.
+No root/linger/public bind was enabled. Starts with the existing user manager,
+normally login; reboot/logout behavior was not executed or claimed.
+
+Independent QA reviewed cross-system DTO/migration/owner/grant/revoke/peer/DNS/UI
+boundaries and found no blocking permission, data-loss or stale-response defect;
+its historical private-playlist documentation correction was applied.
+
+Source Chromium39/39 passed in2.5m with the licensed live import, real PN01/PN02,
+root playback and all prior privacy/order/recovery regressions. Main inspected
+Network desktop dark and320px phone light screenshots; no overflow was observed
+in the automated theme/viewport checks. Evidence: publication-chromium.log and
+publication-source-chromium-screens. Next commit coherent source, package frozen native/source artifacts,
+test exact package Chromium/Firefox and fresh backup/restore before original10→11
+upgrade. Keep public catalog and listening consent disabled on original data.
+Full signed social federation, saved multi-server playback, native Linux/Android/
+Apple clients/offline/handoff/rooms and scheduled/calibrated mixes remain unfinished.
+No complete-roadmap or work-outside-active-execution claim is made.
+
 ## Verified0.10.0 package and preserved original-data upgrade (2026-10-18)
 
 Application/source checkpoint 902dd47f9dca2d9b6f405cd50c21bf4dab5a73d8. Clean native/source archives target/releases/vela-0.10.0-{x86_64-unknown-linux-gnu,source}.tar.gz and SHA256SUMS are preserved locally, never externally published. Extracted default startup/setup/schema10/HTML/WASM/CSS/SIGTERM checks passed; all preserved prior release manifests passed too. Frozen binary SHA256 d5a3d3828a41182267edf69b6c471afc07d920a5aa44eee63efc1e223b660e8c; all9 binary/static hashes match the archive AND built files before/after both browser runs. Highest required GLIBC symbol2.34; only this Linux x86_64 host runtime is validated. Six established metadata-only notices remain, no new dependency or runtime advisory exception.

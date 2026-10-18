@@ -6,6 +6,8 @@ mod listening;
 pub use listening::*;
 mod recommendations;
 pub use recommendations::*;
+mod network;
+pub use network::*;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
