@@ -1,6 +1,6 @@
 # Verified progress
 
-## Web sleep timer0.12 — verified browser increment (2026-10-18)
+## Web sleep timer0.12 — verified browser increment (2026-10-18, `49b7d8c`)
 
 A root-owned sleep timer is available from the playback queue: 5/15/30/60 minutes,
 a visible countdown, and explicit cancel. It uses a generation-guarded one-second
