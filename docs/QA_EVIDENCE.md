@@ -1,6 +1,24 @@
+# Verified0.11 package/runtime checkpoint
+
+Source/application `fe0484d62f1a2ae33a8c25ee901d4ed6b9568f06`.
+
+| Feature | Exact paths | Verified source | Executed evidence | Result | Next | Owner |
+| --- | --- | --- | --- | --- | --- | --- |
+| Explicit publication/grants/revocation/peer policy | crates/domain/src/network.rs; crates/core/src/network.rs; crates/media/src/publications.rs; apps/server/src/network.rs; migrations/0011_explicit_publications.sql | fe0484d | Rust200; strict native+WASM; API owner/CSRF/CAS; two real independent origins + hostile/slow peer; DNS/redirect/capacity and legacy10 preservation | PASS for profile1 | Full signed federation/adapters remain unfinished | main/media/QA |
+| Actual Dioxus Network/root-player workflows | apps/web/src/network.rs; tests/browser/music.spec.mjs | fe0484d exact package | Chromium39/Firefox39 with licensed live import, PN01/PN02, all prior regressions; screenshots/physical abort/actual Range/revoke | PASS for web scope | Native/Safari/screen-reader/Internet TLS NOT_RUN | web/main |
+| Frozen release integrity/defaults/recovery | scripts/package-release.sh; scripts/verify_package.py; scripts/verify_shutdown.py | fe0484d | Extracted schema11/default-private/assets/SIGTERM;19 matching binary/static hashes; retained release SHA checks;20 restarts+4faults | PASS | Docker/ARM64 platform validation unavailable | main |
+| Original data and persistent supervision | scripts/backup.py; scripts/install-user-service.py; tests/test_user_service.py; data/ | fe0484d | Fresh stopped backup/isolated restore/all old SQL rows+media preserved; original10→11;22Python; actual unit installation/recheck, enabled/PID78464/0restarts | PASS | No boot/logout/native-audio inference | devops/main |
+
+All exact commands/evidence paths, unexecuted scope and current original-data
+counts are in PROGRESS. One listening preference/device record existed before
+the final backup; private consent values are identical before/after migration,
+with0sessions. New public catalog remains disabled with0publications. G01/G24
+are verified to this original-data upgrade scope; G11/G14/G15/G22 remain the
+specific read-only/rights subsets below, not full federation golden acceptance.
+
 # Public catalog0.11 source integration
 
-Current working-tree source; immutable package acceptance is separate.200 Rust tests, strict native/all-target+WASM Clippy, release native/WASM,
+Historical source gate before the exact package checks above.200 Rust tests, strict native/all-target+WASM Clippy, release native/WASM,
 fmt,22 Python, JS syntax/diff and locked dependency policy passed.20 real clean
 restarts and4 independent worker faults passed. `target/checks/publication-*` holds
 commands/logs; the failed NUL projection run is preserved separately from corrected
@@ -9,11 +27,11 @@ are in PROGRESS. No native/public-TLS/ActivityPub compatibility claim.
 
 | Feature | Exact paths | Latest verified source | Evidence command | Result | Next | Owner |
 | --- | --- | --- | --- | --- | --- | --- |
-| Origin/private publication/independent grants | core/network.rs; media/publications.rs; domain/network.rs; migration0011; server/network.rs | Working tree | cargo test --locked --workspace -- --test-threads=2:200 | PASS | Exact package/regressions | main/media |
-| Two independent origins + hostile peer | server/src/network/tests.rs | Working tree | Same Rust run: actual B HTTP preview calls actual A HTTP, Range/HEAD/revoke, slow/oversized/spoofed identity/grants/IDs | PASS for read-only profile | Standards signatures/replay/blocks remain NOT_RUN | main |
-| Controlled DNS/redirects and stream capacity | imports/egress.rs; server/network/tests.rs | Working tree | Real two-listener no-dial redirect controls, barrier cancellation retaining4DNS slots,8 public bodies drop/reserved owner capacity | PASS | Public load measurements | main/reviewers |
-| Network UI/source guards | web/network.rs; tests/browser/music.spec.mjs | Working tree | Chromium39/39 with live import, PN01/PN02; main inspected Network1440dark/320light, no overflow | PASS for source Chromium | Exact packaged two-engine runs | web/main |
-| Same-build persistent user service | scripts/install-user-service.py; tests/test_user_service.py; docs/USER_SERVICE.md | Working tree + frozen902dd47 runtime |22 Python incl13 installer; actual --replace-transient --install and --dry-run recheck | PASS | Preserve pinned upgrade process | devops/main |
+| Origin/private publication/independent grants | core/network.rs; media/publications.rs; domain/network.rs; migration0011; server/network.rs | fe0484d | cargo test --locked --workspace -- --test-threads=2:200 | PASS | Exact package/regressions | main/media |
+| Two independent origins + hostile peer | server/src/network/tests.rs | fe0484d | Same Rust run: actual B HTTP preview calls actual A HTTP, Range/HEAD/revoke, slow/oversized/spoofed identity/grants/IDs | PASS for read-only profile | Standards signatures/replay/blocks remain NOT_RUN | main |
+| Controlled DNS/redirects and stream capacity | imports/egress.rs; server/network/tests.rs | fe0484d | Real two-listener no-dial redirect controls, barrier cancellation retaining4DNS slots,8 public bodies drop/reserved owner capacity | PASS | Public load measurements | main/reviewers |
+| Network UI/source guards | web/network.rs; tests/browser/music.spec.mjs | fe0484d | Chromium39/39 with live import, PN01/PN02; main inspected Network1440dark/320light, no overflow | PASS for source Chromium | Exact packaged two-engine runs | web/main |
+| Same-build persistent user service | scripts/install-user-service.py; tests/test_user_service.py; docs/USER_SERVICE.md | fe0484d + frozen902dd47 runtime |22 Python incl13 installer; actual --replace-transient --install and --dry-run recheck | PASS | Preserve pinned upgrade process | devops/main |
 
 Independent readonly QA signed off the implemented permission/projection/peer/DNS/
 UI boundaries and checked retained logs. No release-blocking defect found; exact

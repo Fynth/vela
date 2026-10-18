@@ -23,11 +23,11 @@ review package.
 
 ```bash
 python3 scripts/install-user-service.py \
-  --runtime-dir target/runtime/vela-0.10.0 \
+  --runtime-dir target/runtime/vela-0.11.0 \
   --data-dir data \
-  --archive target/releases/vela-0.10.0-x86_64-unknown-linux-gnu.tar.gz \
-  --source-archive target/releases/vela-0.10.0-source.tar.gz \
-  --checksums target/releases/vela-0.10.0-SHA256SUMS \
+  --archive target/releases/vela-0.11.0-x86_64-unknown-linux-gnu.tar.gz \
+  --source-archive target/releases/vela-0.11.0-source.tar.gz \
+  --checksums target/releases/vela-0.11.0-SHA256SUMS \
   --replace-transient --dry-run --print-unit
 ```
 

@@ -1,11 +1,11 @@
 # Platform evidence
 
-Inspected2026-10-17. A native server executable is not a desktop music client. Status applies only to the stated scope. COMPILES, RUNS, FUNCTIONAL_TESTED and HARDWARE_VERIFIED require separate evidence; RELEASE_READY is not inferred from any one of them.
+Updated2026-10-18. A native server executable is not a desktop music client. Status applies only to the stated scope. COMPILES, RUNS, FUNCTIONAL_TESTED and HARDWARE_VERIFIED require separate evidence; RELEASE_READY is not inferred from any one of them.
 
 | Target | Actual implementation | Latest established evidence | Status / remaining work |
 | --- | --- | --- | --- |
-| Linux x86_64 server | Axum/SQLite/native binary | Frozen0.10.0 source902dd47/user runtime, schema10, original20-track/20analysis rows, verified backup/restore | FUNCTIONAL_TESTED for documented server scope |
-| Web Chromium / Firefox Linux | Dioxus WASM, one HTMLMediaElement, Media Session |0.10 exact package:37 scenarios in each engine; personal exploration/rotation/feedback, history/radio and original player regressions | FUNCTIONAL_TESTED for documented scenarios; physical sound/background/Safari unverified |
+| Linux x86_64 server | Axum/SQLite/native binary | Frozen0.11.0 sourcefe0484d/persistent enabled user runtime, schema11, original20-track/20analysis rows, verified stopped backup/restore | FUNCTIONAL_TESTED for documented server scope |
+| Web Chromium / Firefox Linux | Dioxus WASM, one HTMLMediaElement, Media Session |0.11 exact package:39 scenarios per engine; explicit publication/rights UI, personal mixes/history/radio and original player regressions | FUNCTIONAL_TESTED for documented scenarios; physical sound/background/Safari unverified |
 | Linux desktop client | None yet | GTK3.24.52, WebKitGTK2.54.1, ALSA1.2.16.1 available; dx absent | NOT_STARTED; select native audio backend, Dioxus desktop feature separation, MPRIS, packaging and actual playback |
 | Windows desktop | None | No Windows target/runner available | NOT_STARTED; native engine/SMTC and Windows build/runtime required |
 | macOS desktop | None | No Apple host/Xcode | BLOCKED for Apple compilation/runtime; shared-contract work remains possible |

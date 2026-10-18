@@ -6,6 +6,10 @@ ActivityPub or make private music public. Public discovery is disabled by defaul
 No original user tracks are published during development or upgrade.
 
 An administrator configures the canonical HTTPS origin and enables discovery.
+Disabling discovery pauses public access without revoking individual records;
+reenabling restores access only to still-active explicit publications. Owners can
+revoke records even while discovery is disabled.
+
 Each owner then selects an owned track, declares CC0-1.0, CC-BY-4.0 or
 CC-BY-SA-4.0, supplies public attribution and private HTTPS source evidence, and
 confirms their right to grant the selected permissions. All rights/stream/download

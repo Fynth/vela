@@ -1,12 +1,12 @@
 # Music experience parity
 
-## Public catalog0.11 — verified source scope
+## Public catalog0.11 — sourcefe0484d, exact package verified2026-10-18
 
 | Feature / priority | Status | Exact implementation | Acceptance / tests | Platform and rights scope |
 | --- | --- | --- | --- | --- |
-| Explicit origin and per-track publication P0 | VERIFIED for documented source scope | domain/network.rs; core/network.rs; media/publications.rs; migration0011; server/network.rs | Chromium39/PN01; API ownership/CSRF/CAS/grants, legacy10 preservation, no auto publication | Native server + web; supported declared CC0/BY/BY-SA only, not legal verification |
-| Public catalog preview / authorized media P0 | VERIFIED for read-only source profile | server/network.rs + network/tests.rs; imports/egress.rs; web/network.rs | 200 Rust; actual independent A/B HTTP, malicious/slow peer, DNS/redirect/size limits, Range/HEAD/download/revoke; Chromium39/PN02 | Read-only profile1; no AP/signatures/follows/cache/unified remote queue; latest G11/G14/G15/G22 subsets |
-| Durable local supervision P1 | VERIFIED for same-build local scope | scripts/install-user-service.py; tests/test_user_service.py; docs/USER_SERVICE.md |22 Python tests incl13 installer; actual frozen0.10 install/readiness and validation-only recheck | Linux user systemd enabled, private loopback; no root/linger/reboot or native audio claim |
+| Explicit origin and per-track publication P0 | VERIFIED for documented source scope | domain/network.rs; core/network.rs; media/publications.rs; migration0011; server/network.rs | Packaged Chromium39/Firefox39, PN01; API ownership/CSRF/CAS/grants, legacy10 preservation, no auto publication | Native server + web; supported declared CC0/BY/BY-SA only, not legal verification |
+| Public catalog preview / authorized media P0 | VERIFIED for read-only source profile | server/network.rs + network/tests.rs; imports/egress.rs; web/network.rs | 200 Rust; actual independent A/B HTTP, malicious/slow peer, DNS/redirect/size limits, Range/HEAD/download/revoke; packaged Chromium39/Firefox39, PN02 | Read-only profile1; no AP/signatures/follows/cache/unified remote queue; latest G11/G14/G15/G22 subsets |
+| Durable local supervision P1 | VERIFIED for same-build local scope | scripts/install-user-service.py; tests/test_user_service.py; docs/USER_SERVICE.md |22 Python tests incl13 installer; actual frozen0.10 install, original10→11 upgrade and frozen0.11 validation-only recheck | Linux user systemd enabled, private loopback; no root/linger/reboot or native audio claim |
 
 Next actual experience gaps: standards-based signed/blocked peers and saved origin
 adapters; native Linux/Android playback and offline manifests; Apple toolchain and

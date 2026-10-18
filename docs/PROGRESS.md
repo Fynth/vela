@@ -1,5 +1,68 @@
 # Verified progress
 
+## Verified0.11.0 package and preserved original-data upgrade (2026-10-18)
+
+Application/source fe0484d62f1a2ae33a8c25ee901d4ed6b9568f06. Native/source archives
+`target/releases/vela-0.11.0-{x86_64-unknown-linux-gnu,source}.tar.gz` and SHA256SUMS
+are local review artifacts, never externally published. Extracted default startup,
+schema11, HTML/WASM/CSS, closed-public-catalog including malformed filters, and
+SIGTERM passed. All retained release manifests passed. Frozen binary SHA256
+1224d6fd1d52195028d96e0de592b2717019d981b81d3bdb43e42f3863d00af5;
+all19 binary/static files match archive AND built files before/after both browsers
+and original upgrade. Highest required GLIBC symbol2.34; only this Linux x86_64
+server host is validated. Existing6 metadata-only notice gaps are unchanged.
+
+Exact extracted binary passed Chromium39/39 in2.6m and Firefox39/39 in3.3m, each
+with fresh isolated data and licensed live import. PN01/PN02 use generated project
+PCM and actual backend/settings/rights/Range/revoke calls; all prior playback,
+privacy/history/DSP/radio/recommendation/share/import/search regressions passed.
+Source Chromium39 also passed separately in2.5m. Main inspected source Network
+1440dark/320light plus packaged Firefox320light and Chromium320dark declaration
+screens. Screens cover Network320/1440 both themes and existing player/Home suites
+320/768/1440/1920; no horizontal overflow in assertions. These are browser checks,
+not physical audio/background/mobile certification. Exact package20clean restarts
+and4 worker DB faults passed too.
+
+Immediately before upgrade verified persistent/enabled0.10 unit PID46997 and its
+frozen executable. Graceful stop returned0/old PID exited. Fresh private0600
+before-0.11.0-20261018T095211Z.tar.gz restored to a separate disposable directory;
+every SQL logical row and referenced media hash matched. Original data was never
+restored/reset/deleted. Forward10→11 preserved EVERY existing table's logical-row
+hash except the intentionally extended SQLx migration ledger, including all20
+analysis rows. Counts remain1user/20tracks/20assets/1artwork/0playlists. One preference
+and one device row already existed in the stopped schema10 backup; their exact
+consent/retention/revision values match after upgrade. Listening sessions and
+recommendation exclusions remain0. No installer/upgrade opt-in occurred. New
+network_settings is disabled/originnull/revision0 and publications0. Public endpoints
+return404; no original music was published. quick_check ok/FK0.
+
+Current runtime PID78464 is active/running with0restarts, non-root persistent and
+enabled `vela-local-development.service`, frozen `target/runtime/vela-0.11.0/`,
+ORIGINAL `data/`, loopback127.0.0.1:3210. Health0.11.0/setup complete; executable,
+eight served core assets and complete19-file frozen/archive hashes verified.
+The same-build installer validates the upgraded unit/schema/archives too. Prior
+private unit definitions and0.10 package remain retained.0077 umask, on-failure2s,
+3starts/60s and stop60s. Starts with the existing user manager, normally login;
+reboot-before-login/logout behavior and linger were not configured/tested.
+
+Evidence under target/checks/: publication-{package,package-verify,package-abi,
+packaged-chromium,packaged-firefox,packaged-shutdown}.log/json as applicable;
+publication-packaged-{chromium,firefox}-screens; publication-frozen-package-match.json;
+publication-upgrade{,-backup,-runtime,-consent}.log/json; publication-service-011-recheck.log.
+Source200Rust/strict native+WASM/fmt/22Python/JS/deny and failed-then-fixed NUL run
+are recorded below. Independent reviewer signed off cross-system security/data/UI
+boundaries before packaging. Docker daemon socket remains unavailable; no Docker,
+ARM64, native client, Safari, screen-reader or Internet TLS/signature claim.
+
+Next autonomous work: shared platform audio contract plus a complete actual Linux
+Dioxus native player/OS media bridge, then Android Media3 service/offline manifests;
+Apple compile/device evidence needs an Apple environment. Network still needs
+saved origin adapters/blocked peers, standards-based identity/signature/replay and
+social delivery, remote queue/search and separately authorized rooms/handoff.
+On-demand mixes need scheduled refresh/calibrated quality. Preserve this deployable
+checkpoint and all backups/runtime/releases. The whole mandate is not complete;
+no work outside an active execution session is implied.
+
 ## Public catalog0.11.0 — verified source before packaging (2026-10-18)
 
 Started clean main8abba45/application902dd47, original frozen0.10 unit PID34675,

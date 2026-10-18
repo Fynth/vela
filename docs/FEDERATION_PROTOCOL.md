@@ -6,6 +6,8 @@ follows, peer blocks, durable delivery and Funkwhale interoperability remain
 NOT_IMPLEMENTED. Do not advertise federation compatibility from these GET routes.
 
 The server is private by default. Enabling public discovery publishes no tracks.
+Enablement never creates a publication. Disabling only pauses public access;
+reenabling restores any still-active explicit grants, while revoked IDs stay404.
 The owner must separately create an explicit licensed publication; metadata,
 streaming and downloads are distinct grants. See NETWORK_RIGHTS and ADR0016.
 

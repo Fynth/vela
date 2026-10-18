@@ -22,8 +22,8 @@ Status meanings: implemented=source exists; verified=checks recorded in PROGRESS
 Explicit private-by-default server identity, owner declaration/provenance,
 metadata/stream/download grants, retained CAS revocation, bounded peer preview and
 actual two-node negative HTTP tests are implemented. Network UI/PN01/PN02 and
-persistent same-build Linux user-service installation are integrated; exact executed
-gates and remaining failures belong in PROGRESS/QA_EVIDENCE. None of this enables
+persistent same-build Linux user-service installation are integrated; source200Rust and exact packaged Chromium39/Firefox39 plus preserved original-data
+upgrade passed; exact scope/evidence is in PROGRESS/QA_EVIDENCE. None of this enables
 public sharing or history collection on original data. Read-only profile1 is not
 full social federation or a unified remote player. Next: standards-based identity/
 signatures, blocked peers and real saved catalog adapters; actual Linux/Android
