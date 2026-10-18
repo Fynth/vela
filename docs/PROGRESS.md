@@ -171,7 +171,7 @@ sent, so consent/history is not bypassed or inferred.
   (exactly one row)→unfavorite→empty→Library restores three tracks, with screenshot
   `target/checks/native-favorites-window9/native-favorites-dark.png`; desktop23/25
   tests (both opt-ins separately), strict Clippy, and233 workspace tests pass.
-- Native read-only playlists follow-up: the desktop client now reads the real
+- Native read-only playlists follow-up `6e6dafb`: the desktop client now reads the real
   `GET /api/playlists`/`GET /api/playlists/{id}` APIs, shows list/detail metadata and
   per-entry `can_stream`, and queues only the stream-authorized subset under a
   playlist context. The fixture creates a two-entry playlist through the real API;
