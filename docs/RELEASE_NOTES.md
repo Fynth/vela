@@ -1,3 +1,10 @@
+# 0.12.1 — bounded spectral-2 tempo patch release
+
+Local DSP spectral-2 adds a bounded onset-interval tempo estimate with honest
+confidence and Radio UI disclosure. The extractor version change keeps immutable
+spectral-1 caches separate. No schema, HTTP contract or original-data change; this
+is a server/web assets patch for the frozen local runtime.
+
 # 0.12.0 — verified Linux native client + local package/runtime checkpoint
 
 `vela-desktop` is a real Dioxus Linux application with an in-memory native HTTP
@@ -11,8 +18,7 @@ directory entry from the first byte and released on replacement/failure/sign-out
 exit. Credentials are memory-only and no native listening events are collected.
 
 Verified on this Linux x86_64 host against an isolated fixture server/account/media:
-Local DSP spectral-2 adds a bounded onset-interval tempo estimate with honest
-confidence and Radio UI disclosure. fmt, strict Clippy,27 desktop tests (25 run,2 opt-in), owned-null-sink audio and
+fmt, strict Clippy,27 desktop tests (25 run,2 opt-in), owned-null-sink audio and
 bounded-channel private D-Bus MPRIS tests, and a real WebKitGTK window at1280×840
 and640×700 including playback, seek, navigation continuity, queue edits, theme,
 640px element bounds, sign-out and zero temporary directory entries during transfer/
