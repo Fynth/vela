@@ -11,9 +11,8 @@ use mpris_server::{LoopStatus, Metadata, PlaybackStatus, Player, Time, TrackId, 
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicU8, Ordering},
-    mpsc::{Receiver, Sender},
 };
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
+use tokio::sync::mpsc::{Receiver, Sender, channel};
 
 const STARTING: u8 = 0;
 const READY: u8 = 1;
@@ -85,15 +84,16 @@ pub(crate) enum State {
 
 #[derive(Clone)]
 pub(crate) struct Mpris {
-    updates: UnboundedSender<Update>,
+    updates: Sender<Update>,
     commands: Arc<Mutex<Receiver<Command>>>,
     state: Arc<AtomicU8>,
 }
 
 impl Mpris {
     pub(crate) fn publish(&self, update: Update) {
-        // A closed service thread must never surface an audio/UI error.
-        let _ = self.updates.send(update);
+        // A closed or saturated observer must never surface an audio/UI error.
+        // The next 200ms snapshot supersedes a dropped intermediate position.
+        let _ = self.updates.try_send(update);
     }
     pub(crate) fn try_command(&self) -> Option<Command> {
         self.commands.lock().ok()?.try_recv().ok()
@@ -110,8 +110,8 @@ impl Mpris {
 
 #[cfg(not(target_os = "linux"))]
 pub(crate) fn spawn() -> Mpris {
-    let (updates, _) = unbounded_channel();
-    let (_, command_rx) = std::sync::mpsc::channel();
+    let (updates, _) = channel(64);
+    let (_, command_rx) = channel(32);
     Mpris {
         updates,
         commands: Arc::new(Mutex::new(command_rx)),
@@ -121,8 +121,8 @@ pub(crate) fn spawn() -> Mpris {
 
 #[cfg(target_os = "linux")]
 pub(crate) fn spawn() -> Mpris {
-    let (updates, update_rx) = unbounded_channel();
-    let (commands, command_rx) = std::sync::mpsc::channel();
+    let (updates, update_rx) = channel(64);
+    let (commands, command_rx) = channel(32);
     let state = Arc::new(AtomicU8::new(STARTING));
     let thread_state = state.clone();
     let thread = std::thread::Builder::new()
@@ -156,7 +156,7 @@ pub(crate) fn spawn() -> Mpris {
 
 #[cfg(target_os = "linux")]
 async fn run(
-    mut updates: UnboundedReceiver<Update>,
+    mut updates: Receiver<Update>,
     commands: Sender<Command>,
     state: Arc<AtomicU8>,
 ) -> Result<()> {
@@ -182,46 +182,46 @@ async fn run(
         .await?;
     let send = commands.clone();
     player.connect_play(move |_| {
-        let _ = send.send(Command::Play);
+        let _ = send.try_send(Command::Play);
     });
     let send = commands.clone();
     player.connect_pause(move |_| {
-        let _ = send.send(Command::Pause);
+        let _ = send.try_send(Command::Pause);
     });
     let send = commands.clone();
     player.connect_play_pause(move |_| {
-        let _ = send.send(Command::PlayPause);
+        let _ = send.try_send(Command::PlayPause);
     });
     let send = commands.clone();
     player.connect_stop(move |_| {
-        let _ = send.send(Command::Stop);
+        let _ = send.try_send(Command::Stop);
     });
     let send = commands.clone();
     player.connect_next(move |_| {
-        let _ = send.send(Command::Next);
+        let _ = send.try_send(Command::Next);
     });
     let send = commands.clone();
     player.connect_previous(move |_| {
-        let _ = send.send(Command::Previous);
+        let _ = send.try_send(Command::Previous);
     });
     let send = commands.clone();
     player.connect_seek(move |_, offset| {
-        let _ = send.send(Command::SeekRelative(offset.as_micros()));
+        let _ = send.try_send(Command::SeekRelative(offset.as_micros()));
     });
     let send = commands.clone();
     player.connect_set_position(move |_, track_id, position| {
-        let _ = send.send(Command::SetPosition {
+        let _ = send.try_send(Command::SetPosition {
             track_id: track_id.as_str().to_owned(),
             position_ms: u64::try_from(position.as_micros().max(0)).unwrap_or(0) / 1000,
         });
     });
     let send = commands.clone();
     player.connect_set_volume(move |_, volume| {
-        let _ = send.send(Command::SetVolume(volume));
+        let _ = send.try_send(Command::SetVolume(volume));
     });
     let send = commands.clone();
     player.connect_set_shuffle(move |_, shuffle| {
-        let _ = send.send(Command::SetShuffle(shuffle));
+        let _ = send.try_send(Command::SetShuffle(shuffle));
     });
     let send = commands.clone();
     player.connect_set_loop_status(move |_, status| {
@@ -230,11 +230,11 @@ async fn run(
             LoopStatus::Playlist => RepeatKind::All,
             LoopStatus::Track => RepeatKind::One,
         };
-        let _ = send.send(Command::SetRepeat(repeat));
+        let _ = send.try_send(Command::SetRepeat(repeat));
     });
     let send = commands.clone();
     player.connect_quit(move |_| {
-        let _ = send.send(Command::Quit);
+        let _ = send.try_send(Command::Quit);
     });
     tokio::task::spawn_local(player.run());
     state.store(READY, Ordering::Release);

@@ -34,16 +34,19 @@ seek/volume where the bus is available.
   checks.
 - `lib.rs` + `audio.rs`: one long-lived output thread on a supervised device, one
   bounded command channel, generation/source guards, real decoder duration/seek,
-  pause/resume/volume/EOF/replacement/stop. Prepared originals are private `0600`
-  temporary files capped at250MiB; on Linux they are unlinked immediately and each
-  decoder reopens `/proc/self/fd/N`. A lease lives only while its current occurrence
-  is playing and is released on replacement/failure/sign-out/exit.
+  pause/resume/volume/EOF/replacement/stop. Prepared originals are unnamed private
+  `0600` temporary files capped at250MiB, created without a directory entry from the
+  first byte on Linux (`O_TMPFILE`/create-and-unlink); each decoder reopens
+  `/proc/self/fd/N`. A lease lives only while its current occurrence is playing and
+  is released on replacement/failure/sign-out/exit. A dead worker is reported as
+  not playable and can be replaced only by an explicit same-account reconnect.
 - `playback.rs` (reused by path from the web crate): bounded occurrence indices,
   fair shuffle deck/history, explicit next priority, repeat semantics. Structural
   queue edits synchronize the order model; metadata does not reset traversal.
-- `mpris.rs`: separate thread/current-thread Tokio runtime, typed command channel,
-  bounded text, no credentials/HTTP/audio ownership. Missing/failed session bus
-  degrades to in-app controls. No local paths or private fields are published.
+- `mpris.rs`: separate thread/current-thread Tokio runtime, bounded64-update and
+  32-command channels, bounded text, no credentials/HTTP/audio ownership.
+  Missing/failed session bus degrades to in-app controls. No local paths or private
+  fields are published.
 - `ui.rs`/`style.css`: real loading/empty/error/preparing/cancel/retry states,
   duplicate occurrence identity, disabled-state explanations, responsive
   1280×840 and640×700 layouts, light/dark, keyboard focus and reduced motion.
@@ -63,16 +66,27 @@ physical media keys are not certified.
 
 - `cargo fmt --all -- --check`; strict Clippy `-p vela-desktop --all-targets
   --features native-qa`; `cargo test --locked -p vela-desktop`: 23 passed,
-  2 ignored (opt-in audio/MPRIS). Logs: `target/checks/native-0.12-{fmt,clippy,tests}.log`.
+  2 ignored (opt-in audio/MPRIS) from25 listed tests (8 audio,6 client,3 MPRIS,
+  8 shared playback). Logs: `target/checks/native-0.12b-{fmt,clippy,tests}.log`.
 - Ignored `audio::tests::native_owned_null_sink_play_pause_seek_eof_replace_stop_and_cleanup`
   executed under an owned Pulse null sink: passed.
 - Ignored `mpris::tests::real_session_bus_exposes_properties_and_forwards_controls`
-  executed under a private `dbus-run-session`: passed.
+  executed under a private `dbus-run-session`: passed after switching to bounded
+  update/command channels.
+- An independent read-only review found that the first adapter created a named
+  temporary file during transfer, so closing the window while preparing could leave
+  a partial original. Main changed preparation to an unnamed file from the first
+  byte, asserted zero directory entries during a held transfer, and re-ran the
+  complete suite. Other review findings fixed: unbounded MPRIS queues, a dead audio
+  worker still advertised as playable (explicit reconnect now), QA sink assertions
+  and a UTF-8 slice panic; the reported test-count discrepancy was resolved by
+  enumerating25 actual tests.
 - `scripts/verify_native_client.py` against an isolated fixture server/account/media
   in a real WebKitGTK window: 15 named checks including real WAV/FLAC/MP3 playback,
   seek, queue duplicates/reorder, 640×700 element bounds, no overflow, sign-out and
   zero leftover temporary originals. Also passed the close-while-playing variant.
-  Evidence: `target/checks/native-0.12-window4/` and
+  Evidence: `target/checks/native-0.12b-window/`, `native-0.12b-mpris-session.log`;
+  earlier `native-0.12-window4/` and
   `target/checks/native-0.12-close-playing/` plus screenshots.
 - A first compact run exposed queue grid tracks overflowing640px; the assertion was
   made element-level, `.native-queue-list` was constrained to `minmax(0,1fr)`, and

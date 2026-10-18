@@ -174,18 +174,24 @@ Responses are bounded to4MiB JSON; only closed UUID stream paths and one exact
 owner-authorized original are requested.
 
 Source preparation verifies declared and actual size plus the response BLAKE3 ETag,
-caps one file at250MiB, and writes a private0600 temporary file. On Linux the file
-is unlinked before decoding and each decoder reopens it through `/proc/self/fd/N`,
-so an interrupted GUI cannot leave a completed named original. The lease is released
-on replacement, failure, sign-out and process exit; the opt-in window test asserts
-zero leftover originals. Preparation is not a download entitlement, not offline
-storage, and never fetches public or foreign media.
+caps one file at250MiB, and creates an unnamed private0600 temporary file from the
+first byte (Linux `O_TMPFILE` or create-and-unlink fallback). No directory entry
+exists even while transfer is in progress, so a window close, GUI exit or crash
+during preparation cannot leave a complete or partial named private original.
+Each decoder reopens the unlinked inode through `/proc/self/fd/N`; the lease is
+released on replacement, failure, sign-out and process exit. Tests assert zero
+directory entries during a held transfer, after completion, after cancellation and
+after window exit. Preparation is not a download entitlement, not offline storage,
+and never fetches public or foreign media.
 
 Account, catalog, source and login work carry independent cancellation plus current
 session/query/selection/generation/lifetime checks; sign-out stops native audio,
-clears the queue/catalog and releases leases. No native listening event is sent in
-this slice, so no consent state is bypassed. MPRIS runs on a separate thread and
-publishes only bounded track metadata/transport state; it owns no credentials, HTTP
-or audio, and a failed session bus degrades to in-app controls. No installer,
-signing, secure credential persistence, background mobile service or physical
-audio/device certification is claimed.
+clears the queue/catalog and releases leases. A dead output worker is no longer
+reported as playable: the UI disables transport and offers a bounded reconnect that
+installs a fresh engine only for the same live account epoch. No native listening
+event is sent in this slice, so no consent state is bypassed. MPRIS runs on a
+separate thread with bounded64-update/32-command channels, publishes only bounded
+track metadata/transport state, owns no credentials, HTTP or audio, and a failed
+session bus degrades to in-app controls. No installer, signing, secure credential
+persistence, background mobile service or physical audio/device certification is
+claimed.

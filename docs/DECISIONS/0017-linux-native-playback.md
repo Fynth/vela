@@ -26,22 +26,26 @@ Add an eighth workspace application, `vela-desktop`, for Linux x86_64:
    proxy inheritance disabled, and canonical HTTPS (or numeric loopback HTTP for
    development) origins.
 2. **Bounded source preparation before decode.** The first adapter downloads one
-   authorized owned original into a private `0600` temporary file, verifies the
-   exact expected size and the response BLAKE3 ETag, and caps the file at 250 MiB.
-   On Linux the file is unlinked immediately and each decoder reopens it through
-   `/proc/self/fd/N`, so an interrupted GUI cannot leave a completed original named
-   on disk. A prepared source lives only while its queue occurrence is current and
-   is released on replacement, sign-out, failure or exit. This is deliberately not
-   progressive streaming, offline storage or a download entitlement.
+   authorized owned original into an unnamed private `0600` temporary file created
+   from the first byte (Linux `O_TMPFILE` or create-and-unlink fallback), verifies
+   the exact expected size and the response BLAKE3 ETag, and caps the file at
+   250 MiB. No directory entry exists even mid-transfer, so a GUI exit, window
+   close or crash cannot leave a partial original named on disk; decoders reopen
+   the inode through `/proc/self/fd/N`. A prepared source lives only while its queue
+   occurrence is current and is released on replacement, sign-out, failure or exit.
+   This is deliberately not progressive streaming, offline storage or a download
+   entitlement.
 3. **One audio authority.** `AudioEngine` owns a long-lived supervised output thread,
    one bounded command channel and generation/source guards. Rodio/CPAL decode WAV,
    FLAC, MP3, MP4/AAC-family and Vorbis through the bounded local source; seek,
    pause, resume, volume, EOF and replacement are explicit commands. No second audio
-   element, iframe or remote page is used.
-4. **OS integration is an observer.** MPRIS2 runs on its own thread with a typed
-   command channel; it receives immutable public metadata/state snapshots and never
-   owns credentials, HTTP, account state or audio. A failed session bus degrades to
-   in-app controls. No local file paths or private fields are published.
+   element, iframe or remote page is used. A dead output worker is detected, disables
+   transport claims and can be replaced by an explicit same-account reconnect.
+4. **OS integration is an observer.** MPRIS2 runs on its own thread with bounded
+   typed update/command channels; it receives immutable public metadata/state
+   snapshots and never owns credentials, HTTP, account state or audio. A failed
+   session bus degrades to in-app controls. No local file paths or private fields
+   are published.
 5. **Consent stays explicit.** This slice sends no native listening events, does not
    infer playback history from preparation/decode, and keeps the account in memory
    only. Theme is currently in-session; persistence and favorites UI are later work.

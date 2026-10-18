@@ -173,6 +173,12 @@ impl AudioEngine {
             .clone()
     }
 
+    /// The output worker died after a device/stream failure. Controls must stop
+    /// claiming retryability until the UI installs a new engine.
+    pub fn alive(&self) -> bool {
+        self.inner.shared.worker_alive.load(Ordering::Acquire)
+    }
+
     pub fn load(
         &self,
         generation: u64,

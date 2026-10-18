@@ -33,9 +33,10 @@ fn Harness() -> Element {
                         .filter(|height| (320..=4096).contains(height));
                     let (Some(width), Some(height)) = (width, height) else {
                         let received = message["resize"].to_string();
+                        let bounded: String = received.chars().take(200).collect();
                         break json!({
                             "ok":false,
-                            "failure":format!("Invalid resize request: {}", &received[..received.len().min(200)])
+                            "failure":format!("Invalid resize request: {bounded}")
                         });
                     };
                     let _ = tokio::task::spawn_blocking(move || {
@@ -130,9 +131,17 @@ fn resize_owned_window(width: u64, height: u64) {
 }
 
 fn main() {
+    let sink = std::env::var("VELA_NATIVE_TEST_SINK").expect("owned test sink name");
+    assert_eq!(sink, "vela_native_test_null");
     assert_eq!(
-        std::env::var("VELA_NATIVE_TEST_SINK").as_deref(),
-        Ok("vela_native_test_null")
+        std::env::var("PULSE_SINK").as_deref(),
+        Ok(sink.as_str()),
+        "QA must use the script-owned null sink, never the user's default output"
+    );
+    let alsa = std::env::var("ALSA_CONFIG_PATH").expect("isolated ALSA configuration");
+    assert!(
+        std::fs::read_to_string(alsa).is_ok_and(|config| config.contains(&sink)),
+        "isolated ALSA configuration must route to the owned null sink"
     );
     let window = WindowBuilder::new()
         .with_title("Vela Music — isolated native QA")

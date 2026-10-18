@@ -142,8 +142,11 @@ impl Ui {
                 .as_ref()
                 .is_some_and(|account| account.epoch == *self.epoch.peek())
     }
+    fn audio_alive(&self) -> bool {
+        self.audio.read().as_ref().is_some_and(AudioEngine::alive)
+    }
     fn audio_ready(&self) -> bool {
-        self.audio.read().is_some()
+        self.audio_alive()
     }
     fn current_track(&self) -> Option<Track> {
         if !self.signed_in() {
@@ -232,7 +235,7 @@ impl Ui {
         } else {
             mpris::Status::Stopped
         };
-        let can_play = track.is_some() && self.audio.peek().is_some();
+        let can_play = track.is_some() && self.audio_alive();
         let can_seek = can_play
             && self.prepared.peek().is_some()
             && snapshot.duration_ms > 0
@@ -276,22 +279,13 @@ impl Ui {
 fn default_origin() -> String {
     let fallback = "http://127.0.0.1:3210";
     let value = std::env::var("VELA_DESKTOP_SERVER_URL").unwrap_or_else(|_| fallback.into());
-    let valid = value.len() <= 2048
-        && url::Url::parse(&value).is_ok_and(|url| {
-            (url.scheme() == "https"
-                || (url.scheme() == "http"
-                    && match url.host() {
-                        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
-                        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
-                        _ => false,
-                    }))
-                && url.username().is_empty()
-                && url.password().is_none()
-                && url.query().is_none()
-                && url.fragment().is_none()
-                && url.path() == "/"
-        });
-    if valid { value } else { fallback.into() }
+    // Use the same canonical-origin policy as the HTTP client so a malformed
+    // environment value can never prefill a form that the client would reject.
+    if value.len() <= 2048 && crate::client::canonical_origin(&value).is_ok() {
+        value
+    } else {
+        fallback.into()
+    }
 }
 
 fn login(mut ui: Ui) {
@@ -593,6 +587,38 @@ fn advance(mut ui: Ui, command: Command) {
     }
 }
 
+fn reconnect_audio(mut ui: Ui) {
+    if ui.audio.peek().as_ref().is_some_and(AudioEngine::alive) {
+        return;
+    }
+    let Some(account) = ui
+        .account
+        .peek()
+        .clone()
+        .filter(|account| ui.signed_in() && account.epoch == *ui.epoch.peek())
+    else {
+        return;
+    };
+    ui.audio.set(None);
+    ui.audio_error.set(String::new());
+    let mut installing = ui.clone();
+    spawn(async move {
+        let result = tokio::task::spawn_blocking(AudioEngine::new).await;
+        if !installing.alive.get() || *installing.epoch.peek() != account.epoch {
+            return;
+        }
+        match result {
+            Ok(Ok(engine)) => {
+                *installing.engine_cleanup.borrow_mut() = Some(engine.clone());
+                installing.audio.set(Some(engine));
+            }
+            Ok(Err(error)) => installing.audio_error.set(error),
+            Err(_) => installing.audio_error.set(
+                "Native audio output could not be reconnected. Restart Vela to try again.".into(),
+            ),
+        }
+    });
+}
 fn toggle(mut ui: Ui) {
     if !ui.signed_in() || *ui.preparing.peek() {
         return;
@@ -856,7 +882,7 @@ fn sign_in(ui: Ui) -> Element {
                 input {id:"native-origin",r#type:"url",required:true,maxlength:2048,value:"{origin}",disabled:connecting,autocomplete:"url",placeholder:"https://music.example.org",oninput:move |event|origin_signal.set(event.value())}
                 small {"HTTPS for remote servers; numeric loopback HTTP is available for local development."}
                 label {r#for:"native-username","Username"}
-                input {id:"native-username",required:true,maxlength:64,value:"{username}",disabled:connecting,autocomplete:"username",oninput:move |event|username_signal.set(event.value())}
+                input {id:"native-username",required:true,maxlength:32,value:"{username}",disabled:connecting,autocomplete:"username",oninput:move |event|username_signal.set(event.value())}
                 label {r#for:"native-password","Password"}
                 input {id:"native-password",r#type:"password",required:true,value:"{password}",disabled:connecting,autocomplete:"off",oninput:move |event|password_signal.set(event.value())}
                 button {class:"button primary",r#type:"submit",disabled:connecting||output_pending,if connecting {"Connecting…"} else if output_pending {"Preparing native output…"} else {"Sign in"}}
@@ -955,6 +981,8 @@ fn player(ui: Ui) -> Element {
     let toggle_ui = ui.clone();
     let previous = ui.clone();
     let next = ui.clone();
+    let reconnect = ui.clone();
+    let audio_alive = ui.audio_alive();
     let seek_ui = ui.clone();
     let volume_ui = ui.clone();
     let cancel = ui.clone();
@@ -1004,7 +1032,8 @@ fn player(ui: Ui) -> Element {
         }
         if !ui.audio_error.read().is_empty(){div {class:"player-error",role:"alert","{ui.audio_error}"}}
         if !error.is_empty(){div {class:"player-error",role:"alert","{error} Press Play to retry."}}
-        if let Some(error)=snapshot.error{div {class:"player-error",role:"alert","{error} Press Play to retry."}}
+        if let Some(error)=snapshot.error{div {class:"player-error",role:"alert","{error}"}}
+        if ui.audio.peek().is_some() && !audio_alive {div {class:"player-error",role:"alert","Native audio output stopped. " button {class:"text-button",onclick:move |_|reconnect_audio(reconnect.clone()),"Reconnect audio"}}}
     } }
 }
 

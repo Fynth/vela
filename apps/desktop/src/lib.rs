@@ -24,6 +24,7 @@ impl std::fmt::Debug for PreparedAudio {
     }
 }
 impl PreparedAudio {
+    #[cfg(any(not(target_os = "linux"), test))]
     pub(crate) fn new(file: tempfile::NamedTempFile, length_bytes: u64) -> Self {
         #[cfg(target_os = "linux")]
         {
@@ -43,6 +44,19 @@ impl PreparedAudio {
         #[cfg(not(target_os = "linux"))]
         {
             Self { file, length_bytes }
+        }
+    }
+    /// Take ownership of an already unnamed temporary file. The platform keeps
+    /// no directory entry for it, so a process exit during preparation cannot
+    /// leave a complete or partial private original behind.
+    #[cfg(target_os = "linux")]
+    pub(crate) fn from_file(file: std::fs::File, length_bytes: u64) -> Self {
+        use std::os::fd::AsRawFd;
+        let reader_path = format!("/proc/self/fd/{}", file.as_raw_fd()).into();
+        Self {
+            _file: file,
+            reader_path,
+            length_bytes,
         }
     }
     pub(crate) fn path(&self) -> &std::path::Path {

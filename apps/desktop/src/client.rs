@@ -411,7 +411,7 @@ async fn bounded<T>(
     }
 }
 
-fn canonical_origin(input: &str) -> Result<Url, String> {
+pub(crate) fn canonical_origin(input: &str) -> Result<Url, String> {
     let error = || "Use an HTTPS server root, or numeric loopback HTTP for local Vela.".to_owned();
     if input.is_empty()
         || input.len() > 2048
@@ -563,14 +563,29 @@ fn write_original(
     _permit: OwnedSemaphorePermit,
     directory: Option<PathBuf>,
 ) -> Result<Arc<PreparedAudio>, String> {
-    let mut builder = tempfile::Builder::new();
-    builder.prefix("vela-native-");
+    #[cfg(target_os = "linux")]
     let mut file = match directory {
-        Some(directory) => builder.tempfile_in(directory),
-        None => builder.tempfile(),
+        Some(directory) => tempfile::tempfile_in(directory),
+        None => tempfile::tempfile(),
     }
     .map_err(|_| AUDIO_ERROR.to_owned())?;
-    #[cfg(unix)]
+    #[cfg(not(target_os = "linux"))]
+    let mut file = {
+        let mut builder = tempfile::Builder::new();
+        builder.prefix("vela-native-");
+        match directory {
+            Some(directory) => builder.tempfile_in(directory),
+            None => builder.tempfile(),
+        }
+        .map_err(|_| AUDIO_ERROR.to_owned())?
+    };
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))
+            .map_err(|_| AUDIO_ERROR.to_owned())?;
+    }
+    #[cfg(all(unix, not(target_os = "linux")))]
     {
         use std::os::unix::fs::PermissionsExt;
         file.as_file()
@@ -596,10 +611,20 @@ fn write_original(
     if size != expected || hash.finalize().to_hex().as_str() != expected_hash {
         return Err("The downloaded original failed its size or BLAKE3 fingerprint check.".into());
     }
+    #[cfg(target_os = "linux")]
+    file.rewind().map_err(|_| AUDIO_ERROR.to_owned())?;
+    #[cfg(not(target_os = "linux"))]
     file.as_file_mut()
         .rewind()
         .map_err(|_| AUDIO_ERROR.to_owned())?;
-    Ok(Arc::new(PreparedAudio::new(file, size)))
+    #[cfg(target_os = "linux")]
+    {
+        Ok(Arc::new(PreparedAudio::from_file(file, size)))
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Ok(Arc::new(PreparedAudio::new(file, size)))
+    }
 }
 
 /// Native user-selected HTTPS origins may resolve privately. Admission is still
@@ -1097,7 +1122,11 @@ mod tests {
         })
         .await
         .unwrap();
-        eventually(|| std::fs::read_dir(directory.path()).unwrap().count() == 1).await;
+        assert_eq!(
+            std::fs::read_dir(directory.path()).unwrap().count(),
+            0,
+            "an in-progress original must never have a directory entry"
+        );
         assert_eq!(
             client
                 .prepare(&track, CancellationToken::new(), progress().0)
