@@ -263,6 +263,9 @@ impl Ui {
         self.epoch.set(epoch);
         self.new_selection();
         self.account.set(None);
+        // The in-memory copy of the saved session ends with the account. The
+        // keyring item is deleted separately and never on this thread (AUD-02).
+        self.saved_session.set(None);
         self.password.set(String::new());
         self.connecting.set(false);
         self.catalog.set(None);
@@ -438,6 +441,9 @@ fn login(mut ui: Ui) {
         return;
     }
     let ticket = ui.login_gate.begin(*ui.epoch.peek());
+    // AUD-01: this attempt claims the saved item. An older attempt may no longer
+    // write it, even while its helper process is still running.
+    let attempt = crate::session_store::begin_attempt();
     ui.password.set(String::new());
     ui.connecting.set(true);
     ui.login_error.set(String::new());
@@ -448,10 +454,7 @@ fn login(mut ui: Ui) {
         }
         let result =
             VelaClient::connect(&origin, username.clone(), password, ticket.cancel.clone()).await;
-        if !ticket.current(&ui)
-            || ui.origin.peek().trim() != origin
-            || ui.username.peek().trim() != username
-        {
+        if !login_still_current(&ui, &ticket, &origin, &username) {
             return;
         }
         ui.connecting.set(false);
@@ -459,24 +462,44 @@ fn login(mut ui: Ui) {
             Ok((client, auth)) => {
                 let token = client.session_token();
                 if remember {
-                    let origin = origin.clone();
+                    let save_origin = origin.clone();
                     let stored = tokio::task::spawn_blocking(move || {
-                        crate::session_store::save(&origin, &token)
+                        crate::session_store::save(attempt, &save_origin, &token)
                     })
                     .await;
+                    // AUD-01: the keyring may outlive this wait. A canceled or
+                    // replaced login publishes no feedback and adopts nothing.
+                    if !login_still_current(&ui, &ticket, &origin, &username) {
+                        return;
+                    }
                     match stored {
-                        Ok(Ok(())) => ui.notice.set("Session saved on this device.".into()),
-                        Ok(Err(error)) => ui.notice.set(error),
+                        Ok(Ok(crate::session_store::StoreStatus::Stored)) => {
+                            ui.notice.set("Session saved on this device.".into());
+                        }
+                        // A newer attempt owns the item; it reports for itself.
+                        Ok(Ok(crate::session_store::StoreStatus::Superseded)) => {}
+                        Ok(Err(error)) => ui.notice.set(error.message().to_owned()),
                         Err(_) => ui
                             .notice
                             .set("The session could not be saved on this device.".into()),
                     }
+                }
+                // AUD-01: adoption and every later UI mutation is guarded again.
+                if !login_still_current(&ui, &ticket, &origin, &username) {
+                    return;
                 }
                 adopt_account(ui, client, auth, origin, ticket.epoch);
             }
             Err(error) => ui.login_error.set(error),
         }
     });
+}
+
+/// AUD-01: the account may only be adopted while this exact login attempt still
+/// owns the UI: same ticket/epoch and the same origin and username the attempt
+/// was started with.
+fn login_still_current(ui: &Ui, ticket: &Ticket, origin: &str, username: &str) -> bool {
+    ticket.current(ui) && ui.origin.peek().trim() == origin && ui.username.peek().trim() == username
 }
 
 fn adopt_account(
@@ -559,6 +582,9 @@ fn resume_saved(mut ui: Ui) {
         return;
     };
     let ticket = ui.login_gate.begin(*ui.epoch.peek());
+    // AUD-01: this resume claims the saved item; a stale attempt may not delete
+    // an item that a newer login already wrote.
+    let attempt = crate::session_store::begin_attempt();
     ui.resuming.set(true);
     ui.login_error.set(String::new());
     ui.notice.set(String::new());
@@ -566,41 +592,167 @@ fn resume_saved(mut ui: Ui) {
         let result =
             crate::client::VelaClient::resume(&saved.origin, &saved.token, ticket.cancel.clone())
                 .await;
-        if !ticket.current(&ui) {
+        // AUD-01: a canceled or superseded resume neither reports nor adopts.
+        if !ticket.current(&ui) || ui.signed_in() {
             return;
         }
         ui.resuming.set(false);
         match result {
             Ok((client, auth)) => {
+                // AUD-01: re-checked once more before the account is adopted.
+                if !ticket.current(&ui) || ui.signed_in() {
+                    return;
+                }
                 adopt_account(ui, client, auth, saved.origin, ticket.epoch);
             }
             Err(error) => {
-                let _ = tokio::task::spawn_blocking(crate::session_store::clear).await;
-                if !expired(ui.clone(), &error) {
-                    ui.saved_session.set(None);
-                    ui.login_error.set(error);
+                let failure = saved_session_failure(&error);
+                if !failure.deletes_saved_item() {
+                    // AUD-04: a timeout, a network/DNS failure, a 5xx or a
+                    // malformed record must keep the saved item so the listener
+                    // can retry instead of losing a valid login.
+                    if !matches!(failure, SavedSessionFailure::Canceled) {
+                        ui.login_error.set(failure.message(&error));
+                    }
+                    return;
                 }
+                // Genuine rejection (HTTP 401 / expired session): the stored
+                // token can never authenticate again. Drop the in-memory copy
+                // first so the button cannot start another doomed attempt, then
+                // delete the item off the UI thread with a bounded deadline.
+                let message = failure.message(&error);
+                ui.saved_session.set(None);
+                let deletion =
+                    delete_saved_session(move || crate::session_store::clear_attempt(attempt))
+                        .await;
+                // AUD-01: the deletion may outlive the UI state that ordered it.
+                if !ticket.current(&ui) {
+                    return;
+                }
+                ui.login_error.set(match deletion {
+                    Ok(()) => message,
+                    Err(problem) => format!("{message} {problem}"),
+                });
             }
         }
     });
 }
 
+/// AUD-04: why a saved-session resume failed. Only a genuine authentication
+/// rejection may delete the stored item.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SavedSessionFailure {
+    /// HTTP 401 / expired session: the stored token can never work again.
+    Rejected,
+    /// The saved record itself is unusable, but no server rejected the session.
+    Unusable,
+    /// Network, DNS, timeout or 5xx: keep the item and retry.
+    Transient,
+    /// The server refused, redirected or answered malformed data: keep the item.
+    Refused,
+    /// The attempt was canceled or superseded.
+    Canceled,
+}
+
+impl SavedSessionFailure {
+    fn deletes_saved_item(self) -> bool {
+        matches!(self, Self::Rejected)
+    }
+
+    fn message(self, error: &str) -> String {
+        match self {
+            Self::Rejected | Self::Canceled => error.to_owned(),
+            Self::Transient => format!(
+                "{error} The saved session was kept on this device; retry when the server is reachable."
+            ),
+            Self::Unusable => format!(
+                "{error} The saved session was kept on this device; sign in again to replace it."
+            ),
+            Self::Refused => format!("{error} The saved session was kept on this device."),
+        }
+    }
+}
+
+/// These are the native client's fixed user-facing error strings
+/// (`client.rs`), matched exactly on purpose: a substring match on "Sign in
+/// again" would classify the 403 message as a rejected session and delete a
+/// valid saved login. An unrecognized message falls back to `Refused`, which
+/// preserves the item.
+const SAVED_SESSION_EXPIRED: &str = "The saved session expired. Sign in again.";
+const SESSION_SIGNED_OUT: &str = "Sign in again to continue.";
+const SAVED_SESSION_INVALID: &str = "The saved session is invalid. Sign in again.";
+const REQUEST_CANCELED: &str = "Request canceled.";
+const NETWORK_UNREACHABLE: &str =
+    "Unable to reach the Vela server. Check the connection and retry.";
+const REQUEST_TIMED_OUT: &str = "The Vela request timed out. Retry when the server is available.";
+const REQUEST_FAILED: &str = "The Vela request failed. Check the server and retry.";
+const SERVER_BUSY: &str = "The server is busy. Wait before retrying.";
+
+fn saved_session_failure(error: &str) -> SavedSessionFailure {
+    match error {
+        REQUEST_CANCELED => SavedSessionFailure::Canceled,
+        SAVED_SESSION_EXPIRED | SESSION_SIGNED_OUT => SavedSessionFailure::Rejected,
+        SAVED_SESSION_INVALID => SavedSessionFailure::Unusable,
+        NETWORK_UNREACHABLE | REQUEST_TIMED_OUT | REQUEST_FAILED | SERVER_BUSY => {
+            SavedSessionFailure::Transient
+        }
+        _ => SavedSessionFailure::Refused,
+    }
+}
+
+/// Run one keyring deletion off the UI thread with a bounded wait (AUD-02). The
+/// helper process itself is deadline-bounded and killed inside `session_store`;
+/// this outer bound only covers a worker that never returns from the runtime.
+/// Neither the local logout nor the audio engine ever waits for it.
+async fn delete_saved_session(
+    delete: impl FnOnce() -> Result<(), crate::session_store::KeyringError> + Send + 'static,
+) -> Result<(), String> {
+    let task = tokio::task::spawn_blocking(delete);
+    match tokio::time::timeout(crate::session_store::worst_case_deadline(), task).await {
+        Ok(Ok(Ok(()))) => Ok(()),
+        Ok(Ok(Err(error))) => Err(error.message().to_owned()),
+        Ok(Err(_)) => Err(crate::session_store::KeyringError::Unavailable
+            .message()
+            .to_owned()),
+        Err(_) => Err(
+            "The system keyring did not answer in time, so the saved session may still exist."
+                .to_owned(),
+        ),
+    }
+}
+
 fn sign_out(mut ui: Ui) {
     let old = ui.account.peek().clone();
-    // Explicit sign-out waits for the keyring deletion so closing the window
-    // immediately cannot leave a reusable saved token behind.
-    let session_clear = crate::session_store::clear();
+    // AUD-02: local access, the queue and audio end immediately. The keyring
+    // deletion is started after that and is never awaited on the UI thread, so
+    // a hung Secret Service cannot delay stopping playback or the local logout.
     ui.clear_account();
     ui.login_error.set(String::new());
     ui.notice
         .set("Signed out on this device. Your queue and temporary audio have been cleared.".into());
-    if let Err(error) = session_clear {
-        ui.login_error.set(error);
-    }
+    let epoch = *ui.epoch.peek();
+    let login_generation = ui.login_gate.generation.get();
+    let mut keyring_ui = ui.clone();
+    spawn(async move {
+        let deletion = delete_saved_session(crate::session_store::clear).await;
+        // AUD-01/AUD-02: only the still-current sign-out may publish this error.
+        if !keyring_ui.alive.get()
+            || *keyring_ui.epoch.peek() != epoch
+            || keyring_ui.signed_in()
+            || keyring_ui.login_gate.generation.get() != login_generation
+        {
+            return;
+        }
+        if let Err(problem) = deletion {
+            keyring_ui.login_error.set(format!(
+                "Local sign-out is complete, but the saved session was not confirmed as removed: {problem}"
+            ));
+        }
+    });
     let Some(account) = old else {
         return;
     };
-    let ticket = ui.logout_gate.begin(*ui.epoch.peek());
+    let ticket = ui.logout_gate.begin(epoch);
     spawn(async move {
         let result = account.client.logout(ticket.cancel.clone()).await;
         if ticket.current(&ui)
@@ -3537,20 +3689,36 @@ pub fn App() -> Element {
     use_future(move || {
         let mut ui = saved_loader.clone();
         async move {
+            let generation = ui.login_gate.generation.get();
+            // Claim the item for this read: a cleanup may only delete the record
+            // that was actually read, never one a newer login already saved.
+            let attempt = crate::session_store::begin_attempt();
             let loaded = tokio::task::spawn_blocking(crate::session_store::load).await;
-            if !ui.alive.get() {
+            // AUD-01: a saved-item read may not overwrite a login that started
+            // while the keyring was being read.
+            if !ui.alive.get() || ui.signed_in() || ui.login_gate.generation.get() != generation {
                 return;
             }
             match loaded {
                 Ok(Ok(Some(saved))) => ui.saved_session.set(Some(saved)),
                 Ok(Ok(None)) => {}
                 Ok(Err(error)) => {
-                    let _ = tokio::task::spawn_blocking(crate::session_store::clear).await;
-                    ui.login_error.set(error);
+                    ui.login_error.set(error.message().to_owned());
+                    // AUD-04/AUD-11: only a malformed record is cleaned up, and
+                    // only after the user-visible error is published. A timeout
+                    // or an unavailable helper must keep the stored item.
+                    if error.is_corrupt_record() {
+                        let _ = delete_saved_session(move || {
+                            crate::session_store::clear_attempt(attempt)
+                        })
+                        .await;
+                    }
                 }
-                Err(_) => ui
-                    .login_error
-                    .set("Saved-session storage is unavailable on this device.".into()),
+                Err(_) => ui.login_error.set(
+                    crate::session_store::KeyringError::Unavailable
+                        .message()
+                        .to_owned(),
+                ),
             }
         }
     });
@@ -3573,5 +3741,103 @@ pub fn App() -> Element {
                 {player(ui.clone())}
             }else{{sign_in(ui.clone())}}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn saved_session_failures_are_classified_by_exact_client_message() {
+        // HTTP 401 from `/api/me` and the generic expired-session error are the
+        // only messages that may delete the stored item.
+        assert_eq!(
+            saved_session_failure(SAVED_SESSION_EXPIRED),
+            SavedSessionFailure::Rejected
+        );
+        assert_eq!(
+            saved_session_failure(SESSION_SIGNED_OUT),
+            SavedSessionFailure::Rejected
+        );
+        // Transient transport and server conditions must preserve the item.
+        for error in [
+            NETWORK_UNREACHABLE,
+            REQUEST_TIMED_OUT,
+            REQUEST_FAILED,
+            "The server is busy. Wait before retrying.",
+        ] {
+            assert_eq!(
+                saved_session_failure(error),
+                SavedSessionFailure::Transient,
+                "{error}"
+            );
+        }
+        // A malformed stored record is unusable but was not rejected by a server.
+        assert_eq!(
+            saved_session_failure(SAVED_SESSION_INVALID),
+            SavedSessionFailure::Unusable
+        );
+        // A 403 talks about signing in but is not a session rejection.
+        assert_eq!(
+            saved_session_failure(
+                "The server denied this action. Sign in again or check your permissions."
+            ),
+            SavedSessionFailure::Refused
+        );
+        assert_eq!(
+            saved_session_failure(
+                "The server redirected a Vela request. Use its direct HTTPS origin."
+            ),
+            SavedSessionFailure::Refused
+        );
+        assert_eq!(
+            saved_session_failure("The server returned an invalid Vela response."),
+            SavedSessionFailure::Refused
+        );
+        assert_eq!(
+            saved_session_failure(REQUEST_CANCELED),
+            SavedSessionFailure::Canceled
+        );
+        assert_eq!(
+            saved_session_failure("something new"),
+            SavedSessionFailure::Refused
+        );
+    }
+
+    #[test]
+    fn only_a_real_session_rejection_deletes_the_saved_item() {
+        for failure in [
+            SavedSessionFailure::Unusable,
+            SavedSessionFailure::Transient,
+            SavedSessionFailure::Refused,
+            SavedSessionFailure::Canceled,
+        ] {
+            assert!(!failure.deletes_saved_item(), "{failure:?}");
+        }
+        assert!(SavedSessionFailure::Rejected.deletes_saved_item());
+    }
+
+    #[test]
+    fn non_rejection_messages_say_the_item_was_kept() {
+        let error = NETWORK_UNREACHABLE;
+        assert!(
+            SavedSessionFailure::Transient
+                .message(error)
+                .contains("kept")
+        );
+        assert!(
+            SavedSessionFailure::Unusable
+                .message(error)
+                .contains("kept")
+        );
+        assert!(SavedSessionFailure::Refused.message(error).contains("kept"));
+        assert_eq!(SavedSessionFailure::Rejected.message(error), error);
+        // The rejected message never claims the item survived.
+        assert!(
+            !SavedSessionFailure::Rejected
+                .message(error)
+                .contains("kept")
+        );
     }
 }
