@@ -21,7 +21,7 @@ correctly shows "Not established"). No schema, server HTTP, native or original-d
 runtime change. The live runtime was subsequently upgraded to0.12.1; existing
 analysis rows remain spectral-1 until explicitly reanalyzed.
 
-## 0.12.4 playlist folders schema12 handover — verified (2026-10-18)
+## 0.12.4 playlist folders schema12 handover — verified (2026-10-18, `e5ef26a`)
 
 `target/releases/vela-0.12.4-{x86_64-unknown-linux-gnu,source}.tar.gz` and
 `vela-0.12.4-SHA256SUMS` were built from commit `16034b9` (native
