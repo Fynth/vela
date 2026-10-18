@@ -1,5 +1,11 @@
 # Music experience parity
 
+Reconciled2026-10-19 (docs-only): this file is a dated parity ledger, not the current
+state. Current source/deployed/design split is in [CURRENT_STATE.md](CURRENT_STATE.md).
+The0.12.x native package (0.12.6 current) implements Linux desktop, opt-in session
+resume, offline copies and playlist folders that older tables further below mark absent;
+each section's header date and status cell define its scope.
+
 ## Public catalog0.11 — sourcefe0484d, exact package verified2026-10-18
 
 | Feature / priority | Status | Exact implementation | Acceptance / tests | Platform and rights scope |
@@ -37,8 +43,8 @@ Baseline was re-established at main f6cc845/application ac31d74:110 Rust tests,3
 | Private listening foundation P0 | VERIFIED for web/native server scope | core/src/listening.rs; domain/src/listening.rs; migration0008; server/src/listening.rs; web/src/audible.rs,listening.rs,browser_player.rs | G07-private-history: consent/global+device, actual played time, repeat/EOF, owner/CAS/dedup, export/delete/stale suppression | Browser self-report; no public popularity or physical sound attestation |
 | DSP and durable analysis P0 | VERIFIED for web/native server scope | media/src/analysis.rs,analysis_service.rs; domain/src/audio_analysis.rs; migration0009; server/src/analysis.rs; web/src/radio.rs | G08: known real PCM/FLAC/MP3, finite spectrum, bounded workers/recovery, original preservation/owner ACL | Explicit local analysis,120s prefix; no genre/mood/tempo/LUFS claims |
 | Explained local track radio P0 | VERIFIED for web/native server scope | media/src/discovery.rs; web/src/radio.rs; root Actions | G09: real seed/candidates, measured distance/tag fallback, diversity, actual queue playback |500 newest owned candidates; personal recurring mixes absent |
-| Lawful public network P0 | PARTIAL:0.11 source under verification | server/network.rs; media/publications.rs; web/network.rs | G11/G14/G15/G22 subsets; actual two-node/hostile/rights/revoke and PN01/PN02 | Read-only opt-in public profile; full social federation remains unfinished |
-| Native audio clients P0 | NOT_STARTED / Apple validation BLOCKED | docs/PLATFORM_MATRIX.md only | G16/G17/G18 real Media3/AVFoundation/desktop engines/device evidence | Browser WASM/native server are not native clients |
+| Lawful public network P0 | PARTIAL:0.11 read-only profile implemented/verified; live0.12.6 runtime has discovery disabled and0publications | server/network.rs; media/publications.rs; web/network.rs | G11/G14/G15/G22 subsets (G14/G15 PARTIAL, see QA_EVIDENCE); actual two-node/hostile/rights/revoke and PN01/PN02 | Read-only opt-in public profile; native saved-peer search/cache exists; full social federation remains unfinished |
+| Native audio clients P0 | PARTIAL: Linux0.12.6 FUNCTIONAL_TESTED; Windows/macOS/Android/iOS NOT_STARTED/BLOCKED | apps/desktop (Linux); see PLATFORM_MATRIX and NATIVE_CLIENT_CONTRACTS | G18 Linux tar+WebKitGTK launch EXECUTED; G16/G17 blocked on real toolchains | Linux only; no background/mobile audio or device handoff; browser WASM is not a native client |
 
 Historical0.9 ten-gap inventory (current0.10 implementation/evidence above supersedes the personal baseline entry):
 
@@ -55,6 +61,12 @@ Historical0.9 ten-gap inventory (current0.10 implementation/evidence above super
 
 
 ## Historical UX matrix
+
+Reconciliation note2026-10-19: the table in this section is the2026-10-16 0.4.0
+baseline, preserved as history. Rows marked NOT_STARTED below for history/consent,
+DSP/radio, playlist folders, offline copies, Linux desktop and multi-server adapters
+were overtaken by0.9–0.12.6; read their current status in PROGRESS, QA_EVIDENCE and
+PLATFORM_MATRIX. The0.8/0.9/0.12 paragraphs that follow the table are also dated.
 
 Audit2026-10-16: actual main HEADb7033e4, version0.4.0; clean initial tree. Baseline rerun:97 Rust tests,16 real Chromium scenarios including the opted-in licensed import, fmt/strict native+WASM Clippy and release builds passed. Existing development data contains one account and was backed up/restored separately. Status applies to the described scope, not the whole reference product. VERIFIED requires executed evidence; PARTIAL means usable subset or current implementation awaiting checks; NOT_STARTED means absent; BLOCKED means an actual external dependency prevents progress. All native desktop/mobile clients below are NOT_STARTED; a tested Linux server is not a desktop client.
 
@@ -73,7 +85,7 @@ Current0.8 increment (2026-10-17): root Now Playing verified with110 Rust tests,
 | Browser resume/reconnect P0 | VERIFIED | web/session.rs, browser_player.rs, main.rs, player.js | RES01–04/NET01–02/AUTH01,3 unit policy tests +7 real browser cases | Paused per-account bookmark; bounded streaming retry; no offline/native/device sync |
 | Library/filters/favorites P0 | VERIFIED | media/filters.rs; web/filters.rs/main.rs | Typed filter/TCP; browser11–13 |50-item pages; no full-library virtualization |
 | Albums/artists P0 | PARTIAL | media/catalog.rs; web/main.rs | G04; existing group/race E2E | Provisional groups; visible-page playback; no editions/biographies |
-| Playlist create/rename/delete/share P0 | PARTIAL | core/playlists.rs; web/main.rs | G05; revision/idempotency/revoke TCP/E2E;0.12 owner CAS rename/delete + confirmation + move-down; Chromium/Firefox40 | Named local grants; metadata never grants audio; no folders/smart rules/owner transfer |
+| Playlist create/rename/delete/share P0 | PARTIAL | core/playlists.rs; web/main.rs | G05; revision/idempotency/revoke TCP/E2E;0.12 owner CAS rename/delete + confirmation + move-down; Chromium/Firefox40 | Named local grants; metadata never grants audio; no smart rules/owner transfer (folders added in0.12.4/0.12.5) |
 | Upload/URL/folder ingest P0 | VERIFIED | media/imports/scanner; web modules | G01/G10; real audio/SSRF/recovery | Direct authorized files only; no DRM extraction |
 | Jobs/progress P1 | VERIFIED | core/jobs.rs; web/jobs.rs | Existing mixed-page/TCP/browser14/15/30 | Owned jobs; no SSE or global admin queue |
 | Metadata/artwork P1 | PARTIAL | media/metadata.rs; web/metadata.rs | Existing unchanged-source/revision tests | No write-back/bulk/enrichment/recording matching |

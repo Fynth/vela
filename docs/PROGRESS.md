@@ -1,5 +1,37 @@
 # Verified progress
 
+## Documentation reconciliation2026-10-19 — docs-only, no verification
+
+Created [CURRENT_STATE.md](CURRENT_STATE.md) as the source/deployed/design index and
+corrected stale statements without deleting dated evidence: KNOWN_LIMITATIONS (native
+offline/Secret Service/folders and the AUD-20 dependency gate), PLATFORM_MATRIX
+(0.12.6 current vs0.12.2 historical, spectral-4,0.12.6 native package), QA_EVIDENCE
+(G14/G15 PARTIAL with the exact tested subset), RESILIENT_SCALE_PLAN (personal SQLite
+profile vs opt-in large hub), ROADMAP, SECURITY, NATIVE_CLIENT_CONTRACTS and the
+parity ledger. No code/schema/runtime/test/package was changed and no check was
+executed for this pass; this entry is a documentation record, not evidence. The dated
+package/run logs remain valid for their own dates, and the audit package under
+`docs/PLANS/2026-10-19/` is untouched.
+
+## AUD repair slice: session lifecycle + history snapshots — source verified (2026-10-19)
+
+Three subagents worked in disjoint zones; docs reconciliation plus two code repairs
+were integrated and verified.
+
+- AUD-01/02/04/11 (`3094754`): sign-out clears private state/stops audio before an
+  off-thread, deadline-bounded Secret Service deletion; only a genuine 401 deletes a
+  saved item (network/timeout/5xx/403 preserve it with Retry); attempt generations
+  prevent superseded saves/clears; secret-tool is byte-bounded, kill+reaped and
+  serialized; SavedSession Debug is redacted. Desktop43 pass/2 ignored; the real
+  two-process Secret Service save/resume/sign-out QA passed
+  (`target/checks/aud-session-p0/`).
+- AUD-13 (`48b2fa4`): owner history/export read one deferred snapshot and never prune
+  or reserve a writer; the hourly retention worker owns physical deletion. Core26+7,
+  API31; red/green showed 2.52ms success under an open writer vs 10.03s
+  SQLITE_BUSY on the old path.
+- Docs reconciliation in this worktree adds `CURRENT_STATE.md`, fixes stale
+  limitations/parity/matrix claims and records AUD-20 dependency FAIL honestly.
+
 ## Planning-only source audit2026-10-19 — application unchanged
 
 At user request, inspected clean main05b4c37/version0.12.6, current code/contracts,

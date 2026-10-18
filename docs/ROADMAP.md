@@ -8,13 +8,15 @@ It records20 findings/risks, repair ordering,42 future work packages, UX states,
 feature implementations, an original visual direction and release acceptance.
 This is planning at the user's request: no feature is marked implemented from the
 plan or its design screenshots. Preserve the existing verified slices below;
-historical contradictions identified by the audit still require reconciliation.
+historical contradictions identified by the audit were reconciled in place on
+2026-10-19 (docs-only) with the source/deployed/design split in
+[CURRENT_STATE.md](CURRENT_STATE.md).
 
 Status meanings: implemented=source exists; verified=checks recorded in PROGRESS; partial=exit criteria not all met; planned=no finished feature. No feature is complete because a UI mockup or schema exists.
 
 | Milestone | Current state | Exit condition and outstanding scope |
 | --- | --- | --- |
-| 0 Repository | Verified foundations | Stable dependency verification, workspace/server/web, WAL migrations, CI, architecture/threat model; package/runtime evidence remains in hardening |
+| 0 Repository | Verified foundations; dependency advisories gate OPEN | Stable dependency verification, workspace/server/web, WAL migrations, CI, architecture/threat model; package/runtime evidence remains in hardening. 2026-10-19: cargo-deny FAILs3 INFO Unmaintained notices (AUD-20), no ignore added — see CURRENT_STATE/SECURITY |
 | 1 Music cloud | Verified upload/playback slice | Account setup/auth, real batch browser uploads, metadata/artwork, private paginated catalog, original range streaming, player; expanded storage wizard remains |
 | 2 URL import | Verified direct-source slice | Preview, durable queue/progress/retry/cancel, streaming, exact dedup, SSRF; browser/public download and recovery tested; source collections/licenses/storage estimates need richer adapters |
 | 3 Complete library | Partial | Search/favorites/stats, paginated album/artist browsing, revisioned editor, read-only snapshot scanning, typed filters/title/newest ordering and private import/scan job center present; next verified editions, batch metadata editing, organization and remaining filter dimensions |
@@ -23,9 +25,8 @@ Status meanings: implemented=source exists; verified=checks recorded in PROGRESS
 | 6 Federation | Partial opt-in public profile; social protocol planned | ActivityPub interoperability profile, explicit opt-in visibility, WebFinger/discovery, origin verification/signatures/replay limits, follow/access requests, durable deliveries, remote metadata cache, blocked peers, privacy tests between two instances |
 | 7 Playback quality | Partial browser controls | Queue/seek/volume/repeat/fair shuffle/history/next priorities/keys/media-session integration; 0.7 adds browser context/progress restore and bounded reconnect; 0.8 adds shared-state Now Playing; 0.9 adds consented history and explicit local radio;0.12 adds a verified root sleep timer; next optional controlled FFmpeg, quality selection, validated ReplayGain/gapless/crossfade |
 | 8 Native/offline | Partial: Linux desktop slice | Real0.12 Dioxus Linux client with in-memory native HTTP, Rodio/CPAL output thread, MPRIS2, bounded prepared originals and verified Library/Queue playback. **Verified:** portable x86_64 tar package with exact-manifest/`ldd`/real-window launch
-smoke. **Outstanding:** deb/AppImage/signed installer, secure credential persistence,
-offline manifests/hash/resume/quota, Android Media3 service, iOS AVFoundation background audio, Windows/macOS clients, device transfer/sync; actual device evidence required |
-| 9 Interoperability | Planned | OpenSubsonic contracts/client tests, private listening history/stats, authorized lyrics/LRC, typed smart playlists, M3U/export, deterministic recommendations, optional distinct podcasts/radio |
+smoke; opt-in Secret Service token resume, v2 BLAKE3 offline manifests with startup sweep and a server-stopped offline queue, native playlist folders (0.12.6). **Outstanding:** audited keyring/offline lifecycle fixes, deb/AppImage/signed installer, background/automatic offline sync, Android Media3 service, iOS AVFoundation background audio, Windows/macOS clients, device transfer/sync; actual device evidence required |
+| 9 Interoperability | Planned | OpenSubsonic contracts/client tests, aggregate listening statistics/dashboards (history/export/delete already exist since0.9), authorized lyrics/LRC, typed smart playlists, M3U/export, deterministic recommendations, optional distinct podcasts/radio |
 | 10 Shared experiences | Planned | Authorized WebSocket rooms, clock/latency/reconnect semantics, shared queues, opt-in activity feeds, collection exploration, interoperability |
 | 11 Hardening | Partial | Regression/security/benchmark/backup/deploy work underway; ongoing audits, real container/ARM64 builds, stress/seek/upload/restart tests, accessibility review, release notes |
 

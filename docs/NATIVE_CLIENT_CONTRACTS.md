@@ -1,7 +1,11 @@
 # Native Linux client0.12 — verified bounded increment
 
-Status: verified source slice on Linux x86_64 only. It is not a packaged installer,
-not mobile/background audio, not offline playback and not completion of G18.
+Status: verified Linux x86_64 source and portable-package slice (0.12.6). It includes
+explicit offline device copies, opt-in Secret Service session resume and native
+playlist folders. It is not a system installer/auto-updater, not mobile/background
+audio and not completion of G18. The audit's keyring/offline lifecycle defects
+AUD-01/02/04/11 are fixed in source `3094754` (real two-process Secret Service QA);
+AUD-03/05/06/07/08/12 remain open; see [CURRENT_STATE.md](CURRENT_STATE.md).
 Evidence is listed at the end; see ADR0017 for the decision record.
 
 ## Ownership
@@ -11,7 +15,7 @@ Main owns workspace/`Cargo.lock`, this contract, `apps/desktop/src/lib.rs`,
 `client.rs` is the native HTTP/account boundary; `ui.rs` and `style.css` are
 presentation; `mpris.rs` is the Linux media observer. No contributor runs Cargo,
 changes original runtime/data or commits; max2 compiler jobs, one Cargo build at a
-time. The existing server, schema, HTTP API and frozen0.11 runtime are unchanged.
+time. The existing server, schema, HTTP API and frozen0.12.6 server runtime are unchanged.
 
 ## User journey
 

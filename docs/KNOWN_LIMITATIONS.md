@@ -2,10 +2,13 @@
 
 Source audit2026-10-19: [outstanding findings](PLANS/2026-10-19/01_AUDIT.md) and
 [ordered repair regressions](PLANS/2026-10-19/02_REPAIR_PLAN.md) include native
-keyring/lifecycle/offline issues still awaiting fixes. The audit identifies historical
-statements below that conflict with newer implemented Linux/offline/session features;
-read the current-source audit with dated progress/platform evidence until the planned
-documentation reconciliation. Proposed fixes/design are not completed features.
+keyring/lifecycle/offline issues still awaiting fixes. Documentation reconciliation
+2026-10-19 (docs-only): use [CURRENT_STATE.md](CURRENT_STATE.md) for the
+source/deployed/design split. Historical statements below that conflicted with the
+implemented native offline copies, opt-in Secret Service session and playlist folders
+are corrected in place; older sections remain as dated history. Proposed fixes/design
+are not completed features, and no code defect found by the audit is fixed by this
+reconciliation.
 
 Current0.9 adds explicit private account/device listening consent, bounded cumulative events/history/export/delete, optional durable local PCM/FFT analysis and bounded owner-only track radio. Exact executed checks are in PROGRESS. Collection is conservative and can undercount short/throttled/background playback; it cannot verify physical sound. Pending browser summaries are plaintext, capped100/128KiB, may drop the oldest at capacity and clear on logout/opt-out. History caps10000 retained sessions/account and32 device grants; Settings lists active grants and revokes one with privacy-revision CAS (deleting its sessions), while bulk device management is only the existing delete-all-and-disable path. Reads currently take a short SQLite writer lock to prune; contention is not benchmarked. DSP uses at most a120-second prefix by default, cooperative deadlines and no process memory sandbox; unsupported decoders fail safely. There is no per-job analysis cancel/pause UI; shutdown cooperatively cancels/drains and requeues interrupted work. The unified Jobs page still projects imports/scans only; analysis has its own real status/counts on Radio. Real decoder fixtures cover WAV/FLAC/MP3; Opus analysis is unsupported even where a browser plays it. Tempo is a bounded onset-regularity estimate, not a validated beat annotation; chroma is nearest-semitone pitch-class energy; key is an uncalibrated Krumhansl-profile heuristic (no tuning/chord transcription), and there is no genre/mood inference, LUFS/normalization or exhaustive million-track similarity index. Radio considers at most500 newest other owned tracks, with metadata fallback; personal daily/weekly mixes and history-based ranking remain absent. These additions do not establish native or federated functionality.
 
@@ -20,7 +23,7 @@ This is an early functional slice. The complete master roadmap is not delivered.
 - A Linux native desktop package exists with explicit private offline copies (max100/2GiB,0600, account-scoped), an offline Previous/Next queue and confirmed per-copy removal; saved originals play with the server stopped. Offline v2 manifests verify BLAKE3 before playback and a bounded startup sweep flags
 corrupt copies; there is no content/entitlement sync, automatic download, bulk storage
 manager, Android/iOS hardware validation, device transfer, remote control, PWA cache or background audio. Linux supports explicit opt-in Secret Service session persistence (opaque token only); Windows Credential Manager, macOS Keychain, Android Keystore and biometric unlock are absent.
-- No federation, profiles/follows/activity feed/rooms, peer discovery, connected-server adapter, unified multi-server search or OpenSubsonic routes. Federation remains disabled; no private content is published.
+- Explicit public publication and read-only public-catalog consumption exist (0.11 profile; see "Public catalog0.11 scope"). The native client saves canonical origins, searches them per-origin with cursors and browse-only cached fallback, and plays granted public streams; that remote path is verified only over loopback/private test CA, not Internet public-CA or two physical hosts. The web Network view is a single-origin first20 preview. There is still no ActivityPub-style federation, profiles/follows/activity feed/rooms, automatic peer discovery/WebFinger, HTTP signatures, merged global cursor, connected-server library adapter or OpenSubsonic routes. The live0.12.6 runtime has discovery disabled and0publications; no private content is public without an explicit per-track declaration.
 - No direct-reference external libraries, WebDAV/S3/ZIP/Archive.org/feed adapters, cloud playlist metadata adapters or arbitrary commercial-service downloading. Direct HTTP/S audio, browser batch uploads and administrator-configured read-only folder snapshots are implemented ingestion paths. Browser preview knows filename/MIME/size, not pre-downloaded embedded album tags/artwork/license information.
 - No FFmpeg transcoding, quality presets, ReplayGain, verified gapless/crossfade, playback-speed control or cross-device session-position synchronization. The web sleep timer pauses this tab’s player only; it is not an OS-level or cross-device timer. Uploaded uncommon containers/codecs may not play in the browser. No full-frame decode verification; later corrupt frames may survive metadata validation.
 - Persisted album/artist groups and dedicated screens use trimmed names with SQLite ASCII NOCASE and album-artist/year keys (ADR0004). Unknown years remain provisional separate groups; Unicode case folding, verified editions/recordings, multiple encodings, genres/composer catalog, batch metadata editing and the remaining sort/filter dimensions (duration, size, last-played/play-count) remain planned. Genre/format/year/technical minimums and title/newest orders are implemented for Library/Favorites. Catalog pages50/max100 use UUID keyset cursors; new randomUUID additions may appear before a cursor. Album pages follow disc/track order but edits between pages can move tracks. Queue contains selected pages, not the whole catalog. Missing album tags remain available through Library rather than an invented album.
@@ -33,7 +36,7 @@ manager, Android/iOS hardware validation, device transfer, remote control, PWA c
 - Container runtime/build, ARM64, WebKit/Safari, stock-browser/OS combinations and OS system controls and actual mobile hardware must be validated separately; only checks in PROGRESS count. CI has been configured but is not remotely executed/published by this session.
 - No independent security audit, backup encryption, encrypted local browser catalog or public production deployment. No software updates performed on external servers.
 
-- Dependency policy checks pass with the single documented unmaintained compile-time `paste` advisory exception. Generated license notices include packaged texts and hash-verified pinned upstream texts for most crates;15 packages currently have metadata-only notices (down from12; provenance in docs/third-party-license-texts). Full grants were not found at their inspected exact commits. External redistribution needs those notice gaps reviewed. No release was externally published.
+- **Dependency gate2026-10-19: FAIL for the advisories check.** `cargo-deny` rejected three INFO Unmaintained notices — `zvariant5.15.1` RUSTSEC-2026-0370, `zbus_names4.3.5` RUSTSEC-2026-0371 and `zvariant_derive5.15.1` RUSTSEC-2026-0372 — through `vela-desktop → mpris-server0.10.0 → zbus5.19.0`. Bans/licenses/sources passed. No ignore/exception was added for these three; they are maintenance notices, not published runtime vulnerabilities, and no exploitation is established. Evidence: `target/checks/audit-20261019/dependencies.log`; `deny.toml` keeps its earlier reasoned ignores (paste/GTK/fxhash), none of which covers these notices. Older "dependency policy passes" sentences and dated logs are historical and predate this advisory database. Generated license notices include packaged texts and hash-verified pinned upstream texts for most crates;15 packages currently have metadata-only notices (down from12; provenance in docs/third-party-license-texts). Full grants were not found at their inspected exact commits. External redistribution needs those notice gaps reviewed and a resolved dependency gate. No release was externally published.
 
 - Catalog-only per-track metadata editing is implemented; original tag write-back and bulk edits are unavailable. The editor uses native HTML dialog behavior; non-Chromium accessibility/platform behavior still needs separate validation. Metadata revisions are local-server records; cross-server/offline metadata editing is not supported.
 
@@ -102,11 +105,20 @@ The installer is a same-build handover, not an updater; schema upgrades require 
 verified backup and the separate upgrade process. Native clients/offline/device
 handoff and Apple/Android hardware validation remain unfinished.
 
-## Native Linux client0.12 scope
+## Native Linux client0.12.x scope
 
-The0.12 Linux x86_64 desktop application is a real Dioxus/WebKitGTK window with a
+**Updated2026-10-19:** this section previously described only the first0.12 slice;
+the0.12.5/0.12.6 package adds explicit offline copies, opt-in Secret Service resume
+and native playlist folders, documented below and in
+[NATIVE_CLIENT_CONTRACTS.md](NATIVE_CLIENT_CONTRACTS.md). The audit's native
+AUD-03/05/06/07/08/12 (offline prepare on UI thread, cold launch,
+origin-scoped cache, queue removals, freshness, quota/crash consistency) remain open;
+AUD-01/02/04/11 session/keyring fixes are source-verified in `3094754`, AUD-13 in
+`48b2fa4`.
+
+The0.12.6 Linux x86_64 desktop application is a real Dioxus/WebKitGTK window with a
 Rodio/CPAL output thread and MPRIS2 observer, verified against an isolated fixture
-server/account/media. A portable x86_64 tar package now has an exact-manifest/ldd/version check and a real
+server/account/media. A portable x86_64 tar package has an exact-manifest/ldd/version check and a real
 styled-window launch/close smoke. It is not an installer, AppImage/deb/rpm/Flatpak,
 signed artifact, auto-updated client or release-ready desktop distribution. The window was
 created only on this Hyprland/X11 host; GNOME/KDE/Wayland variants, screen readers,
@@ -116,11 +128,26 @@ Playback downloads the complete authorized original into a private temporary fil
 before decoding; there is no progressive streaming, gapless, crossfade, ReplayGain,
 quality selection or measured time-to-audible claim. The250MiB/one-source bound and
 preparation progress/cancel/retry are real, but large files incur preparation time
-and temporary disk use. Offline playback, download grants, manifests, quotas and
-airplane-mode behavior do not exist. Sign-in requires the account each launch:
-credentials and CSRF are memory-only and no keychain/secure persistence is claimed.
-Sign-out clears the queue/catalog and stops native audio, but no cross-device
-session, device handoff or remote-control protocol exists.
+and temporary disk use. Explicit per-track offline copies **exist** in the0.12
+Linux client, with v2 BLAKE3 manifests in0.12.6
+(100 tracks/2GiB, account-scoped0600 audio, digests verified before
+playback and by a bounded startup sweep, newest-saved offline Previous/Next queue,
+confirmed per-copy removal; QA played with the fixture server stopped). There is
+still no separate download-grant entitlement, background/automatic download or sync,
+bulk storage manager, or verified cold launch/airplane-mode playback without a prior
+in-process sign-in (AUD-05). By default sign-in is required each launch and
+credentials/CSRF stay memory-only. An explicit opt-in **Remember this session**
+stores only the opaque session token and canonical origin in the Linux freedesktop
+Secret Service; password/username/CSRF are never stored, and resume still calls
+`/api/me` (0.12.5+). Windows Credential Manager, macOS Keychain, Android Keystore and
+biometrics are absent. Source commit `3094754` fixes AUD-01/02/04/11: sign-out stops
+audio/clears private state first and deletes the keyring item off-thread with a
+bounded deadline; transient/network/5xx/403 errors preserve the saved item (only a
+genuine 401 rejection deletes it); secret-tool calls are byte/deadline bounded,
+serialized and kill+reaped, and SavedSession Debug is redacted. The real two-process
+Secret Service QA passed. The frozen live0.12.6 runtime predates this fix. Sign-out
+clears the queue/catalog and stops native audio, but no cross-device session, device handoff or
+remote-control protocol exists.
 
 The native UI covers Library, Favorites, Albums, Artists, Playlists, Public and Queue,
 transport, theme, sign-in and sign-out.
@@ -128,7 +155,8 @@ Favorites are implemented natively (filtered view, per-row favorite/unfavorite a
 queue-state synchronization). Native playlists support real list/detail metadata, per-entry `can_stream`
 labels, playback of the authorized subset, and owner create/CAS-rename/confirm-delete.
 Albums and artists are browsable natively with read-only grouped detail and playback
-of the owner-authorized tracks. Playlist entry add/reorder/removal is native; playlist folders, album/artist
+of the owner-authorized tracks. Playlist entry add/reorder/removal is native; playlist folders are native since0.12.4/0.12.5
+(owner-scoped create/filter/move/rename/delete with CAS), while album/artist
 metadata editing, search history, settings/privacy, listening history and
 recommendations remain browser-web features only. Native listening events
 are not sent, so consent/history cannot be inferred from native preparation or

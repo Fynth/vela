@@ -1,5 +1,12 @@
 # Verified0.12.0 package and preserved runtime checkpoint
 
+Documentation reconciliation2026-10-19 (docs-only): current deployed server baseline
+is the frozen0.12.6/schema12 runtime and the current native package is0.12.6; the
+0.12.0–0.12.5 sections are dated historical checkpoints, not current state. Golden
+G14/G15 are corrected to PARTIAL below (exact tested subset stated); see
+[CURRENT_STATE.md](CURRENT_STATE.md) for the source/deployed/design split. No check
+was executed for this reconciliation.
+
 Source `d3bde0c`; archived package SHA256 above. Exact extracted0.12.0 binary/assets
 served the original data directory after a verified backup/isolated restore; the
 service is healthy with schema11 and all prior rows/media intact.
@@ -37,6 +44,8 @@ was installed.
 | Native TLS federation | apps/desktop/src/remote.rs; scripts/verify_native_client.py | 0.12.5 source | One-day local CA + IP-SAN cert; Python TLS terminator proxies the second peer; native reqwest validates the chain for catalog/stream;3 TLS connections; debug-only CA/transport overrides absent from release strings;28/30 desktop tests | PASS for loopback TLS certificate validation | Internet DNS/public CA/two physical hosts NOT_RUN | desktop/main |
 | Native public peer playback | apps/desktop/src/remote.rs,ui.rs; scripts/verify_native_client.py; examples/native-ui-qa.{rs,js} | 0.12 local | Second isolated Vela instance: canonical public origin, explicit CC-BY stream publication, two isolated peers, save/remove origins in isolated private0600 config, 21-record public peer first page20 then preview cursor Load more appends the final record; unified search per-peer cursor Load more appends its 21st result with no duplicate IDs, unified search returns both origins, unreachable saved peer returns browse-only cached metadata with age, no play action and an explicit Retry live that remains cached when still unreachable, second-origin public playback, remote previous/next across both origins, credential-free;28/30 desktop tests | PASS for loopback debug transport | Internet TLS/two-host validation NOT_RUN | main |
 | Native playlist folders | apps/desktop/src/{client,ui}.rs; examples/native-ui-qa.{rs,js} | 0.12.4 source | Owner folder create/filter/move/rename/delete via real APIs; unfiled keeper excluded by filter; delete unfiles and restores grouping;28/30 desktop tests | PASS for Linux native source | Source newer than packaged0.12.4 desktop archive; no folder drag/drop | desktop |
+| Desktop saved-session P0 repair | apps/desktop/src/{session_store,ui}.rs; scripts/verify_native_client.py | `3094754` | AUD-01/02/04/11: off-thread bounded keyring deletion after audio stop; transient/5xx/403 preserve item, only401 deletes; attempt generations; byte-bounded/kill+reap/serialized helper; redacted Debug; desktop43 pass2 ignored; real two-process Secret Service save/resume/sign-out QA `target/checks/aud-session-p0/` | PASS for source+Linux Secret Service | Not deployed to live0.12.6; no hung-real-D-Bus repro | desktop |
+| History snapshot reads | crates/core/src/listening.rs | `48b2fa4` | AUD-13: history/export use one deferred snapshot, no BEGIN IMMEDIATE/prune on GET; hourly worker prunes; core26+7, API31; red/green 2.52ms vs10.03s SQLITE_BUSY under open writer | PASS for source | Retention worker delay not measured live; preferences/devices GETs still write | core |
 | Native hardening review fixes | apps/desktop/src/{offline,session_store,ui}.rs; crates/core/src/playlists.rs | working slice | Keyring singleton/verified deletion/malformed cleanup; same-fd BLAKE3 offline verification + failed-manifest cleanup; transactional folder-owned move; two-process resume + server-stopped offline QA;28/30 desktop tests,31 API tests | PASS for reviewed fixes | Independent review produced no findings before stop; self-review fixes recorded; loopback/mobile limits unchanged | desktop/core |
 | Native saved session | apps/desktop/src/{session_store,client,ui}.rs; scripts/verify_native_client.py | 0.12.5 source | Opt-in checkbox stores opaque token/origin in unique QA Secret Service item; second native process resumes via `/api/me` without password; sign-out clears item; envelope has no password/username/CSRF;28/30 desktop tests | PASS for Linux Secret Service | Windows/macOS/mobile stores, biometrics NOT_RUN | desktop/main |
 | Native offline copy/playback | apps/desktop/src/{offline,ui,client}.rs; apps/desktop/examples/native-ui-qa.{rs,js}; scripts/verify_native_client.py | `7609a76`+working slice | Explicit download of two tracks via validated originals; account-scoped0600 audio+v2 BLAKE3 manifests checked before playback and by the startup sweep; harness stops real fixture server, health probe fails, first offline original plays to advancing media, Next/Previous move within the newest-saved offline queue, confirmed removal leaves one pair;28/30 desktop tests | PASS for Linux one-track offline playback | No offline queue/removal/sync, mobile/background | desktop/main |
@@ -133,7 +142,7 @@ Private defaults were unchanged. Full native clients and public federation remai
 
 # Current mandate evidence
 
-## Golden-scenario coverage map (2026-10-18 checkpoint)
+## Golden-scenario coverage map (2026-10-18 checkpoint; G14/G15 reconciled2026-10-19)
 
 Mapping of all24 golden scenarios to executed evidence and honest status. Historical
 EXP/PLAY/PLNAV/RES/NET/AUTH/NP regression IDs and their browser scenarios are the
@@ -160,9 +169,19 @@ executable substitutes where a golden cannot run on this host.
   cursor and progressive partial-results UI are absent.
 - G13 cross-server playlist + B disconnect status: NOT_RUN (design checkpoint; folders
   and metadata are local-only; remote playlist references are not created).
-- G14 forged peer/replay/SSRF/huge object abuse: EXECUTED (network/security tests).
-- G15 federated public recommendation/revocation/no cache leak: EXECUTED for the
-  realized subset (revocation/public-first behavior tested via publications).
+- G14 forged peer/replay/SSRF/huge object abuse: **PARTIAL — executed subset only**
+  (reconciled2026-10-19): public-DNS/redirect validation, SSRF address rejection,
+  oversized/128KiB body and capacity limits, hostile/slow peer, metadata-only
+  projection, spoofed origin/ID and grant mismatch, revocation, via network/security
+  tests and PN01/PN02. **Absent/NOT_RUN:** HTTP-signature actor authentication, forged
+  actor identity and signed-request replay (no signature/replay protocol exists), and
+  Internet public-CA/two-host validation. Not full G14 acceptance.
+- G15 federated public recommendation/revocation/no cache leak: **PARTIAL — executed
+  subset only** (reconciled2026-10-19): explicit publication revocation → catalog/
+  stream404 and public-first/private-default behavior (publications/two-node tests;
+  web revoke flow). **Absent/NOT_RUN:** a federated/public recommendation model (none
+  exists) and cross-node cache-leak/tombstone validation; native cached peer metadata
+  is browse-only with no play action and no background refresh.
 - G16 Android APK on device/emulator: BLOCKED (no Android SDK/NDK/Gradle on host).
 - G17 iOS simulator/device: BLOCKED (no macOS/Xcode).
 - G18 desktop packages on each platform in CI/physical: PARTIAL — Linux tar + WebKitGTK
@@ -180,9 +199,10 @@ executable substitutes where a golden cannot run on this host.
   release (backup restore, SIGTERM, restart, failure-recovery tests).
 
 Summary of honest gaps: G10 full parity, G12 merged cursor/partial UI, G13 cross-server
-playlists, G16/G17/G19 platform evidence, G21 fresh 100k multi-server run, G23
-localization/screen-reader. Everything else in the realized slice set is EXECUTED with
-the evidence in this file and PROGRESS.
+playlists, G14 forged-actor/signature-replay acceptance, G15 federated recommendation/
+cache-leak validation, G16/G17/G19 platform evidence, G21 fresh 100k multi-server run,
+G23 localization/screen-reader. Everything else is EXECUTED to the evidence scope
+stated above, not beyond it.
 
 The latest master mandate has24 golden scenarios. Historical G01–G14 numbers in older docs/tests belong to the earlier UX brief and do not automatically satisfy the new meanings. Preserve named regression IDs EXP/PLAY/PLNAV/RES/NET/AUTH/NP. New history uses G07-private-history, DSP G08-audio-analysis and radio G09-track-radio.
 
