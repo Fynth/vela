@@ -1,5 +1,77 @@
 # Verified progress
 
+## Queue truthfulness and owner playlist lifecycle0.12 — verified source (2026-10-18)
+
+Application/source checkpoint `6421f3d` (native hardening `05951fd`). Continued the
+same dirty0.12 worktree without schema migration or original-data changes; the
+frozen0.11 runtime PID78464 stayed active/healthy on127.0.0.1:3210 with its original
+data. A bounded web contributor implemented queue move-down/Clear-upcoming/first-page
+truthfulness in `apps/web/src/main.rs`; main owned the domain/core/server contracts,
+playlist UI, integration, compilers, tests and evidence. An independent read-only
+native review had found a real temporary-source leak and other medium issues; those
+were fixed and re-verified in`05951fd` (see the native section below).
+
+### Implemented
+
+Owner-only `PATCH /api/playlists/{id}` accepts a closed
+`UpdatePlaylist{revision,mutation_id,name}`, applies revision CAS and mutation-id
+idempotency, validates a trimmed1–120-character control-free name and audits
+`playlist.edit`. Owner-only `DELETE /api/playlists/{id}?revision=&mutation_id=`
+cascades entries, collaborator grants, share links and mutation records, audits
+`playlist.delete`, and leaves owned tracks/assets/stream rights untouched; later
+detail/share reads and repeated deletes return404. Unknown rename fields are400;
+editors/viewers/outsiders get404; a missing CSRF header is403. Playlist detail now
+shows owner rename/Save and inline Delete→Confirm/Cancel plus move-down, refreshing
+the guarded same view and list only on success. The web `mutate` helper now supports
+PATCH (the first real-browser run caught that it silently used POST).
+
+Queue rows gained occurrence-aware move-down; “Clear upcoming” keeps rows0..=cursor
+and removes only the suffix back-to-front through supported `PlaybackOrder::remove`,
+so the playing occurrence/audio and already-played history survive. Remove-current
+has an honest disabled explanation, and “Back to first page” is disabled on page one
+using the incoming cursor that produced the visible page.
+
+### Executed gates and defects
+
+- New real-TCP test covers owner rename, trimmed revision/idempotent replay,
+  conflicting identity reuse, stale revision409, unknown-field400, editor/outsider
+ 404, missing-CSRF403, share-link revocation, delete CAS, repeated-delete404 and
+  unchanged track list/stream (`target/checks/playlist-lifecycle-api.log`).
+- `cargo fmt --all -- --check`; strict `cargo clippy --locked --workspace
+  --all-targets -- -D warnings`; strict wasm32 web Clippy; `cargo test --locked
+  --workspace -- --test-threads=2`:233 passed,0 failed,2 explicitly ignored opt-ins
+  (owned-null-sink audio, private D-Bus MPRIS). Python tooling:22 passed. JS syntax
+  checks passed. Logs:`playlist-{workspace-tests,workspace-clippy,wasm-clippy,
+  python}.log`.
+- The release web build failed first because `wasm-bindgen` was not on PATH; the
+  preserved pinned `target/tools/wasm-bindgen-0.2.129` was used explicitly.
+- The first Chromium run (40 tests) stopped after test2 because rename returned
+  “The request was refused.”; trace showed the shared web `mutate` helper lacked
+  PATCH and sent POST. After the fix, **Chromium40/40 passed in2.5m** and
+  **Firefox40/40 passed in3.3m**, both with `VELA_LIVE_IMPORT_TEST=1`, including the
+  new playlist lifecycle and queue assertions plus every prior publication/
+  history/DSP/radio/player regression. Logs:`playlist-{chromium2,firefox}.log`;
+  Firefox screenshots are preserved in`target/checks/playlist-firefox-final-screens`
+  and main visually inspected the lifecycle/list view.
+- Native hardening re-verification:23/25 desktop tests with both opt-ins executed,
+  real WebKitGTK window15/15 plus zero temporary directory entries, and bounded
+  MPRIS session test passed (`native-0.12b-*`, native-0.12b-window).
+- First-party review resolved the reported25-vs17 test-count concern by enumerating
+  the actual25 tests (8 audio,6 client,3 MPRIS,8 shared playback); the docs'23-run
+  claim was correct.
+
+### Scope and next work
+
+FUNCTIONAL_TESTED for the source web/API slice. No exact0.12 package was produced or
+installed, and the active runtime remains0.11.0; no Docker, Safari/WebKit, screen
+reader, physical-audio or mobile-hardware validation follows. Playlists still lack
+folders, smart rules, invitations/media grants, owner transfer and drag/drop. Next
+autonomous slices: package/verify0.12 only after deciding whether the native app
+belongs in the server package; native favorites/playlist surfaces; saved peer
+catalog adapters and genuinely playable authorized remote streaming; then scheduled
+recommendation refresh. Preserve the0.11 runtime, all backups/releases/evidence and
+this exact checkpoint; re-inspect process/data on resume.
+
 ## Native Linux client0.12.0 — verified source, original runtime preserved (2026-10-18)
 
 Application/source checkpoint `3a285e0`. Started from the dirty post-0.11 worktree
@@ -54,6 +126,21 @@ sent, so consent/history is not bypassed or inferred.
   ignored resize requests; `enable` is the documented Hyprland action. This was a
   test-driver defect, not application behavior, and is fixed in the committed QA
   example.
+- Follow-up `05951fd` integrated the independent read-only review. The accepted HIGH
+  finding was real: the first adapter created a named temporary file while the
+  transfer was in progress, so closing the window during “Preparing” could leave a
+  partial private original. Preparation now creates an unnamed0600 file from the
+  first byte (`O_TMPFILE`/create-and-unlink), the transfer test asserts zero
+  directory entries while a held download is active, and decoding still reopens the
+  inode through procfd. MPRIS update/command channels are bounded64/32; a dead audio
+  worker stops advertising playable transport and offers an explicit same-account
+  reconnect; the QA harness requires `PULSE_SINK` plus an ALSA config routed to the
+  script-owned null sink; the resize-error UTF-8 slice panic, username length
+  mismatch and weaker startup-origin check were fixed. Re-verified: fmt, strict
+  Clippy,23/25 desktop tests with both opt-ins executed, real WebKitGTK window15/15
+  and zero temporary entries after exit, and the bounded-channel MPRIS session test
+  (`target/checks/native-0.12b-*`, `native-0.12b-window/`). The review's reported
+  17-test count was reconciled against the actual25 enumerated tests.
 - The same session's DSP packet added9 deterministic numerical tests (module now19:
   pure/two-tone spectra, silence, sub-window, clipping/oversized PCM, determinism,
   click/ZCR, -60dBFS, non-finite bounds) inside `crates/media/src/analysis.rs`; one
