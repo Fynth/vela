@@ -145,6 +145,7 @@ struct Ui {
     remote_loading: Signal<bool>,
     remote_error: Signal<String>,
     remote_now: Signal<Option<crate::remote::RemoteNow>>,
+    saved_peers: Signal<Vec<String>>,
     queue: Signal<Vec<Track>>,
     order: Signal<PlaybackOrder>,
     shuffle: Signal<bool>,
@@ -1854,11 +1855,49 @@ fn play_public(mut ui: Ui, track: PublicTrack) {
     });
 }
 
+fn save_public_peer(mut ui: Ui) {
+    let Some(preview) = ui.remote_preview.peek().clone() else {
+        return;
+    };
+    let mut peers = ui.saved_peers.peek().clone();
+    if !peers.contains(&preview.origin) {
+        peers.push(preview.origin);
+        peers.sort();
+    }
+    match crate::peers::save(&peers) {
+        Ok(()) => {
+            ui.saved_peers.set(peers);
+            ui.remote_error.set(String::new());
+            ui.notice.set("Public server saved.".into());
+        }
+        Err(error) => ui.remote_error.set(error),
+    }
+}
+
+fn remove_public_peer(mut ui: Ui, origin: String) {
+    let mut peers = ui.saved_peers.peek().clone();
+    peers.retain(|peer| peer != &origin);
+    match crate::peers::save(&peers) {
+        Ok(()) => {
+            ui.saved_peers.set(peers);
+            ui.notice.set("Public server removed.".into());
+        }
+        Err(error) => ui.remote_error.set(error),
+    }
+}
+
+fn open_saved_peer(mut ui: Ui, origin: String) {
+    ui.remote_origin.set(origin);
+    explore_public(ui);
+}
+
 fn public_view(ui: Ui) -> Element {
     let loading = *ui.remote_loading.read();
     let error = ui.remote_error.read().clone();
     let preview = ui.remote_preview.read().clone();
+    let saved = ui.saved_peers.read().clone();
     let explore = ui.clone();
+    let save_current = ui.clone();
     let mut origin = ui.remote_origin;
     rsx! {section {class:"native-library","aria-label":"Public catalogs",
         div {class:"library-intro",div {span {class:"eyebrow","OPT-IN PUBLIC NETWORK"} h1 {"Public catalogs"} p {"Fetch one explicitly published catalog over its advertised origin. Private libraries, history and credentials are never sent."}}}
@@ -1867,10 +1906,30 @@ fn public_view(ui: Ui) -> Element {
             input {id:"native-peer-origin",r#type:"url",maxlength:2048,value:"{origin}",placeholder:"https://music.example.org",oninput:move |event|origin.set(event.value())}
             button {class:"button primary",r#type:"submit",disabled:loading,if loading {"Exploring…"} else {"Explore public catalog"}}
         }
+        if !saved.is_empty() {
+            div { class: "catalog-caption", p { "Saved public servers" } span { "NO SECRETS" } }
+            div { class: "native-queue-list",
+                for peer in saved.iter().cloned() {
+                    {
+                        let open = ui.clone();
+                        let remove = ui.clone();
+                        let peer_label = peer.clone();
+                        let peer_open = peer_label.clone();
+                        rsx! { article { class: "native-queue-row", key: "{peer}",
+                            button { class: "native-queue-select", "aria-label": "Open saved server {peer_label}", onclick: move |_| open_saved_peer(open.clone(), peer_open.clone()),
+                                div { class: "neutral-cover", "aria-hidden": "true", Icon { name: "network" } }
+                                div { strong { "Saved public server" } small { "{peer_label}" } }
+                            }
+                            button { class: "icon-button", "aria-label": "Remove saved server {peer_label}", title: "Remove this saved origin; no server data is deleted.", onclick: move |_| remove_public_peer(remove.clone(), peer_label.clone()), Icon { name: "close" } }
+                        } }
+                    }
+                }
+            }
+        }
         if loading {div {class:"native-loading",role:"status",span {class:"loading-mark","aria-hidden":"true"} "Reading the public catalog…"}}
         if !error.is_empty() {div {class:"alert error",role:"alert","{error}"}}
         if let Some(preview) = preview {
-            div {class:"catalog-caption",p {"{preview.items.len()} explicit public records · origin {preview.origin}"} span {"PUBLIC RIGHTS"}}
+            div {class:"catalog-caption",p {"{preview.items.len()} explicit public records · origin {preview.origin}"} if !saved.contains(&preview.origin) { button { class: "button secondary small", onclick: move |_| save_public_peer(save_current.clone()), "Save this server" } } else { span { "SAVED" } }}
             if preview.items.is_empty() {
                 div { class: "native-empty", Icon { name: "network" } h2 { "This public catalog is empty" } p { "The server exposes metadata only when its owner explicitly publishes a licensed track." } }
             } else {
@@ -2116,6 +2175,7 @@ pub fn App() -> Element {
         remote_loading: use_signal(|| false),
         remote_error: use_signal(String::new),
         remote_now: use_signal(|| None),
+        saved_peers: use_signal(|| crate::peers::load().unwrap_or_default()),
         queue: use_signal(Vec::new),
         order: use_signal(PlaybackOrder::default),
         shuffle: use_signal(|| false),

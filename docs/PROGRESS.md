@@ -22,6 +22,18 @@ physical sound/screen readers. Release build is now covered by the CI build step
 `target/checks/desktop-package-{2,verify}.log` and the preserved pre-fix archive under
 `target/checks/desktop-package-warning-artifact/`.
 
+## Native saved public peers0.12 — verified (2026-10-18)
+
+The native Public view can now save/remove at most32 canonical public origins in a
+versioned JSON file under `$XDG_CONFIG_HOME/vela/peers.json` (fallback
+`~/.config/vela`). The store is atomic and private0600, rejects credentials,
+non-canonical/plain-HTTP non-loopback origins, malformed/oversized/unsupported files
+and stores no server metadata, tokens or history. The two-instance QA saves the
+peer, removes it, re-saves it, and verifies the isolated config contains exactly the
+canonical origin with0600 permissions; public playback continues through the native
+engine. Evidence:`target/checks/native-saved-peers3/`; desktop24/25 tests plus both
+opt-ins separately, strict Clippy/fmt. No schema, server or original-data change.
+
 ## Verified0.12.0 package and preserved original-data runtime upgrade (2026-10-18)
 
 Package source `d3bde0c8e1c93324cf8628d8def8ba02e824bac4`. Local review artifacts

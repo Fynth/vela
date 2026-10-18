@@ -143,7 +143,7 @@ def main():
                         raise RuntimeError('Isolated peer public catalog did not expose the streaming fixture')
                     environment.update({'VELA_NATIVE_PEER_CANONICAL': peer_origin, 'VELA_NATIVE_PEER_TRANSPORT': peer_transport, 'VELA_NATIVE_QA_PEER_ORIGIN': peer_origin})
                 # Per-process ALSA and Pulse routing, never a global default change.
-                environment.update({'TMPDIR': str(private / 'temporary'), 'ALSA_CONFIG_PATH': str(alsa), 'PULSE_SINK': SINK, 'GDK_BACKEND': 'x11', 'VELA_NATIVE_TEST_SINK': SINK, 'VELA_DESKTOP_SERVER_URL': origin, 'VELA_NATIVE_QA_USERNAME': 'nativefixture', 'VELA_NATIVE_QA_PASSWORD': password, 'VELA_NATIVE_QA_REPORT': str(report), 'XDG_DATA_HOME': str(private / 'home'), 'XDG_CACHE_HOME': str(private / 'home/cache'), 'CARGO_BUILD_JOBS': '2'})
+                environment.update({'TMPDIR': str(private / 'temporary'), 'ALSA_CONFIG_PATH': str(alsa), 'PULSE_SINK': SINK, 'GDK_BACKEND': 'x11', 'VELA_NATIVE_TEST_SINK': SINK, 'VELA_DESKTOP_SERVER_URL': origin, 'VELA_NATIVE_QA_USERNAME': 'nativefixture', 'VELA_NATIVE_QA_PASSWORD': password, 'VELA_NATIVE_QA_REPORT': str(report), 'XDG_DATA_HOME': str(private / 'home'), 'XDG_CONFIG_HOME': str(private / 'home'), 'XDG_CACHE_HOME': str(private / 'home/cache'), 'CARGO_BUILD_JOBS': '2'})
                 if args.test_audio_engine:
                     with (evidence / 'audio-unit.log').open('wb') as audio_log:
                         subprocess.run(['cargo', 'test', '--locked', '-p', 'vela-desktop', '--lib', 'audio::tests::native_owned_null_sink_play_pause_seek_eof_replace_stop_and_cleanup', '--', '--ignored', '--exact', '--nocapture'], cwd=ROOT, env=environment, stdout=audio_log, stderr=subprocess.STDOUT, timeout=180, check=True)
@@ -158,6 +158,16 @@ def main():
                 report.write_text(json.dumps(result, indent=2) + '\n')
                 if originals:
                     raise RuntimeError('Native process left a completed temporary original after exit')
+                if args.test_peer:
+                    config_path = private / 'home' / 'vela' / 'peers.json'
+                    config = json.loads(config_path.read_text())
+                    expected = peer_origin + '/'
+                    if config.get('version') != 1 or config.get('peers') != [expected]:
+                        raise RuntimeError('Saved peer config does not contain exactly the canonical origin')
+                    if config_path.stat().st_mode & 0o077:
+                        raise RuntimeError('Saved peer config is not private0600')
+                    result['saved_peer_config'] = {'path': str(config_path), 'peers': config['peers']}
+                    report.write_text(json.dumps(result, indent=2) + '\n')
                 print(json.dumps(result, indent=2))
     finally:
         for process in (driver, server, peer_process):

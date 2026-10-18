@@ -199,7 +199,16 @@ try {
     try { await wait(() => document.querySelectorAll('[data-public-track-id]').length >= 1, 'Second-server public catalog'); }
     catch { throw new Error(`Second-server public catalog failed (error=${el('.alert.error')?.textContent?.trim() || '-'} input=${el('#native-peer-origin')?.value || '-'} rows=${document.querySelectorAll('[data-public-track-id]').length})`); }
     assert(document.querySelectorAll('[data-public-track-id]').length >= 1, 'Second-server public catalog exposes an explicitly published track');
+    await click('Save this server');
+    await wait(() => (el('.alert.notice')?.textContent || '').includes('Public server saved.'), 'Save public server');
+    assert(document.querySelector('[aria-label^="Remove saved server"]'), 'Saved public server is listed');
     await capture('public-dark');
+    el('[aria-label^="Remove saved server"]').click();
+    await wait(() => (el('.alert.notice')?.textContent || '').includes('Public server removed.'), 'Remove public server');
+    assert(!document.querySelector('[aria-label^="Remove saved server"]'), 'Saved public server can be removed');
+    await click('Save this server');
+    await wait(() => document.querySelector('[aria-label^="Remove saved server"]'), 'Re-save public server');
+    assert(document.querySelector('[aria-label^="Remove saved server"]'), 'Saved public server persists for the config check');
     const publicRow = el('[data-public-track-id]');
     publicRow.querySelector('button').click();
     try { await wait(() => phase() === 'Playing' && position() > 100 && (el('.native-player-status small')?.textContent || '').includes('Public ·'), 'Public track playback'); }
