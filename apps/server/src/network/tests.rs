@@ -1,9 +1,11 @@
 //! Real independent HTTP servers; the fixture route pin exists only in unit builds.
 use super::*;
+use std::sync::{Arc, Mutex};
 struct Node {
     base: String,
     state: AppState,
     task: tokio::task::JoinHandle<()>,
+    requests: Arc<Mutex<Vec<String>>>,
     _directory: tempfile::TempDir,
 }
 impl Drop for Node {
@@ -32,7 +34,17 @@ impl Node {
             .unwrap();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
-        let app = router(state.clone());
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let recorder = requests.clone();
+        let app = router(state.clone()).layer(axum::middleware::from_fn(
+            move |request: axum::extract::Request, next: axum::middleware::Next| {
+                let recorder = recorder.clone();
+                async move {
+                    recorder.lock().unwrap().push(request.uri().to_string());
+                    next.run(request).await
+                }
+            },
+        ));
         let task = tokio::spawn(async move {
             axum::serve(
                 listener,
@@ -45,6 +57,7 @@ impl Node {
             base,
             state,
             task,
+            requests,
             _directory: directory,
         }
     }
@@ -146,6 +159,29 @@ async fn two_independent_origins_preview_only_declared_music_and_revocation_reau
     assert_ne!(preview.catalog.items[0].id, track.id);
     assert!(preview.catalog.items[0].can_stream);
     assert!(!preview.catalog.items[0].can_download);
+    let second_cursor = record.id.clone();
+    let second = b
+        .state
+        .peers
+        .preview("https://a.vela.example.org", Some(&second_cursor))
+        .await
+        .unwrap_or_else(|e| panic!("Peer cursor preview failed with {}", e.0));
+    assert!(second.catalog.items.is_empty());
+    assert!(
+        a.requests
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|uri| uri.contains(&format!("cursor={second_cursor}"))),
+        "peer client must forward the validated cursor"
+    );
+    assert!(
+        b.state
+            .peers
+            .preview("https://a.vela.example.org", Some("not-a-uuid"))
+            .await
+            .is_err()
+    );
     let stream = format!("{}/api/public/media/{}/stream", a.base, record.id);
     let bytes = client
         .get(&stream)

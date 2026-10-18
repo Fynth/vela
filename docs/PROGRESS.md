@@ -70,13 +70,20 @@ opt-ins, strict Clippy/fmt. Source postdates0.12.5; no schema/server/web/runtime
 ## Web peer preview cursor pagination — source verified (2026-10-18, `e3b6168`)
 
 The web Network preview now supports bounded page continuation: `PreviewPeer` gained an
-optional UUID cursor the server validates on every page (canonical ID, empty/oversized
+optional UUID cursor the server validates on every page **and forwards to the peer's
+`/api/public/catalog?...&cursor=...` request**. (canonical ID, empty/oversized
 rejected), the web Load more button revalidates the same canonical origin, dedupes rows
 by track ID and disables at exhaustion. Existing per-page invariants (ID ordering,
 next_cursor==last item, per-track text/duration/rights checks) are unchanged.
 
-Evidence: server network lib tests4 and API31 pass; strict workspace+WASM Clippy/fmt;
-full Chromium41 passed+1 live-import skip in2.0m. Source postdates the live0.12.6
+A server fixture test now records the outbound peer URI and asserts page2 contains the
+validated cursor (and that a non-UUID cursor is rejected), closing the gap where the
+cursor was validated but never forwarded. Note: the Chromium suite does not exercise a
+successful public preview (PN02 covers rejection paths), so Chromium's green result is
+non-regression only for this success path.
+
+Evidence: server network lib tests4 (including cursor forwarding) and API31 pass; strict
+workspace+WASM Clippy/fmt; full Chromium41 passed+1 live-import skip in2.0m. Source postdates the live0.12.6
 runtime; the next patch will deploy it. Firefox rerun pending. No schema or
 original-data change.
 

@@ -217,9 +217,12 @@ impl PeerClient {
             {
                 return Err(remote_error());
             }
-            let catalog: PublicCatalog = self
-                .json(&origin, "/api/public/catalog?limit=20", 128 * 1024)
-                .await?;
+            let mut catalog_path = String::from("/api/public/catalog?limit=20");
+            if let Some(cursor) = cursor {
+                catalog_path.push_str("&cursor=");
+                catalog_path.push_str(cursor);
+            }
+            let catalog: PublicCatalog = self.json(&origin, &catalog_path, 128 * 1024).await?;
             if catalog.origin != origin
                 || catalog.server_id != caps.server_id
                 || catalog.items.len() > 20
@@ -234,6 +237,12 @@ impl PeerClient {
                 .items
                 .windows(2)
                 .any(|rows| rows[0].id >= rows[1].id)
+                || cursor.is_some_and(|cursor| {
+                    catalog
+                        .items
+                        .first()
+                        .is_some_and(|track| track.id.as_str() <= cursor)
+                })
                 || catalog.next_cursor.as_ref().is_some_and(|cursor| {
                     catalog.items.last().is_none_or(|track| track.id != *cursor)
                 })
