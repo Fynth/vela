@@ -4,17 +4,17 @@ members = ["crates/domain", "crates/core", "crates/media", "crates/imports", "cr
 default-members = ["apps/server"]
 
 [workspace.package]
-version = "0.12.3"
+version = "0.12.4"
 edition = "2024"
 license = "AGPL-3.0-or-later"
 rust-version = "1.99"
 
 [workspace.dependencies]
-vela-domain = { path = "crates/domain", version = "0.12.3" }
-vela-core = { path = "crates/core", version = "0.12.3" }
-vela-media = { path = "crates/media", version = "0.12.3" }
-vela-imports = { path = "crates/imports", version = "0.12.3" }
-vela-scanner = { path = "crates/scanner", version = "0.12.3" }
+vela-domain = { path = "crates/domain", version = "0.12.4" }
+vela-core = { path = "crates/core", version = "0.12.4" }
+vela-media = { path = "crates/media", version = "0.12.4" }
+vela-imports = { path = "crates/imports", version = "0.12.4" }
+vela-scanner = { path = "crates/scanner", version = "0.12.4" }
 anyhow = "1"
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }

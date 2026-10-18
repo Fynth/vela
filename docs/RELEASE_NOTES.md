@@ -1,8 +1,9 @@
-# 0.12.4 (unreleased source) — playlist folders
+# 0.12.4 — playlist folders (schema12)
 
-Source includes owner-scoped playlist folders (schema12): create/list, CAS rename/delete,
-CAS move of owned playlists and unfiling on folder deletion. Chromium/Firefox each pass42
-source scenarios (41+1 skip). This is not yet deployed to the frozen0.12.3 runtime.
+Owner-scoped playlist folders: create/list, CAS rename/delete, CAS move of owned
+playlists and unfiling on folder deletion. Migration0012 is additive; original playlists
+remain visible and unfiled. Chromium/Firefox each pass42 scenarios (41+1 skip). The
+native client consumes the additive playlist field but has no folder UI yet.
 
 # 0.12.3 — privacy device revocation + native offline checkpoint
 
