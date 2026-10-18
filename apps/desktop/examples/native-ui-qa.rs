@@ -19,6 +19,7 @@ fn Harness() -> Element {
             "closeWhilePlaying": std::env::var("VELA_NATIVE_QA_CLOSE_PLAYING").as_deref() == Ok("1"),
             "peerOrigin": std::env::var("VELA_NATIVE_QA_PEER_ORIGIN").unwrap_or_default(),
             "peer2Origin": std::env::var("VELA_NATIVE_QA_PEER2_ORIGIN").unwrap_or_default(),
+            "cachedOrigin": std::env::var("VELA_NATIVE_QA_CACHED_ORIGIN").unwrap_or_default(),
         }))
         .expect("fixture credentials sent to own window");
         let mut captures = Vec::new();

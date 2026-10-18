@@ -189,13 +189,37 @@ def main():
                             raise RuntimeError('Second peer public search did not match its fixture')
                     config_dir = private / 'home' / 'vela'
                     config_dir.mkdir(parents=True, mode=0o700)
+                    cached_origin = 'https://offline.example.org'
                     config_path = config_dir / 'peers.json'
-                    config_path.write_text(json.dumps({'version': 1, 'peers': [peer2_origin + '/']}))
+                    config_path.write_text(json.dumps({'version': 1, 'peers': [peer2_origin + '/', cached_origin + '/']}))
                     config_path.chmod(0o600)
+                    def fnv1a(value):
+                        hashed = 0xcbf29ce484222325
+                        for byte in value.encode():
+                            hashed ^= byte
+                            hashed = (hashed * 0x100000001b3) & 0xFFFFFFFFFFFFFFFF
+                        return f'{hashed:016x}'
+                    cache_dir = private / 'home' / 'cache' / 'vela' / 'public-catalog'
+                    cache_dir.mkdir(parents=True, mode=0o700)
+                    cache_file = cache_dir / f'{fnv1a(cached_origin + "/")}.json'
+                    cache_file.write_text(json.dumps({
+                        'version': 1,
+                        'origin': cached_origin + '/',
+                        'fetched_at': int(time.time()),
+                        'items': [{
+                            'id': str(uuid.uuid4()), 'revision': 1, 'title': 'Cached Beacon',
+                            'artist': 'Vela Test', 'album': 'Cached Album', 'genre': '',
+                            'year': None, 'duration_ms': 30000, 'codec': 'flac',
+                            'license': 'CC0-1.0', 'attribution': 'Cached fixture',
+                            'can_stream': True, 'can_download': False,
+                        }],
+                    }))
+                    cache_file.chmod(0o600)
                     environment.update({
                         'VELA_NATIVE_PEER_TRANSPORTS': json.dumps({peer_origin + '/': peer_transport, peer2_origin + '/': peer2_transport}),
                         'VELA_NATIVE_QA_PEER_ORIGIN': peer_origin,
                         'VELA_NATIVE_QA_PEER2_ORIGIN': peer2_origin,
+                        'VELA_NATIVE_QA_CACHED_ORIGIN': cached_origin,
                     })
                 # Per-process ALSA and Pulse routing, never a global default change.
                 environment.update({'TMPDIR': str(private / 'temporary'), 'ALSA_CONFIG_PATH': str(alsa), 'PULSE_SINK': SINK, 'GDK_BACKEND': 'x11', 'VELA_NATIVE_TEST_SINK': SINK, 'VELA_DESKTOP_SERVER_URL': origin, 'VELA_NATIVE_QA_USERNAME': 'nativefixture', 'VELA_NATIVE_QA_PASSWORD': password, 'VELA_NATIVE_QA_REPORT': str(report), 'XDG_DATA_HOME': str(private / 'home'), 'XDG_CONFIG_HOME': str(private / 'home'), 'XDG_CACHE_HOME': str(private / 'home/cache'), 'CARGO_BUILD_JOBS': '2'})
@@ -216,7 +240,7 @@ def main():
                 if args.test_peer:
                     config_path = private / 'home' / 'vela' / 'peers.json'
                     config = json.loads(config_path.read_text())
-                    expected = sorted([peer_origin + '/', peer2_origin + '/'])
+                    expected = sorted([peer_origin + '/', peer2_origin + '/', cached_origin + '/'])
                     if config.get('version') != 1 or config.get('peers') != expected:
                         raise RuntimeError(f'Saved peer config mismatch: {config!r} expected {expected!r}')
                     if config_path.stat().st_mode & 0o077:

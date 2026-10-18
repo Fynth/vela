@@ -78,7 +78,11 @@ seek/volume where the bus is available.
   oversized or unsupported files. It stores no server metadata, tokens or history;
   the Public view can open/remove saved origins, save the current preview, and search
 saved peers (`q`, at most eight peers×20 results) concurrently with independent
-five-second timeouts and per-origin error reporting.
+five-second timeouts and per-origin error reporting. A successful catalog response
+is cached as public metadata under the user cache directory (atomic private0600,
+versioned, at most64 files/128KiB each); when a saved peer is unreachable, search
+returns its cached rows as **browse-only** (`Cached metadata · stream unverified`)
+with no play action. Cached metadata is never treated as a current grant.
 - `playback.rs` (reused by path from the web crate): bounded occurrence indices,
   fair shuffle deck/history, explicit next priority, repeat semantics. Structural
   queue edits synchronize the order model; metadata does not reset traversal.
@@ -119,8 +123,8 @@ app-store or physical-audio certification. Evidence:
 ## Verification
 
 - `cargo fmt --all -- --check`; strict Clippy `-p vela-desktop --all-targets
-  --features native-qa`; `cargo test --locked -p vela-desktop`: 25 passed,
-  2 ignored (opt-in audio/MPRIS) from27 listed tests (8 audio,6 client,3 MPRIS,
+  --features native-qa`; `cargo test --locked -p vela-desktop`: 26 passed,
+  2 ignored (opt-in audio/MPRIS) from28 listed tests (8 audio,6 client,3 MPRIS,
   8 shared playback). Logs: `target/checks/native-0.12b-{fmt,clippy,tests}.log`.
 - Ignored `audio::tests::native_owned_null_sink_play_pause_seek_eof_replace_stop_and_cleanup`
   executed under an owned Pulse null sink: passed.

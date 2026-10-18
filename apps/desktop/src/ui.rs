@@ -2134,13 +2134,14 @@ fn public_view(ui: Ui) -> Element {
                         let peer_label = peer.origin.clone();
                         let peer_error = peer.error.clone();
                         let peer_error_text = peer.error.clone().unwrap_or_default();
+                        let peer_cached = peer.cached;
                         rsx! {
-                            article { class: "native-queue-row", key: "search-{peer.origin}", "data-public-origin": "{peer.origin}", "data-public-peer-summary": "true", "data-public-peer-error": "{peer_error_text}",
+                            article { class: "native-queue-row", key: "search-{peer.origin}", "data-public-origin": "{peer.origin}", "data-public-peer-summary": "true", "data-public-peer-error": "{peer_error_text}", "data-public-peer-cached": "{peer.cached}",
                                 div { class: "neutral-cover", "aria-hidden": "true", Icon { name: "network" } }
                                 div { class: "native-queue-select",
                                     div { strong { "Public origin" } small { "{peer_label}" } }
                                 }
-                                if peer_error.is_some() { small { "Unavailable" } } else { span { class: "queue-current", "{peer.items.len()} results" } }
+                                if peer_cached { small { "Cached metadata · stream unverified" } } else if peer_error.is_some() { small { "Unavailable" } } else { span { class: "queue-current", "{peer.items.len()} results" } }
                             }
                             if let Some(error) = peer_error { p { class: "muted", "{error}" } }
                             div { class: "native-queue-list",
@@ -2150,13 +2151,13 @@ fn public_view(ui: Ui) -> Element {
                                         let play_track = track.clone();
                                         let play_origin = peer_origin.clone();
                                         let track_title = track.title.clone();
-                                        rsx! { article { class: "native-queue-row", key: "{peer.origin}-{track.id}", "data-public-track-id": "{track.id}", "data-public-origin": "{peer.origin}",
+                                        rsx! { article { class: "native-queue-row", key: "{peer.origin}-{track.id}", "data-public-track-id": "{track.id}", "data-public-origin": "{peer.origin}", "data-public-cached": "{peer_cached}",
                                             div { class: "neutral-cover", "aria-hidden": "true", Icon { name: "music" } }
                                             div { class: "native-queue-select", div { strong { "{track.title}" } small { "{track.artist} · {track.album}" } small { "{peer.origin}" } } }
                                             span { class: "native-track-time", "{time_label(track.duration_ms.max(0) as u64)}" }
-                                            if track.can_stream {
+                                            if track.can_stream && !peer_cached {
                                                 button { class: "button primary small", disabled: !ui.audio_ready(), "aria-label": "Play public track {track_title}", onclick: move |_| play_public_result(play_ui.clone(), play_origin.clone(), play_track.id.clone()), Icon { name: "play" } "Play public track" }
-                                            } else { small { "Metadata only" } }
+                                            } else if peer_cached { small { "Cached metadata only" } } else { small { "Metadata only" } }
                                         } }
                                     }
                                 }

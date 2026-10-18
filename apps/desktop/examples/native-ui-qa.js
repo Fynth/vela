@@ -212,7 +212,7 @@ try {
     await wait(() => (el('.alert.notice')?.textContent || '').includes('Public server saved.'), 'Save public server');
     assert(document.querySelector('[aria-label^="Remove saved server"]'), 'Saved public server is listed');
     await capture('public-dark');
-    el('[aria-label^="Remove saved server"]').click();
+    el(`[aria-label="Remove saved server ${config.peerOrigin}/"]`).click();
     await wait(() => (el('.alert.notice')?.textContent || '').includes('Public server removed.'), 'Remove public server');
     const remainingLabels = [...document.querySelectorAll('[aria-label^="Remove saved server"]')].map(node => node.getAttribute('aria-label'));
     if (document.querySelector(`[aria-label="Remove saved server ${config.peerOrigin}/"]`)) throw new Error(`Saved public server can be removed failed labels=${JSON.stringify(remainingLabels)} expected=${config.peerOrigin}/`);
@@ -244,6 +244,8 @@ try {
     catch { throw new Error(`Unified saved-server search failed (error=${el('.alert.error')?.textContent?.trim() || '-'} query=${el('#native-peer-query')?.value || '-'} origins=${JSON.stringify([...document.querySelectorAll('[data-public-track-id][data-public-origin]')].map(row => row.dataset.publicOrigin))} saved=${JSON.stringify([...document.querySelectorAll('[aria-label^="Remove saved server"]')].map(node => node.getAttribute('aria-label')))} peers=${JSON.stringify([...document.querySelectorAll('[data-public-peer-summary]')].map(node => [node.dataset.publicOrigin, node.dataset.publicPeerError]))})`); }
     const origins = [...document.querySelectorAll('[data-public-track-id][data-public-origin]')].map(row => row.dataset.publicOrigin);
     assert(origins.some(origin => origin.startsWith(config.peerOrigin)) && origins.some(origin => origin.startsWith(config.peer2Origin)), 'Unified search returns both saved public origins');
+    const cachedRow = [...document.querySelectorAll('[data-public-track-id][data-public-origin]')].find(row => row.dataset.publicOrigin.startsWith(config.cachedOrigin));
+    assert(cachedRow && cachedRow.dataset.publicCached === 'true' && !cachedRow.querySelector('button'), 'Unreachable saved peer falls back to browse-only cached metadata');
     await capture('public-search-dark');
     const peer2Row = [...document.querySelectorAll('[data-public-track-id][data-public-origin]')].find(row => row.dataset.publicOrigin.startsWith(config.peer2Origin));
     assert(peer2Row, 'Second saved origin is represented in unified results');

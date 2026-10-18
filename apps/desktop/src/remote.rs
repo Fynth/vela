@@ -8,8 +8,11 @@
 use crate::{PreparedAudio, client::canonical_origin};
 use futures_util::{StreamExt, future::join_all};
 use reqwest::{Client, StatusCode, header};
+use serde::{Deserialize, Serialize};
 use std::{
+    fs,
     io::{Seek, Write},
+    path::PathBuf,
     sync::Arc,
     time::Duration,
 };
@@ -39,6 +42,7 @@ pub struct PeerSearch {
     pub server_id: Option<String>,
     pub items: Vec<PublicTrack>,
     pub error: Option<String>,
+    pub cached: bool,
 }
 
 #[derive(Clone)]
@@ -189,6 +193,7 @@ async fn catalog(
     {
         return Err(INVALID_RESPONSE.into());
     }
+    save_cached(peer.canonical.as_str(), &catalog.items);
     Ok(RemotePreview {
         origin: peer.canonical.as_str().to_owned(),
         server_id: catalog.server_id,
@@ -206,6 +211,145 @@ pub(crate) fn queue_target(current: usize, length: usize, delta: i32) -> Option<
         None
     } else {
         Some(next as usize)
+    }
+}
+
+fn cached_or_error(origin: String, error: String) -> PeerSearch {
+    match load_cached(&origin) {
+        Some(items) if !items.is_empty() => PeerSearch {
+            origin,
+            server_id: None,
+            items,
+            error: None,
+            cached: true,
+        },
+        _ => PeerSearch {
+            origin,
+            server_id: None,
+            items: Vec::new(),
+            error: Some(error),
+            cached: false,
+        },
+    }
+}
+
+fn cache_key(origin: &str) -> String {
+    let mut hash = 0xcbf29ce484222325_u64;
+    for byte in origin.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{hash:016x}")
+}
+
+fn cache_root() -> Option<PathBuf> {
+    let base = std::env::var_os("XDG_CACHE_HOME")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .or_else(|| {
+            std::env::var_os("HOME")
+                .map(PathBuf::from)
+                .map(|home| home.join(".cache"))
+        })?;
+    Some(base.join("vela").join("public-catalog"))
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CachedCatalog {
+    version: u8,
+    origin: String,
+    fetched_at: u64,
+    items: Vec<PublicTrack>,
+}
+
+fn load_cached(origin: &str) -> Option<Vec<PublicTrack>> {
+    load_cached_from(&cache_root()?, origin)
+}
+
+fn load_cached_from(root: &std::path::Path, origin: &str) -> Option<Vec<PublicTrack>> {
+    let path = root.join(format!("{}.json", cache_key(origin)));
+    let metadata = fs::metadata(&path).ok()?;
+    if !metadata.is_file() || metadata.len() > MAX_CATALOG_BYTES as u64 {
+        return None;
+    }
+    let bytes = fs::read(&path).ok()?;
+    let cached: CachedCatalog = serde_json::from_slice(&bytes).ok()?;
+    if cached.version != 1
+        || cached.origin != origin
+        || cached.items.is_empty()
+        || cached.items.len() > 50
+        || cached
+            .items
+            .iter()
+            .any(|track| track.id.parse::<uuid::Uuid>().is_err() || track.duration_ms <= 0)
+    {
+        return None;
+    }
+    Some(cached.items)
+}
+
+fn save_cached(origin: &str, items: &[PublicTrack]) {
+    if let Some(root) = cache_root() {
+        save_cached_to(&root, origin, items);
+    }
+}
+
+fn save_cached_to(root: &std::path::Path, origin: &str, items: &[PublicTrack]) {
+    if items.is_empty() || items.len() > 50 {
+        return;
+    }
+    if fs::read_dir(root)
+        .map(|entries| entries.filter_map(Result::ok).take(65).count() > 64)
+        .unwrap_or(false)
+    {
+        return;
+    }
+    let Ok(payload) = serde_json::to_vec(&CachedCatalog {
+        version: 1,
+        origin: origin.to_owned(),
+        fetched_at: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_secs())
+            .unwrap_or(0),
+        items: items.to_vec(),
+    }) else {
+        return;
+    };
+    if payload.len() > MAX_CATALOG_BYTES {
+        return;
+    }
+    let _ = fs::create_dir_all(root);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(root, fs::Permissions::from_mode(0o700));
+    }
+    let temporary = root.join(format!(".{}.tmp", cache_key(origin)));
+    let write = || -> std::io::Result<()> {
+        #[cfg(unix)]
+        let mut file = {
+            use std::os::unix::fs::OpenOptionsExt;
+            fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .mode(0o600)
+                .open(&temporary)?
+        };
+        #[cfg(not(unix))]
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&temporary)?;
+        file.write_all(&payload)?;
+        file.sync_all()?;
+        fs::rename(&temporary, root.join(format!("{}.json", cache_key(origin))))?;
+        Ok(())
+    };
+    if write().is_err() {
+        let _ = fs::remove_file(&temporary);
     }
 }
 
@@ -245,19 +389,13 @@ pub async fn search_peers(
                     server_id: Some(preview.server_id),
                     items: preview.items,
                     error: None,
+                    cached: false,
                 },
-                Ok(Err(error)) => PeerSearch {
+                Ok(Err(error)) => cached_or_error(origin, error),
+                Err(_) => cached_or_error(
                     origin,
-                    server_id: None,
-                    items: Vec::new(),
-                    error: Some(error),
-                },
-                Err(_) => PeerSearch {
-                    origin,
-                    server_id: None,
-                    items: Vec::new(),
-                    error: Some("The public server did not answer within five seconds.".into()),
-                },
+                    "The public server did not answer within five seconds.".into(),
+                ),
             }
         }
     });
@@ -398,5 +536,58 @@ mod queue_tests {
         assert_eq!(queue_target(0, 1, 1), None);
         assert_eq!(queue_target(0, 2, 2), None);
         assert_eq!(queue_target(1, 2, -2), None);
+    }
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+
+    fn track(id: uuid::Uuid) -> PublicTrack {
+        PublicTrack {
+            id: id.to_string(),
+            revision: 1,
+            title: "Cached Signal".into(),
+            artist: "Vela Test".into(),
+            album: "Cached Album".into(),
+            genre: String::new(),
+            year: None,
+            duration_ms: 30_000,
+            codec: "flac".into(),
+            license: vela_domain::PublicLicense::Cc0,
+            attribution: "Cached fixture".into(),
+            can_stream: true,
+            can_download: false,
+        }
+    }
+
+    #[test]
+    fn cached_public_catalog_is_private_exact_origin_and_validated() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("public-catalog");
+        let items = vec![track(uuid::Uuid::new_v4())];
+        save_cached_to(&root, "https://offline.example.org/", &items);
+        let loaded = load_cached_from(&root, "https://offline.example.org/").unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].id, items[0].id);
+        assert!(load_cached_from(&root, "https://other.example.org/").is_none());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let path = root.join(format!(
+                "{}.json",
+                cache_key("https://offline.example.org/")
+            ));
+            assert_eq!(
+                fs::metadata(path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+        let path = root.join(format!(
+            "{}.json",
+            cache_key("https://offline.example.org/")
+        ));
+        fs::write(&path, b"{\"version\":2,\"origin\":\"https://offline.example.org/\",\"fetched_at\":0,\"items\":[]}").unwrap();
+        assert!(load_cached_from(&root, "https://offline.example.org/").is_none());
     }
 }

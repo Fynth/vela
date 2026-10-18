@@ -21,6 +21,24 @@ correctly shows "Not established"). No schema, server HTTP, native or original-d
 runtime change. The live runtime was subsequently upgraded to0.12.1; existing
 analysis rows remain spectral-1 until explicitly reanalyzed.
 
+## Native browse-only public metadata cache0.12.1 — verified (2026-10-18)
+
+A successful native public catalog fetch is now cached as bounded public metadata
+under `$XDG_CACHE_HOME/vela/public-catalog` (fallback `~/.cache`): versioned JSON,
+canonical origin echo, at most50 rows,128KiB, atomic private0600 files, directory0700
+and at most64 files. When a saved peer is unreachable, unified search returns its
+cached rows labelled `Cached metadata · stream unverified`; cached rows have **no play
+button** and never authorize streaming. Cache failures are silent and never replace a
+live response.
+
+Evidence: cache round-trip/permission/exact-origin/version unit test; two isolated
+peers plus a third preseeded unreachable saved origin; the real WebKitGTK journey
+returns both live origins and the browse-only cached row, keeps saved origins at three
+(including the cache origin), and still plays/Previous/Next across the live peers.
+Evidence:`target/checks/native-cached-peers3/`;26/28 desktop tests plus both opt-ins,
+strict Clippy/fmt. No schema, server HTTP, web or original-data/runtime change. The
+packaged0.12.1 desktop archive is rebuilt and verified separately.
+
 ## 0.12.1 spectral-2 patch release + preserved-data runtime handover — verified (2026-10-18, `f2c9fdb`)
 
 `target/releases/vela-0.12.1-{x86_64-unknown-linux-gnu,source}.tar.gz` and
