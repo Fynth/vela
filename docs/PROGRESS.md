@@ -21,7 +21,7 @@ correctly shows "Not established"). No schema, server HTTP, native or original-d
 runtime change. The live runtime was subsequently upgraded to0.12.1; existing
 analysis rows remain spectral-1 until explicitly reanalyzed.
 
-## Native opt-in Secret Service session — source verified (2026-10-18)
+## Native opt-in Secret Service session — source verified (2026-10-18, `3fa423c`)
 
 Native sign-in now offers an explicit Remember-this-session checkbox (default off). When
 enabled, only the opaque64-hex session token and canonical origin are written through
