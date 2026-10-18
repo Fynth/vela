@@ -21,7 +21,7 @@ correctly shows "Not established"). No schema, server HTTP, native or original-d
 runtime change. The live runtime was subsequently upgraded to0.12.1; existing
 analysis rows remain spectral-1 until explicitly reanalyzed.
 
-## Native offline queue + removal0.12.2 — verified (2026-10-18)
+## Native offline queue + removal0.12.2 — verified (2026-10-18, `b0bf085`)
 
 Offline playback now uses all saved copies in newest-saved order: Play offline builds
 the local queue at the selected copy, Previous/Next step only within it, and controls
