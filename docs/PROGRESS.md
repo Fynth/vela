@@ -179,7 +179,7 @@ sent, so consent/history is not bypassed or inferred.
   the window test verifies list→detail→Play playlist→native playback→shared queue
   two entries→Library return (`target/checks/native-playlists-window/`, screenshot
   `native-playlists-dark.png`).
-- Native playlist lifecycle follow-up: owners can create, CAS-rename and
+- Native playlist lifecycle follow-up `f54188a`: owners can create, CAS-rename and
   confirm/cancel-delete playlists through the same bounded client (current0.12 debug
   server), with busy/error/guard handling and list/detail updates. The window journey
   creates `Native draft`, renames it to `Native renamed`, verifies cancel preserves
