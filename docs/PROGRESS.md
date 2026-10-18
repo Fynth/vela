@@ -21,7 +21,7 @@ correctly shows "Not established"). No schema, server HTTP, native or original-d
 runtime change. The live runtime was subsequently upgraded to0.12.1; existing
 analysis rows remain spectral-1 until explicitly reanalyzed.
 
-## Playlist folders — source verified (2026-10-18)
+## Playlist folders — source verified (2026-10-18, `168c95f`)
 
 Playlist folders add owner-scoped grouping metadata without changing playlist tracks,
 shares or media rights. Migration0012 creates `playlist_folders` plus
