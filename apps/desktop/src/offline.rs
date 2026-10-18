@@ -8,7 +8,7 @@ use crate::PreparedAudio;
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
-    io::{Read, Write},
+    io::Write,
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -272,6 +272,7 @@ fn save_to(
     };
     if write_manifest().is_err() {
         let _ = fs::remove_file(&temporary_manifest);
+        let _ = fs::remove_file(&audio);
         return Err("The offline manifest could not be written.".into());
     }
     Ok(())
@@ -291,56 +292,51 @@ fn prepare_from(
         .find(|entry| entry.track.id == track_id)
         .ok_or_else(|| "The offline copy is missing. Save it again from the library.".to_owned())?;
     let path = audio_path_from(root, track_id)?;
+    let symlink = fs::symlink_metadata(&path)
+        .map_err(|_| "The offline copy is missing. Save it again.".to_owned())?;
+    if symlink.file_type().is_symlink() {
+        return Err("The offline copy is not a regular file. Save it again.".into());
+    }
+    // Open once and hash that same descriptor, then rewind it for decoding. A
+    // path replacement between verification and open cannot substitute bytes.
+    let mut file = fs::File::open(&path)
+        .map_err(|_| "The offline copy could not be opened. Save it again.".to_owned())?;
+    let metadata = file
+        .metadata()
+        .map_err(|_| "The offline copy could not be read.".to_owned())?;
+    if !metadata.is_file() || metadata.len() != entry.length_bytes {
+        return Err("The offline copy does not match its manifest. Save it again.".into());
+    }
     if let Some(expected) = entry.digest.as_deref() {
-        verify_digest(&path, expected)?;
+        let mut hasher = blake3::Hasher::new();
+        let mut buffer = [0_u8; 64 * 1024];
+        loop {
+            let read = std::io::Read::read(&mut file, &mut buffer)
+                .map_err(|_| "The offline copy could not be read.".to_owned())?;
+            if read == 0 {
+                break;
+            }
+            hasher.update(&buffer[..read]);
+        }
+        if hasher.finalize().to_hex().as_str() != expected {
+            return Err("The offline copy failed its integrity check. Save it again.".into());
+        }
+        use std::io::Seek;
+        file.seek(std::io::SeekFrom::Start(0))
+            .map_err(|_| "The offline copy could not be read.".to_owned())?;
     }
     #[cfg(target_os = "linux")]
     {
-        let (file, length) = read_audio(&path)?;
-        Ok(std::sync::Arc::new(PreparedAudio::from_file(file, length)))
+        Ok(std::sync::Arc::new(PreparedAudio::from_file(
+            file,
+            metadata.len(),
+        )))
     }
     #[cfg(not(target_os = "linux"))]
     {
-        let _ = path;
+        let _ = file;
         Err("Offline playback is currently available on Linux only.".into())
     }
-}
-
-fn verify_digest(path: &Path, expected: &str) -> Result<(), String> {
-    let mut file = fs::File::open(path)
-        .map_err(|_| "The offline copy is missing. Save it again.".to_owned())?;
-    let mut hasher = blake3::Hasher::new();
-    let mut buffer = [0_u8; 64 * 1024];
-    loop {
-        let read = std::io::Read::read(&mut file, &mut buffer)
-            .map_err(|_| "The offline copy could not be read.".to_owned())?;
-        if read == 0 {
-            break;
-        }
-        hasher.update(&buffer[..read]);
-    }
-    if hasher.finalize().to_hex().as_str() != expected {
-        return Err("The offline copy failed its integrity check. Save it again.".into());
-    }
-    Ok(())
-}
-
-pub fn read_audio(path: &Path) -> Result<(fs::File, u64), String> {
-    let metadata =
-        fs::metadata(path).map_err(|_| "The offline copy is missing. Save it again.".to_owned())?;
-    if !metadata.is_file() {
-        return Err("The offline copy is not a regular file.".into());
-    }
-    let file = fs::File::open(path)
-        .map_err(|_| "The offline copy could not be opened. Save it again.".to_owned())?;
-    let mut probe = file
-        .try_clone()
-        .map_err(|_| "The offline copy could not be read.".to_owned())?;
-    let mut byte = [0_u8; 1];
-    if probe.read(&mut byte).is_err() {
-        return Err("The offline copy could not be read.".into());
-    }
-    Ok((file, metadata.len()))
 }
 
 #[cfg(test)]

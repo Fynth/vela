@@ -79,7 +79,13 @@ pub fn save(origin: &str, token: &str) -> Result<(), String> {
         token,
     })
     .map_err(|_| "The session could not be saved.".to_owned())?;
-    // Store replaces any previous QA/application item for this attribute.
+    // secret-tool store adds a new item; clear the fixed attribute first so a
+    // repeated opt-in does not accumulate stale session tokens.
+    let _ = Command::new("secret-tool")
+        .args(["clear", "service", &service()])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
     let mut child = Command::new("secret-tool")
         .args([
             "store",
@@ -108,13 +114,27 @@ pub fn save(origin: &str, token: &str) -> Result<(), String> {
 }
 
 pub fn clear() -> Result<(), String> {
-    // Clearing a missing item is not an error.
-    let _ = Command::new("secret-tool")
+    let status = Command::new("secret-tool")
         .args(["clear", "service", &service()])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
-    Ok(())
+    match status {
+        Ok(status) if status.success() => Ok(()),
+        _ => {
+            // A missing item is acceptable; a still-present item is not.
+            let present = Command::new("secret-tool")
+                .args(["lookup", "service", &service()])
+                .output()
+                .map(|output| output.status.success() && !output.stdout.is_empty())
+                .unwrap_or(true);
+            if present {
+                Err("The saved session could not be removed from the system keyring.".into())
+            } else {
+                Ok(())
+            }
+        }
+    }
 }
 
 #[cfg(test)]

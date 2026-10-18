@@ -142,8 +142,10 @@ sign-in screen shows a **Continue saved session** action only when an item exist
 resumes by calling `/api/me` with the stored cookie and reconstructs the CSRF token
 from that authenticated response. No automatic passwordless login occurs.
 
-Explicit sign-out clears the Secret Service item; an expired/invalid saved session is
-cleared with a visible sign-in error. The fixed release service name is
+Saving clears the fixed Service attribute first so repeated opt-ins do not accumulate
+stale tokens. Explicit sign-out waits for deletion and reports a visible error if the
+item remains; malformed/expired saved sessions are also cleared with a visible sign-in
+error. The fixed release service name is
 `org.vela.music.desktop.session`; QA may override it only in debug builds. This is Linux
 freedesktop Secret Service only — no Windows Credential Manager/macOS Keychain, Android
 Keystore or biometric unlock is claimed. The token is a bearer credential protected by
@@ -158,7 +160,8 @@ completed unnamed original into an account-scoped private cache. Layout:
 manifest; directories are0700 and files0600, written via private temp+rename. Limits
 are100 tracks/2GiB; malformed, mismatched-size or orphaned entries are ignored. New
 manifests are v2 and carry the BLAKE3 digest of the copied device bytes; Play offline
-re-hashes the file and refuses a same-size tampered copy with a visible integrity error.
+re-hashes the file from the same opened descriptor and refuses a same-size tampered copy
+with a visible integrity error; a failed manifest write removes the copied audio.
 Legacy v1 manifests (length-only) remain readable and will verify on the next save. No
 credentials, session tokens, audio URLs or listening events are stored.
 

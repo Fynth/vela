@@ -560,11 +560,16 @@ fn resume_saved(mut ui: Ui) {
 
 fn sign_out(mut ui: Ui) {
     let old = ui.account.peek().clone();
-    std::mem::drop(tokio::task::spawn_blocking(crate::session_store::clear));
+    // Explicit sign-out waits for the keyring deletion so closing the window
+    // immediately cannot leave a reusable saved token behind.
+    let session_clear = crate::session_store::clear();
     ui.clear_account();
     ui.login_error.set(String::new());
     ui.notice
         .set("Signed out on this device. Your queue and temporary audio have been cleared.".into());
+    if let Err(error) = session_clear {
+        ui.login_error.set(error);
+    }
     let Some(account) = old else {
         return;
     };
@@ -1137,6 +1142,7 @@ fn rename_folder(mut ui: Ui) {
         ui.folder_busy.set(false);
         match result {
             Ok(updated) => {
+                ui.folder_rename_draft.set(updated.name.clone());
                 if let Some(entry) = ui.folders.write().iter_mut().find(|folder| folder.id == id) {
                     *entry = updated;
                 }
@@ -2102,6 +2108,8 @@ fn remove_offline(mut ui: Ui, track_id: String) {
                     }
                     ui.prepared.set(None);
                     ui.offline_active.set(false);
+                    ui.queue.set(Vec::new());
+                    ui.order.write().reset(0, 0);
                     ui.offline_confirm.set(String::new());
                 }
                 let loaded = tokio::task::spawn_blocking({
@@ -3495,7 +3503,10 @@ pub fn App() -> Element {
             match loaded {
                 Ok(Ok(Some(saved))) => ui.saved_session.set(Some(saved)),
                 Ok(Ok(None)) => {}
-                Ok(Err(error)) => ui.login_error.set(error),
+                Ok(Err(error)) => {
+                    let _ = tokio::task::spawn_blocking(crate::session_store::clear).await;
+                    ui.login_error.set(error);
+                }
                 Err(_) => ui
                     .login_error
                     .set("Saved-session storage is unavailable on this device.".into()),

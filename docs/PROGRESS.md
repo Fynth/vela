@@ -21,6 +21,24 @@ correctly shows "Not established"). No schema, server HTTP, native or original-d
 runtime change. The live runtime was subsequently upgraded to0.12.1; existing
 analysis rows remain spectral-1 until explicitly reanalyzed.
 
+## Native/offline/folder hardening — verified (2026-10-18)
+
+Self-review of the newest slices found and fixed concrete issues:
+- Secret Service save now clears the fixed service attribute first, preventing duplicate
+  stale tokens; explicit sign-out waits for deletion and surfaces a visible error if the
+  item remains; malformed startup items are cleared.
+- Offline playback opens the audio once, hashes that descriptor, rewinds and decodes the
+  same descriptor, removing the path-reopen TOCTOU; failed manifest writes remove the
+  copied audio; removing the currently playing copy clears queue/order state.
+- Playlist folder moves now validate folder ownership and playlist CAS inside one
+  IMMEDIATE transaction instead of a check-then-update race.
+
+Evidence: two-process Secret Service save/resume/delete and server-stopped offline queue
+with v2 digest manifest (`target/checks/native-hardening2/`);28/30 desktop tests with
+both opt-ins,31 API tests, strict workspace+WASM Clippy/fmt. No schema/server/web or
+original-data/runtime change. An independent subagent review is still running; findings
+will be handled separately if concrete.
+
 ## Native offline BLAKE3 manifests — source verified (2026-10-18, `eb68780`)
 
 Offline copies now write v2 manifests carrying the BLAKE3 digest of the copied device

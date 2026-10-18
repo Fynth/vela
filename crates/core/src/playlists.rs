@@ -118,6 +118,7 @@ impl PlaylistService {
         if id.parse::<uuid::Uuid>().is_err() || input.revision < 0 {
             return Err(Error::Invalid("Invalid playlist".into()));
         }
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         if let Some(folder_id) = input.folder_id.as_deref() {
             if folder_id.parse::<uuid::Uuid>().is_err() {
                 return Err(Error::Invalid("Invalid playlist folder".into()));
@@ -127,7 +128,7 @@ impl PlaylistService {
             )
             .bind(folder_id)
             .bind(&user.id)
-            .fetch_one(&self.pool)
+            .fetch_one(&mut *tx)
             .await?;
             if !owned {
                 return Err(Error::NotFound);
@@ -138,11 +139,25 @@ impl PlaylistService {
             .bind(id)
             .bind(&user.id)
             .bind(input.revision)
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await?;
         if updated.rows_affected() == 0 {
-            return self.folder_change_error(user, id).await;
+            let exists: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM playlists WHERE id=? AND owner_id=?)",
+            )
+            .bind(id)
+            .bind(&user.id)
+            .fetch_one(&mut *tx)
+            .await?;
+            return if exists {
+                Err(Error::Conflict(
+                    "Changed elsewhere; reload before saving".into(),
+                ))
+            } else {
+                Err(Error::NotFound)
+            };
         }
+        tx.commit().await?;
         self.owned_summary(user, id).await
     }
 
