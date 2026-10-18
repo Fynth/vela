@@ -21,7 +21,7 @@ correctly shows "Not established"). No schema, server HTTP, native or original-d
 runtime change. The live runtime was subsequently upgraded to0.12.1; existing
 analysis rows remain spectral-1 until explicitly reanalyzed.
 
-## Native cached-peer age + Retry live0.12.2 — verified (2026-10-18)
+## Native cached-peer age + Retry live0.12.2 — verified (2026-10-18, `7609a76`)
 
 Cached public metadata now carries its fetch time into the search result. The
 browse-only label discloses a bounded age (`just now`/minutes/hours/days) and each
