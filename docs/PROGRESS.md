@@ -22,6 +22,17 @@ physical sound/screen readers. Release build is now covered by the CI build step
 `target/checks/desktop-package-{2,verify}.log` and the preserved pre-fix archive under
 `target/checks/desktop-package-warning-artifact/`.
 
+## Native playlist add-from-library0.12 — verified (2026-10-18)
+
+The native playlist detail now fetches up to50 owner-authorized library tracks when a
+playlist opens and offers a bounded picker plus Add selected track. The mutation uses
+the existing revisioned `POST /api/playlists/{id}/items` API with busy/generation and
+selected-playlist guards; success updates the detail, revision and list item count.
+The two-instance real-window journey adds a third owned track, verifies three entries,
+plays the three-track queue, then reorders/restores/removes entries. Evidence:
+`target/checks/native-playlist-add3/`,24/25 desktop tests plus both opt-ins, strict
+Clippy/fmt. No schema, server, web or original-data/runtime change.
+
 ## Native saved public peers0.12 — verified (2026-10-18, `db893b7`)
 
 The native Public view can now save/remove at most32 canonical public origins in a

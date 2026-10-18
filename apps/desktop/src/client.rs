@@ -753,6 +753,51 @@ impl VelaClient {
         .await
     }
 
+    pub async fn add_playlist_item(
+        &self,
+        id: &str,
+        revision: i64,
+        track_id: &str,
+        cancel: CancellationToken,
+    ) -> Result<PlaylistDetail, String> {
+        if !canonical_uuid(id) || !canonical_uuid(track_id) || revision < 0 {
+            return Err("Select a valid playlist and owned track.".into());
+        }
+        let session = self.session()?;
+        let body = serde_json::json!({
+            "revision": revision,
+            "mutation_id": uuid::Uuid::new_v4().to_string(),
+            "track_id": track_id,
+            "item_ids": null,
+        });
+        bounded(
+            &cancel,
+            &self.inner.lifetime,
+            Duration::from_secs(20),
+            async {
+                let response = self
+                    .request(
+                        Method::POST,
+                        endpoint(&self.inner.origin, &format!("/api/playlists/{id}/items")),
+                        &session,
+                    )
+                    .json(&body)
+                    .send()
+                    .await
+                    .map_err(|_| NETWORK_ERROR.to_owned())?;
+                if response.status() != StatusCode::OK {
+                    return Err(status_error(response.status()));
+                }
+                let detail: PlaylistDetail = json(response, MAX_JSON_BYTES).await?;
+                if detail.playlist.id != id {
+                    return Err(INVALID_RESPONSE.into());
+                }
+                Ok(detail)
+            },
+        )
+        .await
+    }
+
     pub async fn remove_playlist_item(
         &self,
         id: &str,

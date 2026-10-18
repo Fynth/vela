@@ -53,7 +53,7 @@ seek/volume where the bus is available.
   a playlist context. Owners can create, CAS-rename and confirm-delete playlists via
   the same authenticated/CSRF/Origin-safe client; entry reorder/removal use the
   revisioned order/remove APIs with selected-id guards and update list counts/detail;
-  adding tracks from the library and folders remain web-only. Bounded entry counts/IDs are validated; a metadata-only entry is labelled.
+  playlist folders remain web-only. Bounded entry counts/IDs are validated; a metadata-only entry is labelled.
 - Albums and artists use the existing owner-scoped `GET /api/albums`,
   `/api/albums/{id}`, `/api/albums/{id}/tracks` and artist equivalents. The native
   views render real group summaries, open read-only detail, and queue/play the
@@ -150,8 +150,9 @@ app-store or physical-audio certification. Evidence:
   server: real list card, native create → open → rename → cancel-delete → confirm
   delete, fixture playlist survives, two-entry detail, `Play playlist` starts native
   audio, the shared queue receives both entries, and Library navigation restores the
-  catalog. Entry editing also passes: move entry2 up, restore by moving entry1
-  down, remove entry2, list/detail/counts refresh. Evidence:
+  catalog. Entry editing also passes: add an owned library track through the
+  revisioned item API, play three entries, move entry2 up, restore, remove one,
+  list/detail/counts refresh. Evidence:
   `target/checks/native-playlist-editing/` (including `native-playlists-dark.png`)
   and earlier `native-playlist-edit-window3/`.
 - Favorites journey passes in the same real window: the owner favorite API

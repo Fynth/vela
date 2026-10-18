@@ -130,6 +130,8 @@ struct Ui {
     playlist_loading: Signal<bool>,
     playlist_error: Signal<String>,
     playlist_name_draft: Signal<String>,
+    playlist_candidates: Signal<Vec<Track>>,
+    playlist_candidate: Signal<String>,
     playlist_busy: Signal<bool>,
     playlist_delete_confirm: Signal<bool>,
     browse_kind: Signal<&'static str>,
@@ -246,6 +248,8 @@ impl Ui {
         self.playlist_loading.set(false);
         self.playlist_error.set(String::new());
         self.playlist_name_draft.set(String::new());
+        self.playlist_candidates.set(Vec::new());
+        self.playlist_candidate.set(String::new());
         self.playlist_busy.set(false);
         self.playlist_delete_confirm.set(false);
         self.albums.set(Vec::new());
@@ -637,6 +641,19 @@ fn open_playlist(mut ui: Ui, id: String) {
                 ui.playlist_name_draft.set(detail.playlist.name.clone());
                 ui.playlist_delete_confirm.set(false);
                 ui.playlist.set(Some(detail));
+                let candidates = account
+                    .client
+                    .tracks(None, None, false, ticket.cancel.clone())
+                    .await;
+                if ticket.current(&ui)
+                    && *ui.view.peek() == "playlists"
+                    && ui.playlist_id.peek().as_deref() == Some(id.as_str())
+                {
+                    match candidates {
+                        Ok(page) => ui.playlist_candidates.set(page.items),
+                        Err(_) => ui.playlist_candidates.set(Vec::new()),
+                    }
+                }
             }
             Err(error) => {
                 if !expired(ui.clone(), &error) {
@@ -866,6 +883,53 @@ fn remove_playlist_entry(mut ui: Ui, item_id: String) {
                 }
                 ui.playlist.set(Some(updated));
                 ui.notice.set("Playlist entry removed.".into());
+            }
+            Err(error) => {
+                if !expired(ui.clone(), &error) {
+                    ui.playlist_error.set(error);
+                }
+            }
+        }
+    });
+}
+
+fn add_selected_playlist_track(mut ui: Ui) {
+    let Some(detail) = ui.playlist.peek().clone().filter(|_| ui.signed_in()) else {
+        return;
+    };
+    let track_id = ui.playlist_candidate.peek().clone();
+    if track_id.is_empty() || *ui.playlist_busy.peek() {
+        return;
+    }
+    let Some(account) = ui.account.peek().clone() else {
+        return;
+    };
+    let id = detail.playlist.id;
+    let revision = detail.playlist.revision;
+    let ticket = ui.playlist_write_gate.begin(account.epoch);
+    ui.playlist_busy.set(true);
+    spawn(async move {
+        let result = account
+            .client
+            .add_playlist_item(&id, revision, &track_id, ticket.cancel.clone())
+            .await;
+        if !ticket.current(&ui)
+            || *ui.view.peek() != "playlists"
+            || ui.playlist_id.peek().as_deref() != Some(id.as_str())
+        {
+            return;
+        }
+        ui.playlist_busy.set(false);
+        match result {
+            Ok(updated) => {
+                ui.playlist_error.set(String::new());
+                ui.playlist_candidate.set(String::new());
+                if let Some(entry) = ui.playlists.write().iter_mut().find(|list| list.id == id) {
+                    entry.revision = updated.playlist.revision;
+                    entry.item_count = updated.items.len() as i64;
+                }
+                ui.playlist.set(Some(updated));
+                ui.notice.set("Track added to playlist.".into());
             }
             Err(error) => {
                 if !expired(ui.clone(), &error) {
@@ -1669,6 +1733,9 @@ fn playlists_view(ui: Ui) -> Element {
     let rename = ui.clone();
     let delete = ui.clone();
     let busy = ui.playlist_busy;
+    let candidates = ui.playlist_candidates.read().clone();
+    let mut candidate = ui.playlist_candidate;
+    let add = ui.clone();
     let mut draft = ui.playlist_name_draft;
     let mut confirm = ui.playlist_delete_confirm;
     let is_owner = detail.as_ref().is_some_and(|detail| {
@@ -1708,9 +1775,19 @@ fn playlists_view(ui: Ui) -> Element {
                     }
                 }
                 if *confirm.read() { p { class: "muted", role: "status", "Deleting removes this playlist and its share links. Your original tracks and audio stay." } }
+                div { class: "inline-form",
+                    label { class: "sr-only", r#for: "native-playlist-track", "Library track" }
+                    select { id: "native-playlist-track", value: "{candidate}", disabled: *busy.read(), onchange: move |event| candidate.set(event.value()),
+                        option { value: "", "Choose a library track" }
+                        for track in candidates.iter().cloned() {
+                            option { value: "{track.id}", "{track.title} · {track.artist}" }
+                        }
+                    }
+                    button { class: "button secondary small", disabled: *busy.read() || candidate.read().is_empty(), onclick: move |_| add_selected_playlist_track(add.clone()), "Add selected track" }
+                }
             }
             if detail.items.is_empty() {
-                div { class: "native-empty", Icon { name: "queue" } h2 { "This playlist is empty" } p { "Add tracks from the web app; native playlist editing is not implemented yet." } }
+                div { class: "native-empty", Icon { name: "queue" } h2 { "This playlist is empty" } p { "Add an owned track above, or manage it from the web app." } }
             } else {
                 div { class: "native-queue-list",
                     for (at, entry) in detail.items.iter().cloned().enumerate() {
@@ -2158,6 +2235,8 @@ pub fn App() -> Element {
         playlist_loading: use_signal(|| false),
         playlist_error: use_signal(String::new),
         playlist_name_draft: use_signal(String::new),
+        playlist_candidates: use_signal(Vec::new),
+        playlist_candidate: use_signal(String::new),
         playlist_busy: use_signal(|| false),
         playlist_delete_confirm: use_signal(|| false),
         browse_kind: use_signal(|| "albums"),
