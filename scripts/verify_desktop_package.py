@@ -67,7 +67,9 @@ def main():
         if args.launch:
             if not os.environ.get('DISPLAY') and not os.environ.get('WAYLAND_DISPLAY'):
                 raise RuntimeError('--launch needs a graphical session')
-            environment = {**os.environ, 'VELA_DESKTOP_SERVER_URL': 'http://127.0.0.1:9', 'GDK_BACKEND': 'x11'}
+            launch_temp = root / 'launch-tmp'
+            launch_temp.mkdir()
+            environment = {**os.environ, 'VELA_DESKTOP_SERVER_URL': 'http://127.0.0.1:9', 'GDK_BACKEND': 'x11', 'TMPDIR': str(launch_temp)}
             process = subprocess.Popen([str(binary)], env=environment, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
             window = None
             deadline = time.monotonic() + 20
@@ -97,7 +99,7 @@ def main():
             report['launched'] = True
             report['window_title'] = 'Vela Music'
             report['screenshot'] = str(screenshot)
-            report['temporary_originals_after_exit'] = len(list(Path(tempfile.gettempdir()).glob('vela-native-*')))
+            report['temporary_originals_after_exit'] = len(list(launch_temp.iterdir()))
         print(json.dumps(report, indent=2))
 
 
