@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Vela Music
+GenericName=Music Player
+Comment=Private Vela music library and public catalogs
+Exec=vela-desktop
+Icon=vela-desktop
+Terminal=false
+Categories=Audio;AudioVideo;Player;Network;
+Keywords=music;player;vela;
+StartupWMClass=vela-desktop
