@@ -89,7 +89,7 @@ after the server cursor-forwarding fix) from `target/checks/preview-cursor-firef
 Source postdates the live0.12.6 runtime; the next patch will deploy it. No schema or
 original-data change.
 
-## Phase 0 follow-up: 100k HTTP catalog + artist grouping fix — verified (2026-10-19)
+## Phase 0 follow-up: 100k HTTP catalog + artist grouping fix — verified (2026-10-19, `1a6bf32`)
 
 Extended `scripts/benchmark_http.py` with `--seed-tracks N`: one isolated server
 lifetime runs real migrations/setup, stops gracefully, inserts metadata-only rows in
