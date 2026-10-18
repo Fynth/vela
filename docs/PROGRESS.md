@@ -67,7 +67,7 @@ downloads two tracks, checks v2 digest manifests and plays/Next/Previous/removes
 server down. Evidence:`target/checks/native-offline-hash2/`;28/30 desktop tests with both
 opt-ins, strict Clippy/fmt. Source postdates0.12.5; no schema/server/web/runtime change.
 
-## Web peer preview cursor pagination — source verified (2026-10-18)
+## Web peer preview cursor pagination — source verified (2026-10-18, `e3b6168`)
 
 The web Network preview now supports bounded page continuation: `PreviewPeer` gained an
 optional UUID cursor the server validates on every page (canonical ID, empty/oversized
