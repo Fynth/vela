@@ -105,7 +105,13 @@ struct Ui {
     folder_gate: Gate,
     browse_gate: Gate,
     remote_gate: Gate,
+    /// One save-to-device operation.
     offline_gate: Gate,
+    /// Saved-copy list operations: sign-in load/verify, removal and its reload.
+    offline_list_gate: Gate,
+    /// One offline playback verification. Exists before the blocking worker
+    /// starts so Cancel always wins (AUD-03).
+    offline_play_gate: Gate,
     source_gate: Gate,
     logout_gate: Gate,
     epoch: Signal<u64>,
@@ -177,6 +183,11 @@ struct Ui {
     offline_corrupt: Signal<Vec<String>>,
     offline_active: Signal<bool>,
     offline_confirm: Signal<String>,
+    /// The saved copy currently being verified off the UI thread (AUD-03).
+    offline_checking: Signal<Option<crate::offline::OfflineTrack>>,
+    /// The copy whose removal is in flight; removals are single-flight so an
+    /// older operation can never overwrite a newer list.
+    offline_removing: Signal<String>,
     saved_peers: Signal<Vec<String>>,
     queue: Signal<Vec<Track>>,
     order: Signal<PlaybackOrder>,
@@ -232,11 +243,18 @@ impl Ui {
         self.playlist_write_gate.cancel();
         self.browse_gate.cancel();
         self.remote_gate.cancel();
+        self.offline_gate.cancel();
+        self.offline_list_gate.cancel();
+        self.offline_play_gate.cancel();
         self.source_gate.cancel();
         self.logout_gate.cancel();
     }
     fn new_selection(&mut self) -> u64 {
         self.source_gate.cancel();
+        // AUD-03: a pending offline verification belongs to the previous
+        // selection, so its blocking worker is canceled here as well.
+        self.offline_play_gate.cancel();
+        self.offline_checking.set(None);
         let selection = self.generation_clock.get().wrapping_add(1);
         self.generation_clock.set(selection);
         self.selection.set(selection);
@@ -321,6 +339,8 @@ impl Ui {
         self.offline_corrupt.set(Vec::new());
         self.offline_active.set(false);
         self.offline_confirm.set(String::new());
+        self.offline_checking.set(None);
+        self.offline_removing.set(String::new());
         self.queue.set(Vec::new());
         self.order.set(PlaybackOrder::default());
         self.shuffle.set(false);
@@ -509,7 +529,6 @@ fn adopt_account(
     origin: String,
     epoch: u64,
 ) {
-    let account_id = auth.user.id.clone();
     ui.account.set(Some(Account {
         epoch,
         client,
@@ -517,56 +536,57 @@ fn adopt_account(
         origin,
     }));
     ui.offline.set(Vec::new());
-    let mut offline_ui = ui.clone();
+    // AUD-08: the saved-copy list is read and verified off this thread, and only
+    // the account that started the read may publish its result.
+    let ticket = ui.offline_list_gate.begin(epoch);
+    let Some(owner) = ui
+        .account
+        .peek()
+        .as_ref()
+        .map(|account| OfflineOwner::new(&ui.offline_list_gate, &ticket, account))
+    else {
+        return;
+    };
+    let catalog_ui = ui.clone();
     spawn(async move {
+        let scope = owner.user_id.clone();
         let loaded = tokio::task::spawn_blocking({
-            let account_id = account_id.clone();
+            let account_id = scope.clone();
             move || crate::offline::load(&account_id)
         })
         .await;
-        if offline_ui
-            .account
-            .peek()
-            .as_ref()
-            .map(|account| account.user.id.as_str())
-            != Some(account_id.as_str())
-        {
+        if !owner.current(&ui, &ticket) {
             return;
         }
         match loaded {
-            Ok(Ok(tracks)) => offline_ui.offline.set(tracks),
-            Ok(Err(error)) => offline_ui.offline_error.set(error),
-            Err(_) => offline_ui
+            Ok(Ok(tracks)) => ui.offline.set(tracks),
+            Ok(Err(error)) => ui.offline_error.set(error),
+            Err(_) => ui
                 .offline_error
                 .set("Saved offline music could not be read.".into()),
         }
-        if let Ok(Ok(report)) = tokio::task::spawn_blocking({
-            let account_id = offline_ui
-                .account
-                .peek()
-                .as_ref()
-                .map(|account| account.user.id.clone())
-                .unwrap_or_default();
-            move || crate::offline::verify(&account_id)
+        let verified = tokio::task::spawn_blocking({
+            let account_id = scope;
+            let cancel = ticket.cancel.clone();
+            move || crate::offline::verify(&account_id, &|| cancel.is_cancelled())
         })
-        .await
-            && offline_ui
-                .account
-                .peek()
-                .as_ref()
-                .map(|account| account.user.id.as_str())
-                == Some(account_id.as_str())
-        {
+        .await;
+        // AUD-08: the integrity sweep awaited the reload; an old account may not
+        // publish its notice or its corrupt list any more.
+        if !owner.current(&ui, &ticket) {
+            return;
+        }
+        if let Ok(Ok(report)) = verified {
             if !report.corrupt.is_empty() {
-                offline_ui.notice.set(format!(
+                ui.notice.set(format!(
                     "{} offline copy(ies) failed their integrity check. Save them again.",
                     report.corrupt.len()
                 ));
             }
-            offline_ui.offline_corrupt.set(report.corrupt);
+            ui.offline_corrupt.set(report.corrupt);
         }
     });
-    load_catalog(ui, String::new(), None, false);
+    load_catalog(catalog_ui, String::new(), None, false);
 }
 
 fn resume_saved(mut ui: Ui) {
@@ -2111,6 +2131,168 @@ fn sign_in(ui: Ui) -> Element {
     } }
 }
 
+/// AUD-03/AUD-08: the account identity plus operation generation a deferred
+/// offline result belongs to. Every signal write after an `await` is re-checked
+/// against it, so a delayed delete, reload or verification from a replaced
+/// account can never overwrite the current list or playback state.
+#[derive(Clone)]
+struct OfflineOwner {
+    gate: Gate,
+    generation: u64,
+    epoch: u64,
+    user_id: String,
+    origin: String,
+}
+
+impl OfflineOwner {
+    fn new(gate: &Gate, ticket: &Ticket, account: &Account) -> Self {
+        Self {
+            gate: gate.clone(),
+            generation: ticket.generation,
+            epoch: account.epoch,
+            user_id: account.user.id.clone(),
+            origin: account.origin.clone(),
+        }
+    }
+    /// The whole freshness rule as one pure predicate, so it is testable without
+    /// a native window: the operation generation, the account epoch and the
+    /// exact account identity (user id *and* origin) must all still be the live
+    /// ones, the ticket must be uncancelled and the window still open.
+    fn matches(
+        &self,
+        alive: bool,
+        canceled: bool,
+        generation: u64,
+        epoch: u64,
+        account: Option<(&str, &str)>,
+    ) -> bool {
+        alive
+            && !canceled
+            && generation == self.generation
+            && epoch == self.epoch
+            && account
+                .is_some_and(|(user_id, origin)| user_id == self.user_id && origin == self.origin)
+    }
+    fn current(&self, ui: &Ui, ticket: &Ticket) -> bool {
+        let account = ui.account.peek();
+        self.matches(
+            ui.alive.get(),
+            ticket.cancel.is_cancelled(),
+            self.gate.generation.get(),
+            *ui.epoch.peek(),
+            account
+                .as_ref()
+                .map(|account| (account.user.id.as_str(), account.origin.as_str())),
+        )
+    }
+}
+
+/// AUD-07: what removing one saved copy does to the live offline playback.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OfflineRemoval {
+    /// The decoder owns the removed occurrence: stop and clear the queue.
+    StopPlayback,
+    /// Drop this occurrence from the queue and remap the order model; the active
+    /// source, its position and the other occurrences stay untouched.
+    Remap(usize),
+    /// Nothing in the live playback refers to the removed copy.
+    Keep,
+}
+
+fn offline_removal(
+    offline_active: bool,
+    current: Option<usize>,
+    queue: &[Track],
+    track_id: &str,
+) -> OfflineRemoval {
+    if !offline_active {
+        return OfflineRemoval::Keep;
+    }
+    if current
+        .and_then(|at| queue.get(at))
+        .is_some_and(|track| track.id == track_id)
+    {
+        return OfflineRemoval::StopPlayback;
+    }
+    match queue.iter().position(|track| track.id == track_id) {
+        Some(at) => OfflineRemoval::Remap(at),
+        None => OfflineRemoval::Keep,
+    }
+}
+
+/// Stop the offline decoder and queue without touching any saved copy.
+fn stop_offline_playback(mut ui: Ui) {
+    // `new_selection` also cancels a pending offline verification.
+    ui.new_selection();
+    ui.prepared.set(None);
+    ui.offline_active.set(false);
+    ui.queue.set(Vec::new());
+    ui.order.write().reset(0, 0);
+    // The removed occurrence is gone, so the player must not keep claiming this
+    // source context is still playing.
+    ui.context.set(String::new());
+}
+
+/// AUD-07: the live offline queue is a projection of the saved-copy list. When
+/// the two disagree, rebuild the projection from the list and keep the decoder
+/// that is already playing untouched.
+fn sync_offline_queue(mut ui: Ui) {
+    if !*ui.offline_active.peek() {
+        return;
+    }
+    let playing = ui.current_track().map(|track| track.id);
+    let queue = ui
+        .offline
+        .peek()
+        .iter()
+        .map(|entry| entry.track.clone())
+        .collect::<Vec<_>>();
+    let Some(at) = playing
+        .as_deref()
+        .and_then(|id| queue.iter().position(|track| track.id == id))
+    else {
+        // Nothing the decoder owns is still on this device: stop instead of
+        // claiming another occurrence is playing.
+        stop_offline_playback(ui);
+        return;
+    };
+    let length = queue.len();
+    ui.queue.set(queue);
+    ui.order.write().reset(length, at);
+}
+
+/// AUD-07: add a newly saved copy to the live offline queue at the position the
+/// saved-copy list gives it, without resetting the shuffle deck/history.
+fn offline_queue_added(mut ui: Ui, track_id: &str) {
+    if !*ui.offline_active.peek() {
+        return;
+    }
+    let position = {
+        let saved = ui.offline.peek();
+        saved
+            .iter()
+            .position(|entry| entry.track.id == track_id)
+            .map(|at| (at, saved[at].track.clone()))
+    };
+    let Some((at, track)) = position else {
+        return;
+    };
+    let at = at.min(ui.queue.peek().len());
+    if ui.order.write().insert(at, false) {
+        ui.queue.write().insert(at, track);
+    } else {
+        sync_offline_queue(ui);
+    }
+}
+
+fn cancel_offline_check(mut ui: Ui) {
+    // Physical cancellation: the blocking worker stops at its next verified
+    // block and its late result is dropped with the descriptor lease.
+    ui.offline_play_gate.cancel();
+    ui.offline_checking.set(None);
+    ui.notice.set("Offline copy check canceled.".into());
+}
+
 fn download_offline(mut ui: Ui, track: Track) {
     if !ui.offline_busy.peek().is_empty()
         || ui
@@ -2124,9 +2306,9 @@ fn download_offline(mut ui: Ui, track: Track) {
     let Some(account) = ui.account.peek().clone().filter(|_| ui.signed_in()) else {
         return;
     };
-    let account_id = account.user.id.clone();
     let track_id = track.id.clone();
     let ticket = ui.offline_gate.begin(account.epoch);
+    let owner = OfflineOwner::new(&ui.offline_gate, &ticket, &account);
     ui.offline_busy.set(track_id.clone());
     ui.offline_error.set(String::new());
     spawn(async move {
@@ -2135,13 +2317,7 @@ fn download_offline(mut ui: Ui, track: Track) {
             .client
             .prepare(&track, ticket.cancel.clone(), progress)
             .await;
-        if !ticket.current(&ui)
-            || ui
-                .account
-                .peek()
-                .as_ref()
-                .is_none_or(|account| account.user.id != account_id)
-        {
+        if !owner.current(&ui, &ticket) {
             return;
         }
         let prepared = match result {
@@ -2154,25 +2330,35 @@ fn download_offline(mut ui: Ui, track: Track) {
                 return;
             }
         };
-        let save = tokio::task::spawn_blocking({
-            let account_id = account_id.clone();
+        let saved = tokio::task::spawn_blocking({
+            let account_id = owner.user_id.clone();
             let track = track.clone();
-            move || crate::offline::save(&account_id, &track, &prepared)
+            let cancel = ticket.cancel.clone();
+            move || crate::offline::save(&account_id, &track, &prepared, &|| cancel.is_cancelled())
         })
         .await;
-        if !ticket.current(&ui) {
+        // AUD-08: the copy finished, but the account may have been replaced.
+        if !owner.current(&ui, &ticket) {
             return;
         }
         ui.offline_busy.set(String::new());
-        match save {
+        match saved {
             Ok(Ok(())) => {
                 let loaded = tokio::task::spawn_blocking({
-                    let account_id = account_id.clone();
+                    let account_id = owner.user_id.clone();
                     move || crate::offline::load(&account_id)
                 })
                 .await;
+                // AUD-08: this reload awaited as well; only this operation may
+                // publish it.
+                if !owner.current(&ui, &ticket) {
+                    return;
+                }
                 match loaded {
-                    Ok(Ok(tracks)) => ui.offline.set(tracks),
+                    Ok(Ok(tracks)) => {
+                        ui.offline.set(tracks);
+                        offline_queue_added(ui.clone(), &track_id);
+                    }
                     Ok(Err(error)) => ui.offline_error.set(error),
                     Err(_) => ui
                         .offline_error
@@ -2183,7 +2369,11 @@ fn download_offline(mut ui: Ui, track: Track) {
                     .retain(|track| track != &track_id);
                 ui.notice.set("Saved for offline listening.".into());
             }
-            Ok(Err(error)) => ui.offline_error.set(error),
+            Ok(Err(error)) => {
+                if error != crate::offline::CANCELED {
+                    ui.offline_error.set(error);
+                }
+            }
             Err(_) => ui
                 .offline_error
                 .set("The offline copy could not be written.".into()),
@@ -2216,40 +2406,82 @@ fn start_offline_at(mut ui: Ui, index: usize) {
     let Some(audio) = ui.audio.peek().clone() else {
         return;
     };
-    let prepared = match crate::offline::prepare(&account.user.id, &saved.track.id) {
-        Ok(prepared) => prepared,
-        Err(error) => {
-            ui.offline_error.set(error);
+    // AUD-03: the manifest scan and the BLAKE3 hash of up to 250 MiB belong to a
+    // blocking worker, never to this thread. The ticket exists before that
+    // worker starts, so Cancel/Next/sign-out cannot be racing it, and nothing is
+    // stopped or replaced until the copy has been verified.
+    let ticket = ui.offline_play_gate.begin(account.epoch);
+    let owner = OfflineOwner::new(&ui.offline_play_gate, &ticket, &account);
+    ui.offline_checking.set(Some(saved.clone()));
+    ui.offline_error.set(String::new());
+    ui.source_error.set(String::new());
+    let track_id = saved.track.id.clone();
+    let title = saved.track.title.clone();
+    spawn(async move {
+        let prepared = tokio::task::spawn_blocking({
+            let account_id = owner.user_id.clone();
+            let track_id = track_id.clone();
+            let cancel = ticket.cancel.clone();
+            move || crate::offline::prepare(&account_id, &track_id, &|| cancel.is_cancelled())
+        })
+        .await;
+        // AUD-03/AUD-08: a late, canceled or superseded verification writes
+        // nothing and drops its descriptor lease with `prepared`.
+        if !owner.current(&ui, &ticket) {
             return;
         }
-    };
-    let selection = ui.new_selection();
-    ui.source_error.set(String::new());
-    ui.offline_active.set(true);
-    ui.remote_now.set(None);
-    ui.remote_queue.set(Vec::new());
-    ui.remote_index.set(0);
-    let queue = ui
-        .offline
-        .peek()
-        .iter()
-        .map(|entry| entry.track.clone())
-        .collect::<Vec<_>>();
-    let length = queue.len();
-    ui.queue.set(queue);
-    ui.order.write().reset(length, index);
-    ui.context.set(format!("Offline · {}", saved.track.title));
-    ui.prepared.set(None);
-    match audio.load(selection, prepared.clone(), true, 0) {
-        Ok(()) => ui.prepared.set(Some(prepared)),
-        Err(error) => {
-            ui.offline_active.set(false);
-            ui.source_error.set(error);
+        ui.offline_checking.set(None);
+        let prepared = match prepared {
+            Ok(Ok(prepared)) => prepared,
+            Ok(Err(error)) => {
+                if error != crate::offline::CANCELED {
+                    ui.offline_error.set(error);
+                }
+                return;
+            }
+            Err(_) => {
+                ui.offline_error
+                    .set("The offline copy could not be checked.".into());
+                return;
+            }
+        };
+        // The saved-copy list may have changed while the copy was verified; the
+        // queue is rebuilt from it, so resolve the occurrence by track id.
+        let queue = ui
+            .offline
+            .peek()
+            .iter()
+            .map(|entry| entry.track.clone())
+            .collect::<Vec<_>>();
+        let Some(at) = queue.iter().position(|track| track.id == track_id) else {
+            ui.offline_error
+                .set("The offline copy is missing. Save it again from the library.".into());
+            return;
+        };
+        let length = queue.len();
+        let selection = ui.new_selection();
+        ui.offline_active.set(true);
+        ui.remote_now.set(None);
+        ui.remote_queue.set(Vec::new());
+        ui.remote_index.set(0);
+        ui.queue.set(queue);
+        ui.order.write().reset(length, at);
+        ui.context.set(format!("Offline · {title}"));
+        ui.prepared.set(None);
+        match audio.load(selection, prepared.clone(), true, 0) {
+            Ok(()) => ui.prepared.set(Some(prepared)),
+            Err(error) => {
+                ui.offline_active.set(false);
+                ui.source_error.set(error);
+            }
         }
-    }
+    });
 }
 
 fn offline_step(ui: Ui, delta: i32) {
+    if !ui.signed_in() {
+        return;
+    }
     let current = ui.order.read().current();
     let Some(current) = current else {
         return;
@@ -2257,65 +2489,120 @@ fn offline_step(ui: Ui, delta: i32) {
     let Some(next) = crate::remote::queue_target(current, ui.queue.peek().len(), delta) else {
         return;
     };
-    start_offline_at(ui, next);
+    // AUD-07: the occurrence index belongs to the queue, so resolve the target
+    // track first and only then look up its position in the saved-copy list.
+    let Some(track_id) = ui.queue.peek().get(next).map(|track| track.id.clone()) else {
+        return;
+    };
+    let Some(index) = ui
+        .offline
+        .peek()
+        .iter()
+        .position(|entry| entry.track.id == track_id)
+    else {
+        // The copy left the list between the two projections: resynchronize
+        // instead of starting a track that is no longer on this device.
+        sync_offline_queue(ui);
+        return;
+    };
+    start_offline_at(ui, index);
 }
 
 fn remove_offline(mut ui: Ui, track_id: String) {
-    let Some(account) = ui.account.peek().clone().filter(|_| ui.signed_in()) else {
+    // Removals are single-flight: a second removal may not interleave with the
+    // delete/reload of the first one.
+    if !ui.offline_removing.peek().is_empty() || !ui.signed_in() {
+        return;
+    }
+    let Some(account) = ui.account.peek().clone() else {
         return;
     };
-    let account_id = account.user.id.clone();
+    // A copy under verification is going away: cancel the blocking hash first so
+    // that worker stops at its next block rather than after the whole file.
+    if ui
+        .offline_checking
+        .peek()
+        .as_ref()
+        .is_some_and(|entry| entry.track.id == track_id)
+    {
+        ui.offline_play_gate.cancel();
+        ui.offline_checking.set(None);
+    }
+    let ticket = ui.offline_list_gate.begin(account.epoch);
+    let owner = OfflineOwner::new(&ui.offline_list_gate, &ticket, &account);
+    ui.offline_removing.set(track_id.clone());
     ui.offline_error.set(String::new());
     spawn(async move {
         let removed = tokio::task::spawn_blocking({
-            let account_id = account_id.clone();
+            let account_id = owner.user_id.clone();
             let track_id = track_id.clone();
             move || crate::offline::remove(&account_id, &track_id)
         })
         .await;
-        if ui
-            .account
-            .peek()
-            .as_ref()
-            .is_none_or(|account| account.user.id != account_id)
-        {
+        // AUD-08: the delete ran while this operation could have been replaced
+        // (sign-out, another account, a newer removal).
+        if !owner.current(&ui, &ticket) {
             return;
         }
         match removed {
-            Ok(Ok(())) => {
-                if *ui.offline_active.peek() {
-                    let selection = ui.new_selection();
-                    if let Some(audio) = ui.audio.peek().clone() {
-                        let _ = audio.stop(selection);
-                    }
-                    ui.prepared.set(None);
-                    ui.offline_active.set(false);
-                    ui.queue.set(Vec::new());
-                    ui.order.write().reset(0, 0);
-                    ui.offline_confirm.set(String::new());
-                }
-                let loaded = tokio::task::spawn_blocking({
-                    let account_id = account_id.clone();
-                    move || crate::offline::load(&account_id)
-                })
-                .await;
-                match loaded {
-                    Ok(Ok(tracks)) => ui.offline.set(tracks),
-                    Ok(Err(error)) => ui.offline_error.set(error),
-                    Err(_) => ui
-                        .offline_error
-                        .set("Saved offline music could not be read.".into()),
-                }
-                ui.offline_corrupt
-                    .write()
-                    .retain(|track| track != &track_id);
-                ui.notice.set("Offline copy removed.".into());
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                ui.offline_removing.set(String::new());
+                ui.offline_error.set(error);
+                return;
             }
+            Err(_) => {
+                ui.offline_removing.set(String::new());
+                ui.offline_error
+                    .set("The offline copy could not be removed.".into());
+                return;
+            }
+        }
+        ui.offline_confirm.set(String::new());
+        // AUD-07: only the occurrence the decoder owns stops playback. Any other
+        // saved copy is dropped from the queue and the order model while the
+        // active source and its position keep playing.
+        let effect = offline_removal(
+            *ui.offline_active.peek(),
+            ui.order.peek().current(),
+            &ui.queue.peek(),
+            &track_id,
+        );
+        match effect {
+            OfflineRemoval::StopPlayback => stop_offline_playback(ui.clone()),
+            OfflineRemoval::Remap(at) => {
+                // Every structural queue edit updates the order model in the
+                // same step, so Next/Previous indices stay valid.
+                if !ui.order.write().remove(at) {
+                    sync_offline_queue(ui.clone());
+                } else {
+                    ui.queue.write().remove(at);
+                }
+            }
+            OfflineRemoval::Keep => {}
+        }
+        let reloaded = tokio::task::spawn_blocking({
+            let account_id = owner.user_id.clone();
+            move || crate::offline::load(&account_id)
+        })
+        .await;
+        // AUD-08: the reload awaited again; a stale operation may not replace
+        // the list a newer login/removal already published.
+        if !owner.current(&ui, &ticket) {
+            return;
+        }
+        ui.offline_removing.set(String::new());
+        match reloaded {
+            Ok(Ok(tracks)) => ui.offline.set(tracks),
             Ok(Err(error)) => ui.offline_error.set(error),
             Err(_) => ui
                 .offline_error
-                .set("The offline copy could not be removed.".into()),
+                .set("Saved offline music could not be read.".into()),
         }
+        ui.offline_corrupt
+            .write()
+            .retain(|track| track != &track_id);
+        ui.notice.set("Offline copy removed.".into());
     });
 }
 
@@ -2342,6 +2629,7 @@ fn library(ui: Ui) -> Element {
     let offline_busy = ui.offline_busy.read().clone();
     let offline_error = ui.offline_error.read().clone();
     let offline_confirm = ui.offline_confirm.read().clone();
+    let offline_removing = ui.offline_removing.read().clone();
     let offline_corrupt = ui
         .offline_corrupt
         .read()
@@ -2372,16 +2660,17 @@ fn library(ui: Ui) -> Element {
                     let confirm_id = saved.track.id.clone();
                     let offline_id = saved.track.id.clone();
                     let offline_damaged = offline_corrupt.contains(&offline_id);
+                    let offline_removing_this = offline_removing == offline_id;
                     let set_confirm_id = offline_id.clone();
                     let play_saved = saved.clone();
                     let title = saved.track.title.clone();
                     rsx! { article {class:"native-queue-row",key:"offline-{offline_id.clone()}","data-offline-track-id":"{offline_id.clone()}",
                         div {class:"neutral-cover","aria-hidden":"true",Icon {name:"down"}}
-                        div {class:"native-queue-select",div {strong {"{saved.track.title}"} small {"{saved.track.artist} · {saved.length_bytes / 1024} KiB on this device"} small {if offline_damaged {"Integrity check failed · save it again"} else {"Private offline copy"}}}}
-                        button {class:"button primary small",disabled:offline_damaged,"aria-label":"Play offline {title}",onclick:move |_|play_offline(play_handler.clone(),play_saved.clone()),Icon {name:"play"} "Play offline"}
+                        div {class:"native-queue-select",div {strong {"{saved.track.title}"} small {"{saved.track.artist} · {saved.length_bytes / 1024} KiB on this device"} small {if offline_removing_this {"Removing this device copy…"} else if offline_damaged {"Integrity check failed · save it again"} else {"Private offline copy"}}}}
+                        button {class:"button primary small",disabled:offline_damaged||offline_removing_this,"aria-label":"Play offline {title}",onclick:move |_|play_offline(play_handler.clone(),play_saved.clone()),Icon {name:"play"} "Play offline"}
                         if offline_confirm == offline_id {
-                            button {class:"button danger small","aria-label":"Confirm remove offline {title}",onclick:move |_|remove_offline(confirm_ui.clone(),confirm_id.clone()),"Confirm remove"}
-                            button {class:"button secondary small","aria-label":"Cancel remove offline {title}",onclick:move |_|{let mut ui=cancel_ui.clone();ui.offline_confirm.set(String::new());},"Cancel"}
+                            button {class:"button danger small",disabled:offline_removing_this,"aria-label":"Confirm remove offline {title}",onclick:move |_|remove_offline(confirm_ui.clone(),confirm_id.clone()),if offline_removing_this {"Removing…"} else {"Confirm remove"}}
+                            button {class:"button secondary small",disabled:offline_removing_this,"aria-label":"Cancel remove offline {title}",onclick:move |_|{let mut ui=cancel_ui.clone();ui.offline_confirm.set(String::new());},"Cancel"}
                         } else {
                             button {class:"icon-button","aria-label":"Remove offline copy {title}",title:"Remove only this device copy; the original and server library stay.",onclick:move |_|{let mut ui=set_confirm_ui.clone();ui.offline_confirm.set(set_confirm_id.clone());},Icon {name:"close"}}
                         }
@@ -3390,6 +3679,7 @@ fn player(ui: Ui) -> Element {
     let offline_len = ui.queue.read().len();
     let snapshot = ui.snapshot.read().clone();
     let preparing = *ui.preparing.read();
+    let checking = ui.offline_checking.read().clone();
     let progress = *ui.progress.read();
     let error = ui.source_error.read().clone();
     let shuffle = *ui.shuffle.read();
@@ -3403,9 +3693,12 @@ fn player(ui: Ui) -> Element {
     let seek_ui = ui.clone();
     let volume_ui = ui.clone();
     let cancel = ui.clone();
+    let cancel_check = ui.clone();
     let shuffle_ui = ui.clone();
     let repeat_ui = ui.clone();
-    let blocked = (track.is_none() && remote.is_none()) || !ui.audio_ready();
+    // A copy under verification is a pending transport action: the decoder keeps
+    // what it has and every control that would replace or seek it waits.
+    let blocked = (track.is_none() && remote.is_none()) || !ui.audio_ready() || checking.is_some();
     let playing = snapshot.phase == AudioPhase::Playing;
     let can_seek = !blocked
         && !preparing
@@ -3417,6 +3710,8 @@ fn player(ui: Ui) -> Element {
         );
     let status = if preparing {
         "Preparing original audio"
+    } else if checking.is_some() {
+        "Checking the offline copy"
     } else {
         match snapshot.phase {
             AudioPhase::Idle => "Ready when you are",
@@ -3458,6 +3753,7 @@ fn player(ui: Ui) -> Element {
         div {class:"player-volume",Icon {name:"volume"} label {class:"sr-only",r#for:"native-volume","Volume"} input {id:"native-volume",r#type:"range",min:0,max:100,step:1,value:(snapshot.volume*100.0).round(),disabled:!ui.audio_ready(),oninput:move |event|volume(volume_ui.clone(),event.value())}}
         div {class:"native-player-status",role:"status","data-testid":"native-playback-status",span {"{status}"} if !context.is_empty(){small {"Playing from {context}"}}
             if preparing {div {class:"preparation-progress",if progress.total_bytes>0 {progress {max:progress.total_bytes,value:progress.received_bytes.min(progress.total_bytes)} small {"{byte_label(progress.received_bytes)} / {byte_label(progress.total_bytes)}"}}else{progress {} small {"Waiting for audio bytes…"}} button {class:"text-button",onclick:move |_|{let mut ui=cancel.clone();ui.new_selection();ui.prepared.set(None);ui.source_error.set("Preparation canceled. Press Play to try again.".into());},"Cancel preparation"}}}
+            if let Some(checking)=checking.clone() {div {class:"preparation-progress","data-testid":"native-offline-check",span {"Verifying · {checking.track.title}"} small {"The saved copy is verified off this thread before it replaces the current audio."} button {class:"text-button","aria-label":"Cancel offline check",onclick:move |_|cancel_offline_check(cancel_check.clone()),"Cancel offline check"}}}
         }
         if !ui.audio_error.read().is_empty(){div {class:"player-error",role:"alert","{ui.audio_error}"}}
         if !error.is_empty(){div {class:"player-error",role:"alert","{error} Press Play to retry."}}
@@ -3482,6 +3778,8 @@ pub fn App() -> Element {
         browse_gate: use_hook(Gate::default),
         remote_gate: use_hook(Gate::default),
         offline_gate: use_hook(Gate::default),
+        offline_list_gate: use_hook(Gate::default),
+        offline_play_gate: use_hook(Gate::default),
         source_gate: use_hook(Gate::default),
         logout_gate: use_hook(Gate::default),
         epoch: use_signal(|| 1),
@@ -3555,6 +3853,8 @@ pub fn App() -> Element {
         offline_corrupt: use_signal(Vec::new),
         offline_active: use_signal(|| false),
         offline_confirm: use_signal(String::new),
+        offline_checking: use_signal(|| None),
+        offline_removing: use_signal(String::new),
         saved_peers: use_signal(|| crate::peers::load().unwrap_or_default()),
         queue: use_signal(Vec::new),
         order: use_signal(PlaybackOrder::default),
@@ -3838,6 +4138,158 @@ mod tests {
             !SavedSessionFailure::Rejected
                 .message(error)
                 .contains("kept")
+        );
+    }
+
+    fn sample_track(id: &str) -> Track {
+        Track {
+            id: id.into(),
+            title: format!("Track {id}"),
+            artist: "Vela Test".into(),
+            album: "Offline".into(),
+            album_artist: "Vela Test".into(),
+            genre: String::new(),
+            year: None,
+            track_number: Some(1),
+            disc_number: Some(1),
+            duration_ms: 30_000,
+            codec: "flac".into(),
+            bitrate: None,
+            sample_rate: Some(44_100),
+            bit_depth: Some(16),
+            channels: Some(2),
+            size_bytes: 1_024,
+            artwork_id: None,
+            added_at: 1,
+            favorite: false,
+        }
+    }
+
+    /// REG-AUD-07: removing a saved copy that is not the active occurrence must
+    /// leave the decoder and its occurrence alone while Next/Previous keep
+    /// working on the shortened queue.
+    #[test]
+    fn removing_a_different_saved_copy_keeps_playback_and_remaps_the_queue() {
+        let mut queue = vec![
+            sample_track("a"),
+            sample_track("b"),
+            sample_track("c"),
+            sample_track("d"),
+        ];
+        let mut order = PlaybackOrder::default();
+        order.reset(queue.len(), 1);
+        let playing = queue[1].clone();
+
+        let effect = offline_removal(true, order.current(), &queue, "d");
+        assert_eq!(effect, OfflineRemoval::Remap(3));
+        let OfflineRemoval::Remap(at) = effect else {
+            unreachable!("checked above");
+        };
+        assert!(order.remove(at));
+        queue.remove(at);
+        // The active source and its occurrence survive untouched.
+        assert_eq!(order.current(), Some(1));
+        assert_eq!(queue[order.current().expect("still current")], playing);
+        // Next and Previous still walk the remapped queue.
+        assert_eq!(order.transition(Command::Next, 0.0, 0), Transition::Play(2));
+        assert_eq!(queue[2].id, "c");
+        assert_eq!(
+            order.transition(Command::Previous, 0.0, 0),
+            Transition::Play(1)
+        );
+        assert_eq!(queue[1].id, "b");
+    }
+
+    /// Removing an occurrence before the active one shifts the current index
+    /// instead of changing the track that is playing.
+    #[test]
+    fn removing_an_earlier_saved_copy_shifts_the_active_occurrence() {
+        let mut queue = vec![
+            sample_track("a"),
+            sample_track("b"),
+            sample_track("c"),
+            sample_track("d"),
+        ];
+        let mut order = PlaybackOrder::default();
+        order.reset(queue.len(), 2);
+        assert_eq!(
+            offline_removal(true, order.current(), &queue, "a"),
+            OfflineRemoval::Remap(0)
+        );
+        assert!(order.remove(0));
+        queue.remove(0);
+        assert_eq!(order.current(), Some(1));
+        assert_eq!(queue[1].id, "c");
+        assert_eq!(order.transition(Command::Next, 0.0, 0), Transition::Play(2));
+        assert_eq!(queue[2].id, "d");
+    }
+
+    /// The stop/remap/keep decision is made before any signal is written.
+    #[test]
+    fn removal_effect_depends_on_the_active_occurrence_only() {
+        let queue = vec![sample_track("a"), sample_track("b")];
+        assert_eq!(
+            offline_removal(true, Some(1), &queue, "b"),
+            OfflineRemoval::StopPlayback
+        );
+        // Removing a device copy while a library source plays stops nothing.
+        assert_eq!(
+            offline_removal(false, Some(1), &queue, "b"),
+            OfflineRemoval::Keep
+        );
+        // A copy saved after playback started is not part of the live queue.
+        assert_eq!(
+            offline_removal(true, Some(1), &queue, "z"),
+            OfflineRemoval::Keep
+        );
+        // A cleared offline queue never stops a stopped decoder.
+        assert_eq!(
+            offline_removal(true, None, &queue, "b"),
+            OfflineRemoval::Remap(1)
+        );
+    }
+
+    /// REG-AUD-08: a delayed delete/reload/verify may only publish while the
+    /// account epoch, the account identity (user id and origin) and the
+    /// operation generation are still the live ones.
+    #[test]
+    fn a_delayed_offline_operation_cannot_publish_for_a_replaced_account() {
+        let owner = OfflineOwner {
+            gate: Gate::default(),
+            generation: 7,
+            epoch: 4,
+            user_id: "account-a".into(),
+            origin: "https://a.example".into(),
+        };
+        let same_account = Some(("account-a", "https://a.example"));
+        assert!(owner.matches(true, false, 7, 4, same_account));
+        assert!(
+            !owner.matches(true, false, 7, 5, same_account),
+            "sign-out/sign-in bumps the account epoch"
+        );
+        assert!(
+            !owner.matches(true, false, 7, 4, Some(("account-a", "https://b.example"))),
+            "the same user UUID on another origin is another local library"
+        );
+        assert!(
+            !owner.matches(true, false, 7, 4, Some(("account-b", "https://a.example"))),
+            "another account may not publish this result"
+        );
+        assert!(
+            !owner.matches(true, false, 8, 4, same_account),
+            "a newer offline operation superseded this one"
+        );
+        assert!(
+            !owner.matches(true, false, 7, 4, None),
+            "signed out while the delete was running"
+        );
+        assert!(
+            !owner.matches(true, true, 7, 4, same_account),
+            "canceled work publishes nothing"
+        );
+        assert!(
+            !owner.matches(false, false, 7, 4, same_account),
+            "a closed window publishes nothing"
         );
     }
 }
