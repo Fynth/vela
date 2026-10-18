@@ -20,8 +20,8 @@ library, play an original through the device's native audio output, pause/resume
 seek, change volume, navigate Library/Favorites/Playlists/Queue without interrupting
 audio, favorite/unfavorite owned tracks, search favorites, browse real albums,
 artists and playlists, play album/artist/playlist stream-authorized subsets, create/
-rename/delete own playlists, use next/previous/shuffle/repeat, queue duplicates/
-play-next/remove/reorder, switch theme, sign out. MPRIS exposes actual state and forwards play/pause/next/previous/
+rename/delete own playlists, reorder/remove playlist entries, use next/previous/
+shuffle/repeat, queue duplicates/play-next/remove/reorder, switch theme, sign out. MPRIS exposes actual state and forwards play/pause/next/previous/
 seek/volume where the bus is available.
 
 ## Implemented boundaries
@@ -51,9 +51,9 @@ seek/volume where the bus is available.
   reads. The native view lists real owner/granted playlists, shows entry metadata
   and whether each entry is streamable, and queues only the `can_stream` subset under
   a playlist context. Owners can create, CAS-rename and confirm-delete playlists via
-  the same authenticated/CSRF/Origin-safe client; success updates the list/detail
-  under session/view/selected-id guards. Entry add/reorder and folder mutation remain
-  web-only. Bounded entry counts/IDs are validated; a metadata-only entry is labelled.
+  the same authenticated/CSRF/Origin-safe client; entry reorder/removal use the
+  revisioned order/remove APIs with selected-id guards and update list counts/detail;
+  adding tracks from the library and folders remain web-only. Bounded entry counts/IDs are validated; a metadata-only entry is labelled.
 - Albums and artists use the existing owner-scoped `GET /api/albums`,
   `/api/albums/{id}`, `/api/albums/{id}/tracks` and artist equivalents. The native
   views render real group summaries, open read-only detail, and queue/play the
@@ -76,8 +76,8 @@ seek/volume where the bus is available.
 This first adapter downloads the whole authorized original before decoding. It is
 not progressive streaming, gapless, offline, a download entitlement, background
 mobile playback, secure credential persistence, device handoff, packaged install,
-playlist entry editing/folders, album/artist editing or a federated source
-resolver. It sends no
+adding library tracks to playlists, folders, album/artist editing or a federated
+source resolver. It sends no
 native listening events. Only Linux x86_64 is built/tested on this host; Windows,
 macOS, Android and iOS remain separate targets. Hardware output, screen readers and
 physical media keys are not certified.
@@ -109,8 +109,10 @@ physical media keys are not certified.
   server: real list card, native create → open → rename → cancel-delete → confirm
   delete, fixture playlist survives, two-entry detail, `Play playlist` starts native
   audio, the shared queue receives both entries, and Library navigation restores the
-  catalog. Evidence: `target/checks/native-playlist-edit-window3/` (including
-  `native-playlists-dark.png`) and earlier `native-playlists-window/`.
+  catalog. Entry editing also passes: move entry2 up, restore by moving entry1
+  down, remove entry2, list/detail/counts refresh. Evidence:
+  `target/checks/native-playlist-editing/` (including `native-playlists-dark.png`)
+  and earlier `native-playlist-edit-window3/`.
 - Favorites journey passes in the same real window: the owner favorite API
   acknowledges the row, Favorites shows exactly that track, unfavorite re-reads the
   filtered page to empty, and Library navigation restores all three owned tracks.

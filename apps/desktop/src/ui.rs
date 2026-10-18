@@ -746,6 +746,106 @@ fn delete_selected_playlist(mut ui: Ui) {
     });
 }
 
+fn move_playlist_entry(mut ui: Ui, at: usize, direction: i32) {
+    let Some(detail) = ui.playlist.peek().clone().filter(|_| ui.signed_in()) else {
+        return;
+    };
+    if *ui.playlist_busy.peek() {
+        return;
+    }
+    let target = at as i32 + direction;
+    if target < 0 || target as usize >= detail.items.len() {
+        return;
+    }
+    let Some(account) = ui.account.peek().clone() else {
+        return;
+    };
+    let mut ids = detail
+        .items
+        .iter()
+        .map(|item| item.id.clone())
+        .collect::<Vec<_>>();
+    ids.swap(at, target as usize);
+    let id = detail.playlist.id;
+    let revision = detail.playlist.revision;
+    let ticket = ui.playlist_write_gate.begin(account.epoch);
+    ui.playlist_busy.set(true);
+    spawn(async move {
+        let result = account
+            .client
+            .reorder_playlist(&id, revision, &ids, ticket.cancel.clone())
+            .await;
+        if !ticket.current(&ui)
+            || *ui.view.peek() != "playlists"
+            || ui.playlist_id.peek().as_deref() != Some(id.as_str())
+        {
+            return;
+        }
+        ui.playlist_busy.set(false);
+        match result {
+            Ok(updated) => {
+                ui.playlist_error.set(String::new());
+                if let Some(entry) = ui.playlists.write().iter_mut().find(|list| list.id == id) {
+                    entry.revision = updated.playlist.revision;
+                    entry.item_count = updated.items.len() as i64;
+                }
+                ui.playlist.set(Some(updated));
+                ui.notice.set("Playlist order updated.".into());
+            }
+            Err(error) => {
+                if !expired(ui.clone(), &error) {
+                    ui.playlist_error.set(error);
+                }
+            }
+        }
+    });
+}
+
+fn remove_playlist_entry(mut ui: Ui, item_id: String) {
+    let Some(detail) = ui.playlist.peek().clone().filter(|_| ui.signed_in()) else {
+        return;
+    };
+    if *ui.playlist_busy.peek() {
+        return;
+    }
+    let Some(account) = ui.account.peek().clone() else {
+        return;
+    };
+    let id = detail.playlist.id;
+    let revision = detail.playlist.revision;
+    let ticket = ui.playlist_write_gate.begin(account.epoch);
+    ui.playlist_busy.set(true);
+    spawn(async move {
+        let result = account
+            .client
+            .remove_playlist_item(&id, &item_id, revision, ticket.cancel.clone())
+            .await;
+        if !ticket.current(&ui)
+            || *ui.view.peek() != "playlists"
+            || ui.playlist_id.peek().as_deref() != Some(id.as_str())
+        {
+            return;
+        }
+        ui.playlist_busy.set(false);
+        match result {
+            Ok(updated) => {
+                ui.playlist_error.set(String::new());
+                if let Some(entry) = ui.playlists.write().iter_mut().find(|list| list.id == id) {
+                    entry.revision = updated.playlist.revision;
+                    entry.item_count = updated.items.len() as i64;
+                }
+                ui.playlist.set(Some(updated));
+                ui.notice.set("Playlist entry removed.".into());
+            }
+            Err(error) => {
+                if !expired(ui.clone(), &error) {
+                    ui.playlist_error.set(error);
+                }
+            }
+        }
+    });
+}
+
 fn play_playlist(mut ui: Ui) {
     let Some(detail) = ui.playlist.peek().clone().filter(|_| ui.signed_in()) else {
         return;
@@ -1493,11 +1593,23 @@ fn playlists_view(ui: Ui) -> Element {
                 div { class: "native-empty", Icon { name: "queue" } h2 { "This playlist is empty" } p { "Add tracks from the web app; native playlist editing is not implemented yet." } }
             } else {
                 div { class: "native-queue-list",
-                    for entry in detail.items.iter().cloned() {
-                        article { class: "native-queue-row", key: "{entry.id}",
-                            div { class: "neutral-cover", "aria-hidden": "true", Icon { name: "music" } }
-                            div { class: "native-queue-select", div { strong { "{entry.track.title}" } small { "{entry.track.artist}" } } }
-                            if entry.can_stream { span { class: "queue-current", "Playable" } } else { small { "Metadata only" } }
+                    for (at, entry) in detail.items.iter().cloned().enumerate() {
+                        {
+                            let up = ui.clone();
+                            let down = ui.clone();
+                            let remove = ui.clone();
+                            let item_id = entry.id.clone();
+                            const LAST_HINT: &str = "Already the last playlist entry.";
+                            rsx! { article { class: "native-queue-row", key: "{entry.id}",
+                                div { class: "neutral-cover", "aria-hidden": "true", Icon { name: "music" } }
+                                div { class: "native-queue-select", div { strong { "{entry.track.title}" } small { "{entry.track.artist}" } } }
+                                if entry.can_stream { span { class: "queue-current", "Playable" } } else { small { "Metadata only" } }
+                                if detail.playlist.can_edit {
+                                    button { class: "icon-button", disabled: at == 0 || *busy.read(), "aria-label": "Move playlist entry {at + 1} up", title: if at == 0 { "Already the first playlist entry." } else { "Move this entry one place earlier." }, onclick: move |_| move_playlist_entry(up.clone(), at, -1), Icon { name: "up" } }
+                                    button { class: "icon-button", disabled: at + 1 >= detail.items.len() || *busy.read(), "aria-label": "Move playlist entry {at + 1} down", title: if at + 1 >= detail.items.len() { LAST_HINT } else { "Move this entry one place later." }, onclick: move |_| move_playlist_entry(down.clone(), at, 1), Icon { name: "down" } }
+                                    button { class: "icon-button", disabled: *busy.read(), "aria-label": "Remove playlist entry {at + 1}", title: "Remove this entry from the playlist; the original track is unchanged.", onclick: move |_| remove_playlist_entry(remove.clone(), item_id.clone()), Icon { name: "close" } }
+                                }
+                            } }
                         }
                     }
                 }

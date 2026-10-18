@@ -41,6 +41,7 @@ pub fn Icon(name: &'static str) -> Element {
         "more" => "M4 12h.01M12 12h.01M20 12h.01",
         "edit" => "m15 3 6 6L8 22H2v-6Zm-2 2 6 6",
         "up" => "m5 12 7-7 7 7M12 5v16",
+        "down" => "m5 12 7 7 7-7M12 3v16",
         "check" => "m4 12 5 5L20 6",
         "back" => "m14 5-7 7 7 7",
         _ => "M9 18V5l12-2v13M9 18a3 3 0 1 1-3-3h3m12 1a3 3 0 1 1-3-3h3",

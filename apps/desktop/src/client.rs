@@ -704,6 +704,100 @@ impl VelaClient {
         .await
     }
 
+    pub async fn reorder_playlist(
+        &self,
+        id: &str,
+        revision: i64,
+        item_ids: &[String],
+        cancel: CancellationToken,
+    ) -> Result<PlaylistDetail, String> {
+        if !canonical_uuid(id)
+            || revision < 0
+            || item_ids.is_empty()
+            || item_ids.len() > 1000
+            || item_ids.iter().any(|item| !canonical_uuid(item))
+        {
+            return Err("Select a valid playlist order.".into());
+        }
+        let session = self.session()?;
+        let body = serde_json::json!({
+            "revision": revision,
+            "mutation_id": uuid::Uuid::new_v4().to_string(),
+            "item_ids": item_ids,
+        });
+        bounded(
+            &cancel,
+            &self.inner.lifetime,
+            Duration::from_secs(20),
+            async {
+                let response = self
+                    .request(
+                        Method::PUT,
+                        endpoint(&self.inner.origin, &format!("/api/playlists/{id}/order")),
+                        &session,
+                    )
+                    .json(&body)
+                    .send()
+                    .await
+                    .map_err(|_| NETWORK_ERROR.to_owned())?;
+                if response.status() != StatusCode::OK {
+                    return Err(status_error(response.status()));
+                }
+                let detail: PlaylistDetail = json(response, MAX_JSON_BYTES).await?;
+                if detail.playlist.id != id {
+                    return Err(INVALID_RESPONSE.into());
+                }
+                Ok(detail)
+            },
+        )
+        .await
+    }
+
+    pub async fn remove_playlist_item(
+        &self,
+        id: &str,
+        item_id: &str,
+        revision: i64,
+        cancel: CancellationToken,
+    ) -> Result<PlaylistDetail, String> {
+        if !canonical_uuid(id) || !canonical_uuid(item_id) || revision < 0 {
+            return Err("Select a valid playlist entry.".into());
+        }
+        let session = self.session()?;
+        let url = endpoint(
+            &self.inner.origin,
+            &format!("/api/playlists/{id}/items/{item_id}"),
+        );
+        let url = {
+            let mut url = url;
+            url.query_pairs_mut()
+                .append_pair("revision", &revision.to_string())
+                .append_pair("mutation_id", &uuid::Uuid::new_v4().to_string());
+            url
+        };
+        bounded(
+            &cancel,
+            &self.inner.lifetime,
+            Duration::from_secs(20),
+            async {
+                let response = self
+                    .request(Method::DELETE, url, &session)
+                    .send()
+                    .await
+                    .map_err(|_| NETWORK_ERROR.to_owned())?;
+                if response.status() != StatusCode::OK {
+                    return Err(status_error(response.status()));
+                }
+                let detail: PlaylistDetail = json(response, MAX_JSON_BYTES).await?;
+                if detail.playlist.id != id {
+                    return Err(INVALID_RESPONSE.into());
+                }
+                Ok(detail)
+            },
+        )
+        .await
+    }
+
     pub async fn favorite(
         &self,
         track_id: &str,

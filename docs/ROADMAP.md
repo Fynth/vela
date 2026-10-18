@@ -43,8 +43,8 @@ separate thread with bounded channels and fail open to in-app controls. The nati
 client also has an owner-only Favorites view with per-row favorite/unfavorite,
 queue-state synchronization and a verified empty/unfavorite/Library-return journey.
 Native Playlists list/detail, owner create/CAS-rename/confirm-delete and playback,
-plus album/artist group browsing and playback, are verified; native entry editing/
-folders and album/artist editing remain future work. A real-window
+plus album/artist group browsing, playback and playlist entry reorder/removal, are
+verified; native add-from-library/folders and album/artist editing remain future work. A real-window
 automated journey verified playback, seek, navigation continuity, queue duplicates/
 reorder, light theme,640×700 element bounds and zero temporary directory entries;
 MPRIS and null-sink audio tests also ran.

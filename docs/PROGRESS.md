@@ -205,6 +205,12 @@ sent, so consent/history is not bypassed or inferred.
   `target/checks/native-playlist-edit-window3/` and
   `native-playlist-edit-{clippy,tests}.log`. Entry add/reorder, folders,
   albums/artists and packaging remain native gaps.
+- Native playlist entry editing follow-up: the detail view now supports revisioned
+  move-up/move-down and remove through the real order/item APIs, with busy/generation
+  and selected-playlist guards and list count/detail refresh. The window journey
+  swaps the two fixture entries, restores order, removes one entry and verifies
+  list/detail counts (`target/checks/native-playlist-editing/`). Adding library
+  tracks to a playlist, folders/albums/artists editing and packaging remain gaps.
 - Native album/artist browse follow-up `1634f1d`: the desktop client reads the owner-scoped
   album/artist list, summary and track APIs, renders real grouped lists/detail and
   plays the authorized group tracks through the same native engine and queue. The

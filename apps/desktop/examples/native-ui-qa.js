@@ -11,6 +11,7 @@ const assert = (condition, name) => { if (!condition) throw new Error(name); che
 const el = selector => document.querySelector(selector);
 const button = name => [...document.querySelectorAll('button')].find(node => (node.getAttribute('aria-label') || node.textContent).trim() === name && node.getClientRects().length);
 const click = async name => { await wait(() => button(name) && !button(name).disabled, `button: ${name}`); button(name).click(); await sleep(100); };
+const pageText = selector => [...document.querySelectorAll(selector)].map(node => node.textContent.trim());
 const fill = (selector, value, event = 'input') => { const input = el(selector); if (!input) throw new Error(`Missing input ${selector}`); input.value = value; input.dispatchEvent(new Event(event, { bubbles:true })); };
 const phase = () => el('.native-player')?.dataset.audioPhase;
 const position = () => Number(el('#native-seek')?.value || 0);
@@ -161,6 +162,20 @@ try {
     await wait(() => phase() === 'Playing' && position() > 300, 'Close while real audio is advancing');
     dioxus.send({ok:true, checks, closeWhilePlaying:true});
   } else {
+    await click('Playlists');
+    await wait(() => button('Open playlist Native evening'), 'Playlist reopen for entry editing');
+    await click('Open playlist Native evening');
+    await wait(() => document.querySelectorAll('.native-queue-row').length === 2 && button('Move playlist entry 2 up'), 'Playlist entry editing controls');
+    const orderBefore = pageText('.native-queue-row .native-queue-select strong');
+    await click('Move playlist entry 2 up');
+    await wait(() => JSON.stringify(pageText('.native-queue-row .native-queue-select strong')) === JSON.stringify([orderBefore[1], orderBefore[0]]), 'Playlist reorder applied');
+    assert(true, 'Playlist entry reorder acknowledged by the API');
+    await click('Move playlist entry 1 down');
+    await wait(() => JSON.stringify(pageText('.native-queue-row .native-queue-select strong')) === JSON.stringify(orderBefore), 'Playlist order restored');
+    assert(true, 'Playlist entry order can be restored');
+    await click('Remove playlist entry 2');
+    await wait(() => document.querySelectorAll('.native-queue-row').length === 1, 'Playlist entry removal applied');
+    assert(document.querySelectorAll('.native-queue-row').length === 1, 'Playlist entry removal acknowledged by the API');
     await click('Sign out'); await wait(() => button('Sign in'), 'Native sign-out clears account');
     assert(!el('.native-player') && document.querySelectorAll('[data-native-track-id]').length === 0, 'Sign-out removes private catalog and player');
     dioxus.send({ok:true, checks});
