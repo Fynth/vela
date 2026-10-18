@@ -119,8 +119,8 @@ app-store or physical-audio certification. Evidence:
 ## Verification
 
 - `cargo fmt --all -- --check`; strict Clippy `-p vela-desktop --all-targets
-  --features native-qa`; `cargo test --locked -p vela-desktop`: 23 passed,
-  2 ignored (opt-in audio/MPRIS) from25 listed tests (8 audio,6 client,3 MPRIS,
+  --features native-qa`; `cargo test --locked -p vela-desktop`: 25 passed,
+  2 ignored (opt-in audio/MPRIS) from27 listed tests (8 audio,6 client,3 MPRIS,
   8 shared playback). Logs: `target/checks/native-0.12b-{fmt,clippy,tests}.log`.
 - Ignored `audio::tests::native_owned_null_sink_play_pause_seek_eof_replace_stop_and_cleanup`
   executed under an owned Pulse null sink: passed.

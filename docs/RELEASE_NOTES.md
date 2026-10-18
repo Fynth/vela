@@ -11,7 +11,7 @@ directory entry from the first byte and released on replacement/failure/sign-out
 exit. Credentials are memory-only and no native listening events are collected.
 
 Verified on this Linux x86_64 host against an isolated fixture server/account/media:
-fmt, strict Clippy,25 desktop tests (23 run,2 opt-in), owned-null-sink audio and
+fmt, strict Clippy,27 desktop tests (25 run,2 opt-in), owned-null-sink audio and
 bounded-channel private D-Bus MPRIS tests, and a real WebKitGTK window at1280×840
 and640×700 including playback, seek, navigation continuity, queue edits, theme,
 640px element bounds, sign-out and zero temporary directory entries during transfer/

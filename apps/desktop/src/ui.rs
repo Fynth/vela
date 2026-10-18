@@ -2001,12 +2001,12 @@ fn remote_step(mut ui: Ui, delta: i32) {
     if ui.remote_now.peek().is_none() {
         return;
     }
-    let current = *ui.remote_index.peek();
-    let next = current as i32 + delta;
-    if next < 0 || next as usize >= ui.remote_queue.peek().len() {
+    let Some(next) =
+        crate::remote::queue_target(*ui.remote_index.peek(), ui.remote_queue.peek().len(), delta)
+    else {
         return;
-    }
-    ui.remote_index.set(next as usize);
+    };
+    ui.remote_index.set(next);
     start_remote(ui);
 }
 

@@ -196,6 +196,19 @@ async fn catalog(
     })
 }
 
+/// Bounded remote-queue stepping. No wrap, no index past either end.
+pub(crate) fn queue_target(current: usize, length: usize, delta: i32) -> Option<usize> {
+    if length == 0 {
+        return None;
+    }
+    let next = current as i32 + delta;
+    if next < 0 || next as usize >= length {
+        None
+    } else {
+        Some(next as usize)
+    }
+}
+
 pub async fn search_peers(
     origins: &[String],
     query: &str,
@@ -368,5 +381,22 @@ fn write_public(
     #[cfg(not(target_os = "linux"))]
     {
         Ok(Arc::new(PreparedAudio::new(file, size)))
+    }
+}
+
+#[cfg(test)]
+mod queue_tests {
+    use super::queue_target;
+
+    #[test]
+    fn remote_queue_stepping_is_bounded_without_wrap() {
+        assert_eq!(queue_target(0, 3, 1), Some(1));
+        assert_eq!(queue_target(1, 3, -1), Some(0));
+        assert_eq!(queue_target(2, 3, 1), None);
+        assert_eq!(queue_target(0, 3, -1), None);
+        assert_eq!(queue_target(0, 0, 1), None);
+        assert_eq!(queue_target(0, 1, 1), None);
+        assert_eq!(queue_target(0, 2, 2), None);
+        assert_eq!(queue_target(1, 2, -2), None);
     }
 }

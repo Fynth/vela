@@ -30,7 +30,7 @@ the existing revisioned `POST /api/playlists/{id}/items` API with busy/generatio
 selected-playlist guards; success updates the detail, revision and list item count.
 The two-instance real-window journey adds a third owned track, verifies three entries,
 plays the three-track queue, then reorders/restores/removes entries. Evidence:
-`target/checks/native-playlist-add3/`,24/25 desktop tests plus both opt-ins, strict
+`target/checks/native-playlist-add3/`,25/27 desktop tests plus both opt-ins, strict
 Clippy/fmt. No schema, server, web or original-data/runtime change.
 
 ## Native origin-labelled remote queue0.12 — verified (2026-10-18, `d14f8b0`)
@@ -46,7 +46,7 @@ cannot replace the public selection.
 
 The two-peer window journey plays the second origin's result, Previous moves to the
 first origin's result, Next returns to the second, and Library restores the private
-catalog. Evidence:`target/checks/native-remote-queue18/`; desktop24/25 tests plus both
+catalog. Evidence:`target/checks/native-remote-queue18/`; desktop25/27 tests plus both
 opt-ins, strict Clippy/fmt, zero temporary leftovers. No schema, server HTTP, web or
 original-data/runtime change.
 
@@ -63,7 +63,7 @@ tracks. The real-window journey saves both origins, searches them together with
 `Vela`, receives track rows from both origins, captures unified results, plays the
 second origin's public track natively and verifies the origin context. Evidence:
 `target/checks/native-unified-search11/` (including `native-public-search-dark.png`),
-desktop24/25 tests plus both opt-ins, strict Clippy/fmt. No schema, server HTTP, web
+desktop25/27 tests plus both opt-ins, strict Clippy/fmt. No schema, server HTTP, web
 or original-data runtime change.
 
 ## Native saved public peers0.12 — verified (2026-10-18, `db893b7`)
@@ -75,7 +75,7 @@ non-canonical/plain-HTTP non-loopback origins, malformed/oversized/unsupported f
 and stores no server metadata, tokens or history. The two-instance QA saves the
 peer, removes it, re-saves it, and verifies the isolated config contains exactly the
 canonical origin with0600 permissions; public playback continues through the native
-engine. Evidence:`target/checks/native-saved-peers3/`; desktop24/25 tests plus both
+engine. Evidence:`target/checks/native-saved-peers3/`; desktop25/27 tests plus both
 opt-ins separately, strict Clippy/fmt. No schema, server or original-data change.
 
 ## Verified0.12.0 package and preserved original-data runtime upgrade (2026-10-18)
@@ -211,7 +211,7 @@ using the incoming cursor that produced the visible page.
   history/DSP/radio/player regression. Logs:`playlist-{chromium2,firefox}.log`;
   Firefox screenshots are preserved in`target/checks/playlist-firefox-final-screens`
   and main visually inspected the lifecycle/list view.
-- Native hardening re-verification:23/25 desktop tests with both opt-ins executed,
+- Native hardening re-verification:25/27 desktop tests with both opt-ins executed,
   real WebKitGTK window15/15 plus zero temporary directory entries, and bounded
   MPRIS session test passed (`native-0.12b-*`, native-0.12b-window).
 - First-party review resolved the reported25-vs17 test-count concern by enumerating
@@ -317,7 +317,7 @@ sent, so consent/history is not bypassed or inferred.
   reconnect; the QA harness requires `PULSE_SINK` plus an ALSA config routed to the
   script-owned null sink; the resize-error UTF-8 slice panic, username length
   mismatch and weaker startup-origin check were fixed. Re-verified: fmt, strict
-  Clippy,23/25 desktop tests with both opt-ins executed, real WebKitGTK window15/15
+  Clippy,25/27 desktop tests with both opt-ins executed, real WebKitGTK window15/15
   and zero temporary entries after exit, and the bounded-channel MPRIS session test
   (`target/checks/native-0.12b-*`, `native-0.12b-window/`). The review's reported
   17-test count was reconciled against the actual25 enumerated tests.
