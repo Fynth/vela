@@ -188,7 +188,7 @@ sent, so consent/history is not bypassed or inferred.
   `target/checks/native-playlist-edit-window3/` and
   `native-playlist-edit-{clippy,tests}.log`. Entry add/reorder, folders,
   albums/artists and packaging remain native gaps.
-- Native album/artist browse follow-up: the desktop client reads the owner-scoped
+- Native album/artist browse follow-up `1634f1d`: the desktop client reads the owner-scoped
   album/artist list, summary and track APIs, renders real grouped lists/detail and
   plays the authorized group tracks through the same native engine and queue. The
   window journey verifies album groups/detail (`Real Fixtures · Vela Test`), Play
