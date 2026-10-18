@@ -1,5 +1,11 @@
 # Threat model and security architecture
 
+Source-review update2026-10-19: [AUD-01–20 and proposed repairs](PLANS/2026-10-19/01_AUDIT.md)
+record native account/keyring/offline lifecycle concerns still awaiting regressions/fixes.
+The fresh cargo-deny gate failed on3INFO Unmaintained notices in the MPRIS/ZBus5 chain;
+this is a maintenance-policy failure, not a confirmed exploit/runtime vulnerability.
+No new exception, application change or service upgrade was made in this planning audit.
+
 ## Private listening and analysis0.9
 
 Listening is disabled globally and per device by default, including upgrades. Each BEGIN IMMEDIATE event transaction independently checks current privacy revision, device consent and track ownership; composite foreign keys enforce owner references. Bounded cumulative progress/sequence IDs deduplicate retries. Delete disables every device and increments revision atomically, so delayed old batches cannot resurrect erased data. Reads/exports are owner-only even for administrators, no-store, bounded and retention-filtered. All writes retain CSRF/Origin and16KiB body limits. Browser outboxes are private plaintext local metadata, capped100 summaries/128KiB and cleared on logout/opt-out; no URLs/tokens enter them. Conservative audible-time signals are self-reported personal statistics, not proof of physical sound or public popularity. Privacy epochs also suppress held exports after erasure. Device revocation requires the current privacy revision, deletes only that owner/device grant and its cascaded sessions, increments the revision and therefore invalidates held exports; stale revisions conflict and an unknown/foreign device is404.

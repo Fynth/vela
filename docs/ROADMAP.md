@@ -1,5 +1,15 @@
 # Authoritative backlog
 
+## Planning audit2026-10-19
+
+The current-source audit and detailed next implementation plan are indexed in
+[Listening Atlas: audit, repair and product roadmap](PLANS/2026-10-19/README.md).
+It records20 findings/risks, repair ordering,42 future work packages, UX states,
+feature implementations, an original visual direction and release acceptance.
+This is planning at the user's request: no feature is marked implemented from the
+plan or its design screenshots. Preserve the existing verified slices below;
+historical contradictions identified by the audit still require reconciliation.
+
 Status meanings: implemented=source exists; verified=checks recorded in PROGRESS; partial=exit criteria not all met; planned=no finished feature. No feature is complete because a UI mockup or schema exists.
 
 | Milestone | Current state | Exit condition and outstanding scope |

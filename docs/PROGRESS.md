@@ -1,5 +1,32 @@
 # Verified progress
 
+## Planning-only source audit2026-10-19 — application unchanged
+
+At user request, inspected clean main05b4c37/version0.12.6, current code/contracts,
+known limitations, benchmark artifacts and frozen original-data runtime. Created
+[a detailed audit and planning package](PLANS/2026-10-19/README.md):20 identified
+defects/risks/gaps, ordered repair regressions, product roadmap, implementation
+recipes, screen/state UX, original Listening Atlas visual system and42 prospective
+work packages. No tasks were delegated and no application feature/schema/runtime
+was changed. Proposed fixes/design are not marked verified implementations.
+
+Executed again: fmt, strict workspace/all-target Clippy and WASM Clippy passed;
+workspace244 tests passed/0failed/2ignored; Python22 passed. Evidence:
+`target/checks/audit-20261019/`. Hardware-dependent ignored tests, full browser/native
+journeys and release builds were not rerun. Read-only health0.12.6/unit active
+PID544183/0restarts; SQLx migration12, quick_check ok/FK0, original1account/20tracks/
+20assets/0playlists/0publications retained. `user_version=0` is unused by these SQLx
+migrations. Browser discovery returned none; isolated Playwright rendered the
+separate static design board in6views, with local fonts,0JS errors/no document
+horizontal overflow and12 passing normal-text contrast pairs. Concept captures
+are not application E2E or accessibility certification. Original runtime/packages/
+backups remain untouched. New repair findings are still outstanding.
+
+Fresh dependency check FAILED on3INFO Unmaintained advisories for
+zvariant/zbus_names/zvariant_derive through MPRIS/ZBus5 (AUD-20); bans/licenses/sources
+passed. No advisory ignore or dependency code was changed. This supersedes prior
+dependency-policy PASS claims for the current advisory database, not the dated logs.
+
 ## Bounded onset-tempo DSP spectral-2 — verified (2026-10-18, `966505d`)
 
 The local analysis extractor is now `vela-pcm-spectral-2`. It measures a normalized

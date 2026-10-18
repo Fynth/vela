@@ -1,5 +1,11 @@
 # Original Vela design system
 
+Proposed evolution2026-10-19: [Listening Atlas visual specification](PLANS/2026-10-19/06_VISUAL_SYSTEM.md)
+and its [local design board](PLANS/2026-10-19/design/vela-atlas-board.html).
+The proposal includes original seed-based geometry, Cyrillic/Latin typography,
+semantic tokens and responsive concept captures. It is not applied to application
+CSS; the existing shipped design documented below remains the current implementation.
+
 Use the existing sage/forest/cream identity, Vela wordmark and locally generated fixture artwork. Dark background#101716, surfaces#17201e/#1d2825, accent#9ddbc4, text#f0efe8. Light uses ivory#f4f2eb, surface#fffcf5, accent#21775b and text#182c25. Reuse CSS variables for all components; no proprietary assets or new bitmap dependencies.
 
 Use the system sans-serif stack,4/8px spacing rhythm,12–16px readable controls/body,24–40px headings,9–16px radii and restrained borders. New UI uses original inline SVG with consistent24px geometry/stroke; decorative SVG is hidden from assistive technology and buttons carry accessible names. Artwork is square, lazy-loaded where possible, with native vector fallback rather than fabricated covers. Existing technical format labels describe actual reported properties, not assumed losslessness.

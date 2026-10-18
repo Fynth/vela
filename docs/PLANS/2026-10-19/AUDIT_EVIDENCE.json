@@ -1,0 +1,71 @@
+{
+  "date": "2026-10-19",
+  "source_commit": "05b4c37fc491ef732e75c6decf5f89c0da7f2c71",
+  "scope": "Documentation-only audit; application sources/data/runtime unchanged; no delegated work",
+  "checks": [
+    {
+      "command": "cargo fmt --all -- --check",
+      "result": "PASS",
+      "log": "target/checks/audit-20261019/fmt.log",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "command": "CARGO_BUILD_JOBS=2 cargo clippy --locked --workspace --all-targets -- -D warnings",
+      "result": "PASS",
+      "log": "target/checks/audit-20261019/clippy.log",
+      "log_sha256": "45cd7c6c37696b59a09cd08de6e30790d356f19117c0ee135a2540d2f28b4353"
+    },
+    {
+      "command": "CARGO_BUILD_JOBS=2 cargo test --locked --workspace -- --test-threads=2",
+      "result": "PASS:244/0failed/2ignored",
+      "log": "target/checks/audit-20261019/rust-tests.log",
+      "log_sha256": "b6f3c2b6df4d1465acd6f360498cfeda8cd794832c70cb30022c0efad9fd0f22"
+    },
+    {
+      "command": "CARGO_BUILD_JOBS=2 cargo clippy --locked -p vela-web --target wasm32-unknown-unknown -- -D warnings",
+      "result": "PASS",
+      "log": "target/checks/audit-20261019/wasm-clippy.log",
+      "log_sha256": "f694a9e074374d315f58b8a63ce849858b1b8708cf56b3d194218605bd2a9d6e"
+    },
+    {
+      "command": "python3 -m unittest discover -s tests -p 'test_*.py'",
+      "result": "PASS:22",
+      "log": "target/checks/audit-20261019/python-tests.log",
+      "log_sha256": "8e48d84adcba6e25f07bbc60e89e643bc19e02989a1b952518af52430a522228"
+    },
+    {
+      "command": "target/tools/cargo-deny-0.20.2-x86_64-unknown-linux-musl/cargo-deny check",
+      "result": "FAILED:3 INFO Unmaintained advisories; bans/licenses/sources pass",
+      "log": "target/checks/audit-20261019/dependencies.log",
+      "log_sha256": "e5bf5cd6147e950fe9debbbbbc47c0ab82cc7dcbecd3227e21b5ac21b74f9749"
+    },
+    {
+      "command": "node docs/PLANS/2026-10-19/design/render-board.mjs",
+      "result": "PASS:6 static design views,12 normal-text contrast pairs",
+      "log": "target/checks/audit-20261019/design-render.log",
+      "log_sha256": "a15a10e9af63c43f1601b4c8301bf5a7e5fcc96f4c2ab371997eaae381269958"
+    }
+  ],
+  "not_rerun": [
+    "full browser application E2E",
+    "native actual-window/audio/MPRIS opt-in",
+    "Docker runtime",
+    "release builds",
+    "mobile/Apple/Windows/hardware/screen-reader"
+  ],
+  "maintenance_notices": [
+    "RUSTSEC-2026-0370",
+    "RUSTSEC-2026-0371",
+    "RUSTSEC-2026-0372"
+  ],
+  "runtime_readonly": {
+    "version": "0.12.6",
+    "source_build": "7fe1ca0",
+    "sqlx_migration": 12,
+    "sqlite_quick_check": "ok",
+    "foreign_key_errors": 0,
+    "service_active": true,
+    "service_restarts": 0,
+    "publications": 0
+  }
+}

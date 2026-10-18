@@ -1,0 +1,241 @@
+{
+  "scope": "Static design board only; not application E2E or full WCAG certification",
+  "captures": [
+    {
+      "name": "desktop-light",
+      "width": 1440,
+      "height": 1100,
+      "scrollWidth": 1440,
+      "theme": "light",
+      "view": "home",
+      "fonts": [
+        true,
+        true
+      ],
+      "audioElements": 0,
+      "player": {
+        "x": 0,
+        "y": 883,
+        "width": 1440,
+        "height": 104,
+        "top": 883,
+        "right": 1440,
+        "bottom": 987,
+        "left": 0
+      },
+      "artworks": 6,
+      "errors": []
+    },
+    {
+      "name": "desktop-dark",
+      "width": 1440,
+      "height": 1100,
+      "scrollWidth": 1440,
+      "theme": "dark",
+      "view": "home",
+      "fonts": [
+        true,
+        true
+      ],
+      "audioElements": 0,
+      "player": {
+        "x": 0,
+        "y": 883,
+        "width": 1440,
+        "height": 104,
+        "top": 883,
+        "right": 1440,
+        "bottom": 987,
+        "left": 0
+      },
+      "artworks": 6,
+      "errors": []
+    },
+    {
+      "name": "phone-light",
+      "width": 375,
+      "height": 812,
+      "scrollWidth": 375,
+      "theme": "light",
+      "view": "home",
+      "fonts": [
+        true,
+        true
+      ],
+      "audioElements": 0,
+      "player": {
+        "x": 0,
+        "y": 676,
+        "width": 375,
+        "height": 136,
+        "top": 676,
+        "right": 375,
+        "bottom": 812,
+        "left": 0
+      },
+      "artworks": 6,
+      "errors": []
+    },
+    {
+      "name": "phone-dark",
+      "width": 375,
+      "height": 812,
+      "scrollWidth": 375,
+      "theme": "dark",
+      "view": "home",
+      "fonts": [
+        true,
+        true
+      ],
+      "audioElements": 0,
+      "player": {
+        "x": 0,
+        "y": 676,
+        "width": 375,
+        "height": 136,
+        "top": 676,
+        "right": 375,
+        "bottom": 812,
+        "left": 0
+      },
+      "artworks": 6,
+      "errors": []
+    },
+    {
+      "name": "album-light",
+      "width": 1440,
+      "height": 1100,
+      "scrollWidth": 1440,
+      "theme": "light",
+      "view": "album",
+      "fonts": [
+        true,
+        true
+      ],
+      "audioElements": 0,
+      "player": {
+        "x": 0,
+        "y": 883,
+        "width": 1440,
+        "height": 104,
+        "top": 883,
+        "right": 1440,
+        "bottom": 987,
+        "left": 0
+      },
+      "artworks": 6,
+      "errors": []
+    },
+    {
+      "name": "narrow-light",
+      "width": 320,
+      "height": 700,
+      "scrollWidth": 320,
+      "theme": "light",
+      "view": "home",
+      "fonts": [
+        true,
+        true
+      ],
+      "audioElements": 0,
+      "player": {
+        "x": 0,
+        "y": 564,
+        "width": 320,
+        "height": 136,
+        "top": 564,
+        "right": 320,
+        "bottom": 700,
+        "left": 0
+      },
+      "artworks": 6,
+      "errors": []
+    }
+  ],
+  "contrastPairs": [
+    {
+      "theme": "light",
+      "text": "text",
+      "bg": "canvas",
+      "ratio": 13.79,
+      "pass": true
+    },
+    {
+      "theme": "light",
+      "text": "text",
+      "bg": "surface",
+      "ratio": 15.32,
+      "pass": true
+    },
+    {
+      "theme": "light",
+      "text": "muted",
+      "bg": "canvas",
+      "ratio": 5.81,
+      "pass": true
+    },
+    {
+      "theme": "light",
+      "text": "muted",
+      "bg": "surface",
+      "ratio": 6.45,
+      "pass": true
+    },
+    {
+      "theme": "light",
+      "text": "onAccent",
+      "bg": "accent",
+      "ratio": 5.44,
+      "pass": true
+    },
+    {
+      "theme": "light",
+      "text": "link",
+      "bg": "canvas",
+      "ratio": 6.42,
+      "pass": true
+    },
+    {
+      "theme": "dark",
+      "text": "text",
+      "bg": "canvas",
+      "ratio": 14.87,
+      "pass": true
+    },
+    {
+      "theme": "dark",
+      "text": "text",
+      "bg": "surface",
+      "ratio": 13.02,
+      "pass": true
+    },
+    {
+      "theme": "dark",
+      "text": "muted",
+      "bg": "canvas",
+      "ratio": 7.8,
+      "pass": true
+    },
+    {
+      "theme": "dark",
+      "text": "muted",
+      "bg": "surface",
+      "ratio": 6.83,
+      "pass": true
+    },
+    {
+      "theme": "dark",
+      "text": "onAccent",
+      "bg": "accent",
+      "ratio": 9.65,
+      "pass": true
+    },
+    {
+      "theme": "dark",
+      "text": "link",
+      "bg": "canvas",
+      "ratio": 9.74,
+      "pass": true
+    }
+  ]
+}

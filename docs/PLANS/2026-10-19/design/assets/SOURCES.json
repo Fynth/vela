@@ -1,0 +1,34 @@
+[
+  {
+    "file": "GolosText.ttf",
+    "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/golostext/GolosText%5Bwght%5D.ttf",
+    "sha256": "17bb58fb69aec2dfb047a2ebf52534023e9b688c97a6b7ac795b0a72912c2063",
+    "bytes": 184292,
+    "retrieved": "2026-10-19",
+    "scope": "design board only, not installed application"
+  },
+  {
+    "file": "SourceSerif4.ttf",
+    "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/sourceserif4/SourceSerif4%5Bopsz,wght%5D.ttf",
+    "sha256": "97b2d4da6e3cb494b5a1e66ae176914d852ccabef49e0c02c0df25f3e39aca0b",
+    "bytes": 1209508,
+    "retrieved": "2026-10-19",
+    "scope": "design board only, not installed application"
+  },
+  {
+    "file": "GolosText-OFL.txt",
+    "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/golostext/OFL.txt",
+    "sha256": "ff532f9e8789f09a9fdffc3c0954eedfb0a48be77b2e2eb90f5f82e4f347f50c",
+    "bytes": 4394,
+    "retrieved": "2026-10-19",
+    "scope": "design board only, not installed application"
+  },
+  {
+    "file": "SourceSerif4-OFL.txt",
+    "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/sourceserif4/OFL.txt",
+    "sha256": "5f94c3fd3a23131a417ab5a0c8452de57e70c3cfb9f604d88241f7065ebf9fd9",
+    "bytes": 4400,
+    "retrieved": "2026-10-19",
+    "scope": "design board only, not installed application"
+  }
+]
