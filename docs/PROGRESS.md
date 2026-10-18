@@ -22,7 +22,7 @@ physical sound/screen readers. Release build is now covered by the CI build step
 `target/checks/desktop-package-{2,verify}.log` and the preserved pre-fix archive under
 `target/checks/desktop-package-warning-artifact/`.
 
-## Native saved public peers0.12 — verified (2026-10-18)
+## Native saved public peers0.12 — verified (2026-10-18, `db893b7`)
 
 The native Public view can now save/remove at most32 canonical public origins in a
 versioned JSON file under `$XDG_CONFIG_HOME/vela/peers.json` (fallback
