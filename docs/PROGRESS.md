@@ -21,6 +21,34 @@ correctly shows "Not established"). No schema, server HTTP, native or original-d
 runtime change. The live runtime was subsequently upgraded to0.12.1; existing
 analysis rows remain spectral-1 until explicitly reanalyzed.
 
+## 0.12.2 spectral-3 + pagination runtime handover — verified (2026-10-18)
+
+`target/releases/vela-0.12.2-{x86_64-unknown-linux-gnu,source}.tar.gz` and
+`vela-0.12.2-SHA256SUMS` were built from commit `e9d1954` (native
+`90668c13587346aa2d23e7d673a5f8310c271b66d48ffc1b5c305e7f1b36a658`, source
+`94a05522872f1b2ac9edb094712b54407ae2f85b6153910080a46066718dc35a`) and extracted to
+`target/runtime/vela-0.12.2/` (schema11). `verify_package.py` passed. Exact-package
+Chromium and Firefox each passed40 scenarios with1 live-import skip (1.9m/2.2m),
+including spectral-3 chroma, G07 history, PC01–02, publications and player
+regressions.
+
+A portable native archive was also built at0.12.2
+(`target/desktop-releases/vela-desktop-0.12.2-linux-x86_64-unknown-linux-gnu.tar.gz`,
+SHA256 `a5527b9364e7c79aa3c6a4a2bd44471a20ae75138cb3b7bae80c858804df007d`, BUILD
+commit `e9d1954`) and passed exact manifest/modes, `vela-desktop 0.12.2`, ldd, styled
+sign-in launch, normal close exit0 and zero temporary originals. It includes cached
+browse-only metadata and preview/per-peer cursor pagination.
+
+Before handover, `before-0.12.2-20261018T181050Z.tar.gz` (440464320 bytes,0600) was
+created and restore-verified into an empty isolated directory: integrity/FK ok and
+1 user/20 tracks/20 assets/20 analysis/1 artwork/0 playlists. The0.12.1 unit file was
+preserved at0600. The service was stopped gracefully, the new runtime validated by the
+installer, and the unit handed over without touching `data/`.
+
+Post-upgrade: health0.12.2; MainPID382555 active/enabled,0 restarts; integrity/FK ok;
+counts unchanged. Existing spectral-1/2 analysis rows remain; new jobs use spectral-3.
+Rollback remains the preserved0.12.1 runtime/archive/unit and this backup.
+
 ## DSP chroma spectral-3 — verified (2026-10-18, `2be441f`)
 
 `vela-pcm-spectral-3` adds chroma: accumulated55Hz–5kHz power is folded to12
@@ -34,8 +62,8 @@ silence/invalid-descriptor guards; server analysis API test derives the expected
 from the measured centroid. Full Chromium:40 passed,1 live-import skip in2.1m with
 `vela-pcm-spectral-3` and the chroma row. Screenshot:
 `target/checks/dsp-chroma/radio-1440-dark.png`. Strict media/server/web Clippy, fmt,
-WASM Clippy. The live0.12.1 runtime remains spectral-2; spectral-3 is source-only until
-the next verified patch release. No schema, HTTP or native change.
+WASM Clippy. The live runtime was subsequently upgraded to0.12.2, which serves spectral-3; existing
+spectral-1/2 rows are retained. No schema, HTTP or native change.
 
 ## Native cross-peer search pagination0.12.1 — verified (2026-10-18, `5560eb1`)
 
@@ -50,8 +78,7 @@ journey sees20 peer results, loads the21st through that peer's own control, veri
 no duplicate IDs across both origins, verifies the control disappears, and still
 runs cached fallback, public playback and remote Previous/Next. Evidence:
 `target/checks/native-cross-peer-pagination/`;26/28 desktop tests plus both opt-ins,
-strict Clippy/fmt. Source newer than the preserved0.12.1 desktop archive; next native
-package will include it. No schema, server HTTP, web or original-data runtime change.
+strict Clippy/fmt. Shipped in the verified0.12.2 portable desktop archive. No schema, server HTTP, web or original-data runtime change.
 
 ## Native public preview cursor pagination0.12.1 — verified (2026-10-18, `2bf1936`)
 

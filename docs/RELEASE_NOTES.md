@@ -4,7 +4,9 @@ Patch release for the frozen local runtime: local DSP spectral-3 adds nearest-se
 chroma and the Radio measurements now show the top pitch classes. The native desktop
 source also includes saved public origins, browse-only cached metadata, and preview/
 per-peer search cursor pagination. No schema migration, HTTP contract change or
-original-data rewrite is part of this patch.
+original-data rewrite is part of this patch. Exact-package Chromium and Firefox each
+passed40 scenarios with1 live-import skip (1.9m/2.2m); the0600 backup was
+restore-verified and the handover kept schema11 and all catalog/media counts.
 
 # 0.12.1 — bounded spectral-2 tempo patch release
 
