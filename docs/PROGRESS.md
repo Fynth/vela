@@ -22,7 +22,7 @@ physical sound/screen readers. Release build is now covered by the CI build step
 `target/checks/desktop-package-{2,verify}.log` and the preserved pre-fix archive under
 `target/checks/desktop-package-warning-artifact/`.
 
-## Native playlist add-from-library0.12 — verified (2026-10-18)
+## Native playlist add-from-library0.12 — verified (2026-10-18, `c49f95c`)
 
 The native playlist detail now fetches up to50 owner-authorized library tracks when a
 playlist opens and offers a bounded picker plus Add selected track. The mutation uses
