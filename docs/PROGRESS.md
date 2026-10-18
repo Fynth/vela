@@ -21,7 +21,7 @@ correctly shows "Not established"). No schema, server HTTP, native or original-d
 runtime change. The live runtime was subsequently upgraded to0.12.1; existing
 analysis rows remain spectral-1 until explicitly reanalyzed.
 
-## DSP heuristic key spectral-4 — source verified (2026-10-18)
+## DSP heuristic key spectral-4 — source verified (2026-10-18, `3f97662`)
 
 `vela-pcm-spectral-4` adds a bounded Krumhansl–Kessler key estimate from normalized
 chroma. At least three pitch classes must exceed5%; all24 major/minor rotations are
