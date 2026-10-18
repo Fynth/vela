@@ -36,8 +36,8 @@ Self-review of the newest slices found and fixed concrete issues:
 Evidence: two-process Secret Service save/resume/delete and server-stopped offline queue
 with v2 digest manifest (`target/checks/native-hardening2/`);28/30 desktop tests with
 both opt-ins,31 API tests, strict workspace+WASM Clippy/fmt. No schema/server/web or
-original-data/runtime change. An independent subagent review is still running; findings
-will be handled separately if concrete.
+original-data/runtime change. An independent subagent review was started but produced no findings
+before it was stopped; the self-review fixes above are the recorded result.
 
 ## Native offline BLAKE3 manifests — source verified (2026-10-18, `eb68780`)
 
