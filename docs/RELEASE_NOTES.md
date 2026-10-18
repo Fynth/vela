@@ -1,3 +1,12 @@
+# 0.12.3 — privacy device revocation + native offline checkpoint
+
+Patch release for the frozen local runtime: Settings can list consented listening
+devices and revoke one with privacy-revision CAS, deleting only that device's saved
+sessions. The portable native client now includes private offline copies with a local
+Previous/Next queue and confirmed removal, cached public metadata with age/Retry live,
+and preview/per-peer search cursor pagination. No schema migration or original-data
+rewrite.
+
 # 0.12.2 — spectral-3 chroma + source pagination checkpoint
 
 Patch release for the frozen local runtime: local DSP spectral-3 adds nearest-semitone
