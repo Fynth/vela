@@ -10,10 +10,11 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 0' TERM INT
 binary="${VELA_TEST_BINARY:-target/debug/vela-server}"
+web_dir="${VELA_TEST_WEB_DIR:-dist}"
 mkdir -p "$fixture_dir/data" "$fixture_dir/music/album"
 cp crates/media/tests/fixtures/signal.flac "$fixture_dir/music/album/"
 cp crates/media/tests/fixtures/beacon.mp3 "$fixture_dir/music/"
 scan_roots="$(python3 -c 'import json,sys; print(json.dumps([{"id":"fixture","name":"Browser music folder","path":sys.argv[1]}]))' "$fixture_dir/music")"
-VELA_BIND=127.0.0.1:3217 VELA_DATA_DIR="$fixture_dir/data" VELA_WEB_DIR=dist VELA_SCAN_ROOTS="$scan_roots" "$binary" &
+VELA_BIND=127.0.0.1:3217 VELA_DATA_DIR="$fixture_dir/data" VELA_WEB_DIR="$web_dir" VELA_SCAN_ROOTS="$scan_roots" "$binary" &
 server_pid=$!
 wait "$server_pid"
