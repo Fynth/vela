@@ -42,6 +42,12 @@ pub struct PeerSearch {
 }
 
 #[derive(Clone)]
+pub struct RemoteItem {
+    pub origin: String,
+    pub track: PublicTrack,
+}
+
+#[derive(Clone)]
 pub struct RemotePreview {
     pub origin: String,
     pub server_id: String,

@@ -67,8 +67,10 @@ seek/volume where the bus is available.
   a credential-free, no-redirect/no-proxy client; it validates advertised
   origin/server identity, IDs, text/duration bounds and grants, requires bounded
   size + BLAKE3 ETag, prepares an unnamed private0600 original and loads it into the
-  single native engine. Remote mode does not mutate/open the private queue and MPRIS
-  reports stopped/no metadata while it plays. A debug-only canonical→loopback
+  single native engine. Remote mode keeps a separate in-memory origin-labelled queue (never persisted,
+  never mixed with private history); previous/next move within it, including across
+  origins. It does not mutate the private queue, and MPRIS reports stopped/no
+  metadata while it plays. A debug-only canonical→loopback
   transport override exists solely for the isolated two-instance QA; release builds
   ignore it. See ADR0018.
 - `peers.rs` stores at most32 canonical public origins in a versioned JSON file under
@@ -137,7 +139,7 @@ app-store or physical-audio certification. Evidence:
   server, enables its canonical public origin and publishes the fixture with an
   explicit stream grant; two isolated peers are published on canonical origins; the native client saves both,
   searches them together, receives results from both, plays the second origin's public
-  track through the native engine and shows the public origin context. Evidence:
+  track, then Previous/Next move across the two origin results at EOF-safe points. Evidence:
   `target/checks/native-public-peer5/` (`native-public-dark.png`). Internet TLS and a
   real remote host remain NOT_RUN; the QA uses a debug-only loopback transport.
 - Queue/favorite checks pass: move-down follows the current occurrence, move-up

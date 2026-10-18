@@ -147,6 +147,8 @@ struct Ui {
     remote_loading: Signal<bool>,
     remote_error: Signal<String>,
     remote_now: Signal<Option<crate::remote::RemoteNow>>,
+    remote_queue: Signal<Vec<crate::remote::RemoteItem>>,
+    remote_index: Signal<usize>,
     remote_query: Signal<String>,
     remote_results: Signal<Vec<crate::remote::PeerSearch>>,
     remote_searching: Signal<bool>,
@@ -267,6 +269,8 @@ impl Ui {
         self.remote_loading.set(false);
         self.remote_error.set(String::new());
         self.remote_now.set(None);
+        self.remote_queue.set(Vec::new());
+        self.remote_index.set(0);
         self.remote_query.set(String::new());
         self.remote_results.set(Vec::new());
         self.remote_searching.set(false);
@@ -520,6 +524,8 @@ fn load_catalog(mut ui: Ui, query: String, cursor: Option<String>, favorites: bo
 
 fn start_source(mut ui: Ui, reuse: bool, autoplay: bool, position_ms: u64) {
     ui.remote_now.set(None);
+    ui.remote_queue.set(Vec::new());
+    ui.remote_index.set(0);
     let Some(account) = ui.account.peek().clone().filter(|_| ui.signed_in()) else {
         return;
     };
@@ -1246,6 +1252,10 @@ fn toggle(mut ui: Ui) {
         return;
     }
     let snapshot = ui.snapshot.peek().clone();
+    if ui.remote_now.peek().is_some() && snapshot.phase == AudioPhase::Ended {
+        start_remote(ui);
+        return;
+    }
     let result = match snapshot.phase {
         AudioPhase::Playing => audio.pause(*ui.selection.peek()),
         AudioPhase::Paused if ui.prepared.peek().is_some() => audio.resume(*ui.selection.peek()),
@@ -1885,7 +1895,45 @@ fn play_public(mut ui: Ui, track: PublicTrack, origin: String) {
     if !track.can_stream || !ui.signed_in() {
         return;
     }
-    if *ui.view.peek() != "public" {
+    ui.notice.set("Opening public track…".into());
+    ui.remote_queue
+        .set(vec![crate::remote::RemoteItem { origin, track }]);
+    ui.remote_index.set(0);
+    start_remote(ui);
+}
+
+fn play_public_result(mut ui: Ui, origin: String, track_id: String) {
+    let mut items = Vec::new();
+    for peer in ui.remote_results.peek().clone() {
+        for track in peer.items {
+            if track.can_stream {
+                items.push(crate::remote::RemoteItem {
+                    origin: peer.origin.clone(),
+                    track,
+                });
+            }
+        }
+    }
+    let Some(index) = items
+        .iter()
+        .position(|item| item.origin == origin && item.track.id == track_id)
+    else {
+        return;
+    };
+    ui.notice.set("Opening public track…".into());
+    ui.remote_queue.set(items);
+    ui.remote_index.set(index);
+    start_remote(ui);
+}
+
+fn start_remote(mut ui: Ui) {
+    if !ui.signed_in() || *ui.view.peek() != "public" {
+        return;
+    }
+    let Some(item) = ui.remote_queue.peek().get(*ui.remote_index.peek()).cloned() else {
+        return;
+    };
+    if !item.track.can_stream {
         return;
     }
     let Some(account) = ui.account.peek().clone() else {
@@ -1894,7 +1942,13 @@ fn play_public(mut ui: Ui, track: PublicTrack, origin: String) {
     let Some(audio) = ui.audio.peek().clone() else {
         return;
     };
+    let origin = item.origin.clone();
+    let track = item.track.clone();
     let selection = ui.new_selection();
+    // Switching to a public item must not leave a local occurrence current:
+    // an in-flight local EOF/advance must not replace the public selection.
+    ui.order.write().reset(0, 0);
+    let _ = audio.stop(selection);
     ui.prepared.set(None);
     ui.remote_now.set(Some(crate::remote::RemoteNow {
         id: track.id.clone(),
@@ -1914,6 +1968,12 @@ fn play_public(mut ui: Ui, track: PublicTrack, origin: String) {
                 .peek()
                 .as_ref()
                 .map(|remote| remote.id.as_str())
+                != Some(track.id.as_str())
+            || ui
+                .remote_queue
+                .peek()
+                .get(*ui.remote_index.peek())
+                .map(|item| item.track.id.as_str())
                 != Some(track.id.as_str())
         {
             return;
@@ -1935,6 +1995,35 @@ fn play_public(mut ui: Ui, track: PublicTrack, origin: String) {
             }
         }
     });
+}
+
+fn remote_step(mut ui: Ui, delta: i32) {
+    if ui.remote_now.peek().is_none() {
+        return;
+    }
+    let current = *ui.remote_index.peek();
+    let next = current as i32 + delta;
+    if next < 0 || next as usize >= ui.remote_queue.peek().len() {
+        return;
+    }
+    ui.remote_index.set(next as usize);
+    start_remote(ui);
+}
+
+fn player_previous(ui: Ui) {
+    if ui.remote_now.peek().is_some() {
+        remote_step(ui, -1);
+    } else {
+        advance(ui, Command::Previous);
+    }
+}
+
+fn player_next(ui: Ui) {
+    if ui.remote_now.peek().is_some() {
+        remote_step(ui, 1);
+    } else {
+        advance(ui, Command::Next);
+    }
 }
 
 fn search_saved_peers(mut ui: Ui) {
@@ -2066,7 +2155,7 @@ fn public_view(ui: Ui) -> Element {
                                             div { class: "native-queue-select", div { strong { "{track.title}" } small { "{track.artist} · {track.album}" } small { "{peer.origin}" } } }
                                             span { class: "native-track-time", "{time_label(track.duration_ms.max(0) as u64)}" }
                                             if track.can_stream {
-                                                button { class: "button primary small", disabled: !ui.audio_ready(), "aria-label": "Play public track {track_title}", onclick: move |_| play_public(play_ui.clone(), play_track.clone(), play_origin.clone()), Icon { name: "play" } "Play public track" }
+                                                button { class: "button primary small", disabled: !ui.audio_ready(), "aria-label": "Play public track {track_title}", onclick: move |_| play_public_result(play_ui.clone(), play_origin.clone(), play_track.id.clone()), Icon { name: "play" } "Play public track" }
                                             } else { small { "Metadata only" } }
                                         } }
                                     }
@@ -2270,9 +2359,9 @@ fn player(ui: Ui) -> Element {
         }
         div {class:"player-controls",div {class:"transport",
             button {class:if shuffle{"icon-button selected"}else{"icon-button"},"aria-label":"Shuffle","aria-pressed":shuffle,disabled:blocked,onclick:move |_|{let mut ui=shuffle_ui.clone();let next=!*ui.shuffle.peek();ui.shuffle.set(next);let repeat=*ui.repeat.peek();ui.order.write().configure(next,repeat);},Icon {name:"shuffle"}}
-            button {class:"icon-button","aria-label":"Previous",disabled:blocked,onclick:move |_|advance(previous.clone(),Command::Previous),Icon {name:"previous"}}
+            button {class:"icon-button","aria-label":"Previous",disabled:blocked||(remote.is_some()&&*ui.remote_index.read()==0),onclick:move |_|player_previous(previous.clone()),Icon {name:"previous"}}
             button {class:"native-play-toggle","aria-label":if playing{"Pause"}else{"Play"},disabled:blocked||preparing||snapshot.phase==AudioPhase::Loading,onclick:move |_|toggle(toggle_ui.clone()),if playing{Icon {name:"pause"}}else{Icon {name:"play"}}}
-            button {class:"icon-button","aria-label":"Next",disabled:blocked,onclick:move |_|advance(next.clone(),Command::Next),Icon {name:"next"}}
+            button {class:"icon-button","aria-label":"Next",disabled:blocked||(remote.is_some()&&*ui.remote_index.read()+1>=ui.remote_queue.read().len()),onclick:move |_|player_next(next.clone()),Icon {name:"next"}}
             button {class:if repeat!=Repeat::Off{"icon-button selected"}else{"icon-button"},"aria-label":repeat_label,"aria-pressed":repeat!=Repeat::Off,disabled:blocked,onclick:move |_|{let mut ui=repeat_ui.clone();let next=match *ui.repeat.peek(){Repeat::Off=>Repeat::All,Repeat::All=>Repeat::One,Repeat::One=>Repeat::Off};ui.repeat.set(next);let shuffle=*ui.shuffle.peek();ui.order.write().configure(shuffle,next);},if repeat==Repeat::One{Icon {name:"repeat-one"}}else{Icon {name:"repeat"}}}
         }
             div {class:"native-seek",span {"{time_label(snapshot.position_ms)}"} label {class:"sr-only",r#for:"native-seek","Playback position"} input {id:"native-seek",r#type:"range",min:0,max:snapshot.duration_ms.max(1),step:100,value:snapshot.position_ms,disabled:!can_seek,onchange:move |event|seek(seek_ui.clone(),event.value())} span {"{time_label(snapshot.duration_ms)}"}}
@@ -2347,6 +2436,8 @@ pub fn App() -> Element {
         remote_loading: use_signal(|| false),
         remote_error: use_signal(String::new),
         remote_now: use_signal(|| None),
+        remote_queue: use_signal(Vec::new),
+        remote_index: use_signal(|| 0),
         remote_query: use_signal(String::new),
         remote_results: use_signal(Vec::new),
         remote_searching: use_signal(|| false),
@@ -2449,7 +2540,8 @@ pub fn App() -> Element {
                 if ended && observer.ended.get() != Some(generation) {
                     observer.ended.set(Some(generation));
                     if observer.remote_now.peek().is_some() {
-                        observer.remote_now.set(None);
+                        // Keep the public item/queue visible after natural EOF so
+                        // the listener can replay or move through the remote queue.
                         observer.prepared.set(None);
                     } else {
                         advance(observer.clone(), Command::Ended);

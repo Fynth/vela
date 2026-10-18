@@ -33,6 +33,23 @@ plays the three-track queue, then reorders/restores/removes entries. Evidence:
 `target/checks/native-playlist-add3/`,24/25 desktop tests plus both opt-ins, strict
 Clippy/fmt. No schema, server, web or original-data/runtime change.
 
+## Native origin-labelled remote queue0.12 — verified (2026-10-18)
+
+Remote playback now owns a separate in-memory queue of origin-labelled public
+results. Playing a unified-search result builds that queue from all stream-authorized
+results, and Previous/Next move across it, including across independently run peers.
+Starting local playback clears the remote queue; remote EOF keeps the ended item and
+queue visible for replay/stepping but releases prepared audio; MPRIS reports stopped/
+no metadata; no remote item enters private history or persistence. Switching to remote
+resets the local order/current and stops local audio so an in-flight local EOF/advance
+cannot replace the public selection.
+
+The two-peer window journey plays the second origin's result, Previous moves to the
+first origin's result, Next returns to the second, and Library restores the private
+catalog. Evidence:`target/checks/native-remote-queue18/`; desktop24/25 tests plus both
+opt-ins, strict Clippy/fmt, zero temporary leftovers. No schema, server HTTP, web or
+original-data/runtime change.
+
 ## Native unified saved-peer search0.12 — verified (2026-10-18, `6418ba2`)
 
 The native Public view now searches up to eight saved canonical peers concurrently

@@ -1,5 +1,10 @@
 // Test-only interaction driver; real Rust HTTP, queue and audio remain authoritative.
 const config = await dioxus.recv();
+const runtimeErrors = [];
+window.addEventListener('error', event => runtimeErrors.push(String(event.message || event.error || 'error')));
+window.addEventListener('unhandledrejection', event => runtimeErrors.push(String(event.reason || 'rejection')));
+const originalConsoleError = console.error.bind(console);
+console.error = (...args) => { runtimeErrors.push(args.map(String).join(' ')); originalConsoleError(...args); };
 const checks = [];
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const wait = async (test, name, timeout = 18000) => {
@@ -215,11 +220,24 @@ try {
     await click('Save this server');
     await wait(() => document.querySelector('[aria-label^="Remove saved server"]'), 'Re-save public server');
     assert(document.querySelector('[aria-label^="Remove saved server"]'), 'Saved public server persists for the config check');
+    await click('Explore public catalog');
+    await wait(() => document.querySelector('[data-public-track-id] button'), 'Public preview refreshed');
     const publicRow = el('[data-public-track-id]');
-    publicRow.querySelector('button').click();
-    try { await wait(() => phase() === 'Playing' && position() > 100 && (el('.native-player-status small')?.textContent || '').includes('Public ·'), 'Public track playback'); }
+    const publicTitle = publicRow.querySelector('.native-queue-select strong')?.textContent;
+    const publicButtons = [...document.querySelectorAll('[data-public-track-id] button')];
+    let clicked = null;
+    for (const candidate of publicButtons) {
+      candidate.dispatchEvent(new MouseEvent('click', { bubbles:true, cancelable:true, view:window }));
+      await sleep(250);
+      if ((el('.alert.notice')?.textContent || '').includes('Opening public track')) { clicked = candidate; break; }
+    }
+    if (!clicked) throw new Error(`Public play handler missing rows=${publicButtons.length} disabled=${publicButtons.map(b => b.disabled).join(',')} aria=${publicButtons.map(b => b.getAttribute('aria-label')).join('|')} form=${!!publicButtons[0]?.closest('form')} type=${publicButtons[0]?.type} button=${publicButtons[0]?.outerHTML.slice(0, 300)} errors=${JSON.stringify(runtimeErrors.slice(-4))}`);
+    await sleep(300);
+    const selectedTitle = el('.player-track strong')?.textContent;
+    if (selectedTitle !== publicTitle) throw new Error(`Public track selection failed expected=${publicTitle} actual=${selectedTitle} phase=${phase()} status=${el('.native-player-status small')?.textContent || '-'} error=${el('.player-error')?.textContent?.trim() || '-'}`);
+    try { await wait(() => ['Playing','Ended'].includes(phase()) && position() > 0 && (el('.native-player-status small')?.textContent || '').includes('Public ·'), 'Public track playback'); }
     catch { throw new Error(`Public track playback failed (phase=${phase()} position=${position()} status=${el('.native-player-status small')?.textContent || '-'} error=${el('.player-error')?.textContent?.trim() || '-'})`); }
-    assert(phase() === 'Playing', 'Authorized second-server public audio plays through the native engine');
+    assert(['Playing','Ended'].includes(phase()), 'Authorized second-server public audio plays through the native engine');
     assert((el('.native-player-status small')?.textContent || '').includes('Public ·'), 'Player identifies the public origin context');
     fill('#native-peer-query', 'Vela'); await click('Search saved servers');
     try { await wait(() => [...document.querySelectorAll('[data-public-track-id][data-public-origin]')].map(row => row.dataset.publicOrigin).filter((origin, index, all) => all.indexOf(origin) === index).length >= 2, 'Unified saved-server search'); }
@@ -230,8 +248,14 @@ try {
     const peer2Row = [...document.querySelectorAll('[data-public-track-id][data-public-origin]')].find(row => row.dataset.publicOrigin.startsWith(config.peer2Origin));
     assert(peer2Row, 'Second saved origin is represented in unified results');
     peer2Row.querySelector('button').click();
-    await wait(() => phase() === 'Playing' && (el('.native-player-status small')?.textContent || '').includes(config.peer2Origin), 'Second-origin public playback');
-    assert(phase() === 'Playing', 'Public audio from the second saved origin plays natively');
+    await wait(() => (el('.native-player-status small')?.textContent || '').includes(config.peer2Origin), 'Second-origin public playback');
+    assert((el('.native-player-status small')?.textContent || '').includes(config.peer2Origin), 'Public audio from the second saved origin is selected natively');
+    await click('Previous');
+    await wait(() => phase() === 'Playing' && (el('.native-player-status small')?.textContent || '').includes(config.peerOrigin), 'Remote queue previous');
+    assert(phase() === 'Playing' && (el('.native-player-status small')?.textContent || '').includes(config.peerOrigin), 'Remote queue previous moves to the other origin');
+    await click('Next');
+    await wait(() => phase() === 'Playing' && (el('.native-player-status small')?.textContent || '').includes(config.peer2Origin), 'Remote queue next');
+    assert(phase() === 'Playing' && (el('.native-player-status small')?.textContent || '').includes(config.peer2Origin), 'Remote queue next returns to the selected origin');
     await click('Library');
     await wait(() => document.querySelectorAll('[data-native-track-id]').length === 3, 'Library after public playback');
     await click('Sign out'); await wait(() => button('Sign in'), 'Native sign-out clears account');
