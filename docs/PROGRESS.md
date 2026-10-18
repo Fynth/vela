@@ -89,6 +89,23 @@ after the server cursor-forwarding fix) from `target/checks/preview-cursor-firef
 Source postdates the live0.12.6 runtime; the next patch will deploy it. No schema or
 original-data change.
 
+## Phase 0 follow-up: 100k HTTP catalog + artist grouping fix — verified (2026-10-19)
+
+Extended `scripts/benchmark_http.py` with `--seed-tracks N`: one isolated server
+lifetime runs real migrations/setup, stops gracefully, inserts metadata-only rows in
+1,000-row transactions, restarts on the same port and requires the pre-restart cookie
+to authenticate. Verified at 100,020 tracks / 8,334 albums / 1,001 artists (seed
+~40-42s, DB ~200MB, FTS integrity/quick/FK checks, cleanup asserted).
+
+Measured release 100k (8 Python threads, client-bound; 0 errors): `/api/tracks` p50
+2.5ms, `/api/albums` 5.8ms, `/api/health` 1.0ms, `/api/search?q=Signal` 156ms,
+`/api/stats` 665ms. `/api/artists?limit=50` was 44-58s due to a planner choice in the
+two-arm `ARTIST_TRACKS` union; forcing `tracks_catalog_artist` plus
+`albums CROSS JOIN tracks` (albums-first) reduced the release endpoint to **29.8ms**
+on the same 100k catalog. Evidence: `target/checks/phase0/http-bench-100k{,-fixed3}.json`,
+PERFORMANCE.md. Remaining measured targets: broad search and `/api/stats`; no schema,
+live-runtime or original-data change.
+
 ## Phase 0 measurement baseline — verified (2026-10-18, `72d9860`)
 
 Executed the first plan phase with reproducible, isolated numbers: 100k metadata

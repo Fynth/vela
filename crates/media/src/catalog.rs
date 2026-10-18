@@ -14,10 +14,13 @@ pub struct InvalidCatalogCursor;
 pub(super) const ALBUM_SELECT: &str = "SELECT b.id,b.title,ar.name AS artist,b.artist_id,NULLIF(b.release_year,0) AS year,(SELECT COUNT(*) FROM tracks t WHERE t.owner_id=b.owner_id AND t.album_id=b.id) AS track_count,(SELECT COALESCE(SUM(t.duration_ms),0) FROM tracks t WHERE t.owner_id=b.owner_id AND t.album_id=b.id) AS duration_ms,(SELECT t.artwork_id FROM tracks t WHERE t.owner_id=b.owner_id AND t.album_id=b.id AND t.artwork_id IS NOT NULL ORDER BY COALESCE(t.disc_number,1),COALESCE(t.track_number,2147483647),t.id LIMIT 1) AS artwork_id FROM albums b JOIN artists ar ON ar.id=b.artist_id AND ar.owner_id=b.owner_id";
 pub(super) const ALBUM_VISIBLE: &str =
     "EXISTS(SELECT 1 FROM tracks t WHERE t.owner_id=b.owner_id AND t.album_id=b.id)";
-pub(super) const ARTIST_VISIBLE: &str = "(EXISTS(SELECT 1 FROM tracks t WHERE t.owner_id=ar.owner_id AND t.artist_id=ar.id) OR EXISTS(SELECT 1 FROM albums b JOIN tracks t ON t.album_id=b.id AND t.owner_id=b.owner_id WHERE b.owner_id=ar.owner_id AND b.artist_id=ar.id))";
+pub(super) const ARTIST_VISIBLE: &str = "(EXISTS(SELECT 1 FROM tracks t INDEXED BY tracks_catalog_artist WHERE t.owner_id=ar.owner_id AND t.artist_id=ar.id) OR EXISTS(SELECT 1 FROM albums b CROSS JOIN tracks t ON t.album_id=b.id AND t.owner_id=b.owner_id WHERE b.owner_id=ar.owner_id AND b.artist_id=ar.id))";
 // UNION keeps a track credited both directly and as album artist only once.
 // Each arm can start from its indexed owner/artist association.
-const ARTIST_TRACKS: &str = "SELECT t.id,t.album_id,t.artwork_id FROM tracks t WHERE t.owner_id=ar.owner_id AND t.artist_id=ar.id UNION SELECT t.id,t.album_id,t.artwork_id FROM albums b JOIN tracks t ON t.album_id=b.id AND t.owner_id=b.owner_id WHERE b.owner_id=ar.owner_id AND b.artist_id=ar.id";
+// CROSS JOIN pins the album-credit arm to start from the artist's albums; the
+// previous JOIN form let SQLite start from the whole owner track set and probe
+// albums per row, making a 100k artists page take ~58s.
+const ARTIST_TRACKS: &str = "SELECT t.id,t.album_id,t.artwork_id FROM tracks t INDEXED BY tracks_catalog_artist WHERE t.owner_id=ar.owner_id AND t.artist_id=ar.id UNION SELECT t.id,t.album_id,t.artwork_id FROM albums b CROSS JOIN tracks t ON t.album_id=b.id AND t.owner_id=b.owner_id WHERE b.owner_id=ar.owner_id AND b.artist_id=ar.id";
 
 impl MediaService {
     pub async fn list_albums(

@@ -318,3 +318,67 @@ Findings to attack next: album/artist grouping is the slowest read group even at
 Both need a server-side profile before changing indexes/queries. The HTTP harness
 must be replaced by a native load generator (wrk/k6 or a Rust client) before any
 10k RPS claim; Python client CPU saturates first.
+
+### 100k-track isolated HTTP reads with a real restart (2026-10-19)
+
+`scripts/benchmark_http.py` now has `--seed-tracks N` (0 keeps the upload-only
+behavior). One isolated server lifetime runs the real migrations and the real setup
+API, is stopped gracefully, then N metadata-only `media_assets`+`tracks` rows owned
+by that account are inserted with sqlite3 in 1,000-row transactions (no audio files,
+no favorites, deterministic UUIDv4/content-hash/title shape from
+`benchmark_catalog.seed_database`). The server restarts on the same port and data
+directory and the saved pre-restart cookie must still authenticate. `/api/stats` and
+`/api/artists?limit=50` are probed serially with a long timeout instead of inside the
+concurrent loop, because their real cost exceeds the concurrent client timeout.
+
+```bash
+python3 scripts/benchmark_http.py --threads 8 --duration 5 --tracks 20 \
+  --seed-tracks 100000 --output target/checks/phase0/http-bench-100k.json
+```
+
+20 real WAV uploads + 100,000 seeded rows (100,020 owner tracks, 8,334 albums,
+1,001 artists). Seed 39.87s insert + 0.40s verification, database 199,798,784 bytes.
+`_sqlx_migrations`=0012, native SQLite writer 3.46.0, FTS5 integrity-check ok,
+`PRAGMA quick_check` ok, no foreign-key violations. The pre-restart cookie
+authenticated `/api/me` after restart with the same account id (anonymous `/api/me`
+= 401), `/api/stats` reported 100,020 owner tracks, and both server stops exited 0.
+The temporary tree and database were removed; whole run 2m37s. Recorded-run hashes:
+script `e2afea5b35321ae63e7bcb35811ba1eb25eec29cd53a3590df101534f25c9fbe`, measured
+binary `b82f45156c7241a616714654b00342e414f339016ba2ab699ff6a47211bb2706`
+(`target/release/vela-server`, unchanged by this work).
+
+| Endpoint | RPS | p50 | p95 | p99 | Errors |
+|---|---|---|---|---|---|
+| /health | 6,236 | 1.23 ms | 2.01 ms | 2.45 ms | 0 |
+| /api/me | 6,338 | 1.21 ms | 1.95 ms | 2.36 ms | 0 |
+| /api/tracks?limit=50 | 2,699 | 2.90 ms | 3.85 ms | 4.46 ms | 0 |
+| /api/search?q=Signal | 56 | 152.91 ms | 207.83 ms | 249.79 ms | 0 |
+| /api/albums | 1,241 | 6.10 ms | 9.47 ms | 13.29 ms | 0 |
+| /api/stats (1 thread, 2 samples) | — | 662.78 ms | — | — | 0 |
+| /api/artists?limit=50 (1 thread, 2 samples) | — | 44,783 ms | — | — | 0 |
+
+`q=Signal` matches the 10% seeded titles, so search takes the broad (non-sparse)
+branch: the capped 4,097-row cardinality probe, then the `rowid IN (SELECT … MATCH)`
+membership branch over 10,000 matching rows, plus the unindexed album/artist
+substring scans. Seeded rows are metadata only; no audio is streamed, and
+cheap-endpoint RPS remains Python-client-bound. The host was shared and busy during
+this run (other agents' rustc builds, a `vela-media` test binary using ~14 CPUs and
+a concurrent grouping benchmark; load average 5.9-11.1 on 16 logical CPUs) and
+`/tmp` is tmpfs, so absolute latency here
+is not an idle-host capacity figure. Two findings to profile next: broad search is
+~25x slower than the album page at 100k, and `/api/artists` (album/track/artwork
+subqueries over the `ARTIST_TRACKS` union) took 44.8s for this page (51.7s and
+58.4s in two earlier probe measurements on the same fixture); `/api/stats`
+performs catalog-wide `COUNT`/`SUM` plus group visibility `EXISTS` subqueries.
+
+
+### Artist grouping fix (2026-10-19)
+
+`crates/media/src/catalog.rs` now pins the artist-track union arms: the direct arm
+uses `tracks_catalog_artist`, the album-credit arm `albums b CROSS JOIN tracks t ...`
+so SQLite starts from `albums_catalog_artist` instead of scanning the owner's 100k
+tracks per artist. On the same 100k temp DB the page query went from ~53,000ms to
+~22ms (SQL) and the release HTTP endpoint from 44-58s to **29.8ms**
+(`target/checks/phase0/http-bench-100k-fixed3.json`). `cargo test -p vela-media`
+passes (63+6+8). `/api/stats` (665ms) still runs catalog-wide counts and visibility
+EXISTS; that is the next measurable slice.
