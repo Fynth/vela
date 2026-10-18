@@ -21,7 +21,7 @@ correctly shows "Not established"). No schema, server HTTP, native or original-d
 runtime change. The live runtime was subsequently upgraded to0.12.1; existing
 analysis rows remain spectral-1 until explicitly reanalyzed.
 
-## Listening-device listing and revocation — verified (2026-10-18)
+## Listening-device listing and revocation — verified (2026-10-18, `ade8969`)
 
 Settings now lists the owner's consented listening devices with session counts,
 enabled state and last activity (bounded32). Each row supports inline-confirmed
