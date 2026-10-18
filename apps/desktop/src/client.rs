@@ -17,7 +17,7 @@ use tokio_util::sync::CancellationToken;
 use url::{Host, Url};
 use vela_domain::{
     AlbumPage, AlbumSummary, ArtistPage, ArtistSummary, AuthResponse, Credentials, PlaylistDetail,
-    PlaylistSummary, Track, TrackPage, UpdatePlaylist,
+    PlaylistFolder, PlaylistSummary, Track, TrackPage, UpdatePlaylist,
 };
 
 const CANCELED: &str = "Request canceled.";
@@ -539,6 +539,194 @@ impl VelaClient {
                     return Err(INVALID_RESPONSE.into());
                 }
                 Ok(playlists)
+            },
+        )
+        .await
+    }
+
+    pub async fn playlist_folders(
+        &self,
+        cancel: CancellationToken,
+    ) -> Result<Vec<PlaylistFolder>, String> {
+        let session = self.session()?;
+        bounded(
+            &cancel,
+            &self.inner.lifetime,
+            Duration::from_secs(20),
+            async {
+                let response = self
+                    .request(
+                        Method::GET,
+                        endpoint(&self.inner.origin, "/api/playlist-folders"),
+                        &session,
+                    )
+                    .send()
+                    .await
+                    .map_err(|_| NETWORK_ERROR.to_owned())?;
+                if response.status() != StatusCode::OK {
+                    return Err(status_error(response.status()));
+                }
+                let folders: Vec<PlaylistFolder> = json(response, MAX_JSON_BYTES).await?;
+                if folders.len() > 100
+                    || folders.iter().any(|folder| {
+                        !canonical_uuid(&folder.id)
+                            || folder.revision < 0
+                            || folder.playlist_count < 0
+                    })
+                {
+                    return Err(INVALID_RESPONSE.into());
+                }
+                Ok(folders)
+            },
+        )
+        .await
+    }
+
+    pub async fn create_playlist_folder(
+        &self,
+        name: &str,
+        cancel: CancellationToken,
+    ) -> Result<PlaylistFolder, String> {
+        let name = playlist_name(name)?;
+        let session = self.session()?;
+        bounded(
+            &cancel,
+            &self.inner.lifetime,
+            Duration::from_secs(20),
+            async {
+                let response = self
+                    .request(
+                        Method::POST,
+                        endpoint(&self.inner.origin, "/api/playlist-folders"),
+                        &session,
+                    )
+                    .json(&serde_json::json!({"name": name}))
+                    .send()
+                    .await
+                    .map_err(|_| NETWORK_ERROR.to_owned())?;
+                if response.status() != StatusCode::OK {
+                    return Err(status_error(response.status()));
+                }
+                let folder: PlaylistFolder = json(response, MAX_JSON_BYTES).await?;
+                if !canonical_uuid(&folder.id) {
+                    return Err(INVALID_RESPONSE.into());
+                }
+                Ok(folder)
+            },
+        )
+        .await
+    }
+
+    pub async fn rename_playlist_folder(
+        &self,
+        id: &str,
+        revision: i64,
+        name: &str,
+        cancel: CancellationToken,
+    ) -> Result<PlaylistFolder, String> {
+        if !canonical_uuid(id) || revision < 0 {
+            return Err("Select a valid playlist folder revision.".into());
+        }
+        let name = playlist_name(name)?;
+        let session = self.session()?;
+        bounded(
+            &cancel,
+            &self.inner.lifetime,
+            Duration::from_secs(20),
+            async {
+                let response = self
+                    .request(
+                        Method::PATCH,
+                        endpoint(&self.inner.origin, &format!("/api/playlist-folders/{id}")),
+                        &session,
+                    )
+                    .json(&serde_json::json!({"revision": revision, "name": name}))
+                    .send()
+                    .await
+                    .map_err(|_| NETWORK_ERROR.to_owned())?;
+                if response.status() != StatusCode::OK {
+                    return Err(status_error(response.status()));
+                }
+                let folder: PlaylistFolder = json(response, MAX_JSON_BYTES).await?;
+                if folder.id != id {
+                    return Err(INVALID_RESPONSE.into());
+                }
+                Ok(folder)
+            },
+        )
+        .await
+    }
+
+    pub async fn delete_playlist_folder(
+        &self,
+        id: &str,
+        revision: i64,
+        cancel: CancellationToken,
+    ) -> Result<(), String> {
+        if !canonical_uuid(id) || revision < 0 {
+            return Err("Select a valid playlist folder revision.".into());
+        }
+        let session = self.session()?;
+        let mut url = endpoint(&self.inner.origin, &format!("/api/playlist-folders/{id}"));
+        url.query_pairs_mut()
+            .append_pair("revision", &revision.to_string());
+        bounded(
+            &cancel,
+            &self.inner.lifetime,
+            Duration::from_secs(20),
+            async {
+                let response = self
+                    .request(Method::DELETE, url, &session)
+                    .send()
+                    .await
+                    .map_err(|_| NETWORK_ERROR.to_owned())?;
+                if response.status() == StatusCode::NO_CONTENT {
+                    Ok(())
+                } else {
+                    Err(status_error(response.status()))
+                }
+            },
+        )
+        .await
+    }
+
+    pub async fn move_playlist(
+        &self,
+        id: &str,
+        revision: i64,
+        folder_id: Option<&str>,
+        cancel: CancellationToken,
+    ) -> Result<PlaylistSummary, String> {
+        if !canonical_uuid(id)
+            || revision < 0
+            || folder_id.is_some_and(|folder| !canonical_uuid(folder))
+        {
+            return Err("Select a valid playlist, folder and revision.".into());
+        }
+        let session = self.session()?;
+        bounded(
+            &cancel,
+            &self.inner.lifetime,
+            Duration::from_secs(20),
+            async {
+                let response = self
+                    .request(
+                        Method::PATCH,
+                        endpoint(&self.inner.origin, &format!("/api/playlists/{id}/folder")),
+                        &session,
+                    )
+                    .json(&serde_json::json!({"revision": revision, "folder_id": folder_id}))
+                    .send()
+                    .await
+                    .map_err(|_| NETWORK_ERROR.to_owned())?;
+                if response.status() != StatusCode::OK {
+                    return Err(status_error(response.status()));
+                }
+                let playlist: PlaylistSummary = json(response, MAX_JSON_BYTES).await?;
+                if playlist.id != id {
+                    return Err(INVALID_RESPONSE.into());
+                }
+                Ok(playlist)
             },
         )
         .await

@@ -21,6 +21,21 @@ correctly shows "Not established"). No schema, server HTTP, native or original-d
 runtime change. The live runtime was subsequently upgraded to0.12.1; existing
 analysis rows remain spectral-1 until explicitly reanalyzed.
 
+## Native playlist folders — source verified (2026-10-18)
+
+The native Playlists view now uses the real folder APIs: create, per-folder filtering,
+CAS rename/delete and CAS Move-to-folder from playlist detail. Deleting a folder
+unfiles its playlists and restores them under All playlists; an unfiled keeper is
+excluded while a folder filter is active. Errors/busy states remain visible; no folder
+drag/drop or cross-account grouping is claimed.
+
+The isolated WebKitGTK journey creates a folder and an unfiled playlist, moves the
+fixture playlist into the folder, checks exclusion under the filter, renames and
+deletes the folder, and verifies both playlists return unfiled. Evidence:
+`target/checks/native-folders2/`;27/29 desktop tests plus both opt-ins, strict
+Clippy/fmt. Source is newer than the preserved0.12.4 desktop archive; the next native
+package will include folder UI. No schema/server/web/original-data change.
+
 ## 0.12.4 playlist folders schema12 handover — verified (2026-10-18, `e5ef26a`)
 
 `target/releases/vela-0.12.4-{x86_64-unknown-linux-gnu,source}.tar.gz` and

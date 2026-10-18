@@ -102,6 +102,7 @@ struct Ui {
     feedback_gate: Gate,
     playlist_gate: Gate,
     playlist_write_gate: Gate,
+    folder_gate: Gate,
     browse_gate: Gate,
     remote_gate: Gate,
     offline_gate: Gate,
@@ -131,6 +132,13 @@ struct Ui {
     playlist_loading: Signal<bool>,
     playlist_error: Signal<String>,
     playlist_name_draft: Signal<String>,
+    folders: Signal<Vec<vela_domain::PlaylistFolder>>,
+    folder_filter: Signal<Option<String>>,
+    folder_name_draft: Signal<String>,
+    folder_rename_draft: Signal<String>,
+    folder_busy: Signal<bool>,
+    folder_confirm: Signal<String>,
+    playlist_folder_target: Signal<String>,
     playlist_candidates: Signal<Vec<Track>>,
     playlist_candidate: Signal<String>,
     playlist_busy: Signal<bool>,
@@ -266,6 +274,13 @@ impl Ui {
         self.playlist_loading.set(false);
         self.playlist_error.set(String::new());
         self.playlist_name_draft.set(String::new());
+        self.folders.set(Vec::new());
+        self.folder_filter.set(None);
+        self.folder_name_draft.set(String::new());
+        self.folder_rename_draft.set(String::new());
+        self.folder_busy.set(false);
+        self.folder_confirm.set(String::new());
+        self.playlist_folder_target.set(String::new());
         self.playlist_candidates.set(Vec::new());
         self.playlist_candidate.set(String::new());
         self.playlist_busy.set(false);
@@ -666,6 +681,12 @@ fn load_playlists(mut ui: Ui) {
             Ok(playlists) => {
                 ui.playlist_error.set(String::new());
                 ui.playlists.set(playlists);
+                if let Ok(folders) = account.client.playlist_folders(ticket.cancel.clone()).await
+                    && ticket.current(&ui)
+                    && *ui.view.peek() == "playlists"
+                {
+                    ui.folders.set(folders);
+                }
             }
             Err(error) => {
                 if !expired(ui.clone(), &error) {
@@ -947,6 +968,217 @@ fn remove_playlist_entry(mut ui: Ui, item_id: String) {
                 }
                 ui.playlist.set(Some(updated));
                 ui.notice.set("Playlist entry removed.".into());
+            }
+            Err(error) => {
+                if !expired(ui.clone(), &error) {
+                    ui.playlist_error.set(error);
+                }
+            }
+        }
+    });
+}
+
+fn create_folder(mut ui: Ui) {
+    let name = ui.folder_name_draft.peek().trim().to_string();
+    if name.is_empty() || *ui.folder_busy.peek() || !ui.signed_in() {
+        return;
+    }
+    let Some(account) = ui.account.peek().clone() else {
+        return;
+    };
+    let ticket = ui.folder_gate.begin(account.epoch);
+    ui.folder_busy.set(true);
+    ui.playlist_error.set(String::new());
+    spawn(async move {
+        let result = account
+            .client
+            .create_playlist_folder(&name, ticket.cancel.clone())
+            .await;
+        if !ticket.current(&ui) || *ui.view.peek() != "playlists" {
+            return;
+        }
+        ui.folder_busy.set(false);
+        match result {
+            Ok(folder) => {
+                ui.folder_name_draft.set(String::new());
+                ui.folders.write().push(folder);
+                ui.folders.write().sort_by(|left, right| {
+                    left.name
+                        .to_lowercase()
+                        .cmp(&right.name.to_lowercase())
+                        .then_with(|| left.id.cmp(&right.id))
+                });
+                ui.notice.set("Playlist folder created.".into());
+            }
+            Err(error) => {
+                if !expired(ui.clone(), &error) {
+                    ui.playlist_error.set(error);
+                }
+            }
+        }
+    });
+}
+
+fn select_folder(mut ui: Ui, id: Option<String>) {
+    ui.folder_confirm.set(String::new());
+    ui.folder_rename_draft.set(
+        id.as_deref()
+            .and_then(|id| {
+                ui.folders
+                    .peek()
+                    .iter()
+                    .find(|folder| folder.id == id)
+                    .map(|folder| folder.name.clone())
+            })
+            .unwrap_or_default(),
+    );
+    ui.folder_filter.set(id);
+}
+
+fn rename_folder(mut ui: Ui) {
+    let Some(id) = ui.folder_filter.peek().clone() else {
+        return;
+    };
+    let name = ui.folder_rename_draft.peek().trim().to_string();
+    if name.is_empty() || *ui.folder_busy.peek() {
+        return;
+    }
+    let Some(folder) = ui
+        .folders
+        .peek()
+        .iter()
+        .find(|folder| folder.id == id)
+        .cloned()
+    else {
+        return;
+    };
+    let Some(account) = ui.account.peek().clone() else {
+        return;
+    };
+    let ticket = ui.folder_gate.begin(account.epoch);
+    ui.folder_busy.set(true);
+    spawn(async move {
+        let result = account
+            .client
+            .rename_playlist_folder(&id, folder.revision, &name, ticket.cancel.clone())
+            .await;
+        if !ticket.current(&ui) || *ui.view.peek() != "playlists" {
+            return;
+        }
+        ui.folder_busy.set(false);
+        match result {
+            Ok(updated) => {
+                if let Some(entry) = ui.folders.write().iter_mut().find(|folder| folder.id == id) {
+                    *entry = updated;
+                }
+                ui.notice.set("Folder renamed.".into());
+            }
+            Err(error) => {
+                if !expired(ui.clone(), &error) {
+                    ui.playlist_error.set(error);
+                }
+            }
+        }
+    });
+}
+
+fn delete_folder(mut ui: Ui, id: String) {
+    let Some(folder) = ui
+        .folders
+        .peek()
+        .iter()
+        .find(|folder| folder.id == id)
+        .cloned()
+    else {
+        return;
+    };
+    if *ui.folder_busy.peek() || !ui.signed_in() {
+        return;
+    }
+    let Some(account) = ui.account.peek().clone() else {
+        return;
+    };
+    let ticket = ui.folder_gate.begin(account.epoch);
+    ui.folder_busy.set(true);
+    spawn(async move {
+        let result = account
+            .client
+            .delete_playlist_folder(&id, folder.revision, ticket.cancel.clone())
+            .await;
+        if !ticket.current(&ui) || *ui.view.peek() != "playlists" {
+            return;
+        }
+        ui.folder_busy.set(false);
+        match result {
+            Ok(()) => {
+                ui.folders.write().retain(|folder| folder.id != id);
+                if ui.folder_filter.peek().as_deref() == Some(id.as_str()) {
+                    ui.folder_filter.set(None);
+                    ui.folder_rename_draft.set(String::new());
+                }
+                ui.folder_confirm.set(String::new());
+                if let Ok(playlists) = account.client.playlists(ticket.cancel.clone()).await
+                    && ticket.current(&ui)
+                    && *ui.view.peek() == "playlists"
+                {
+                    ui.playlists.set(playlists);
+                }
+                ui.notice
+                    .set("Folder deleted. Its playlists are now unfiled.".into());
+            }
+            Err(error) => {
+                if !expired(ui.clone(), &error) {
+                    ui.playlist_error.set(error);
+                }
+            }
+        }
+    });
+}
+
+fn move_playlist_folder(mut ui: Ui) {
+    let Some(detail) = ui.playlist.peek().clone() else {
+        return;
+    };
+    let target = ui.playlist_folder_target.peek().clone();
+    let folder_id = (!target.is_empty()).then_some(target);
+    let Some(account) = ui.account.peek().clone() else {
+        return;
+    };
+    let id = detail.playlist.id;
+    let ticket = ui.folder_gate.begin(account.epoch);
+    ui.folder_busy.set(true);
+    spawn(async move {
+        let result = account
+            .client
+            .move_playlist(
+                &id,
+                detail.playlist.revision,
+                folder_id.as_deref(),
+                ticket.cancel.clone(),
+            )
+            .await;
+        if !ticket.current(&ui) || *ui.view.peek() != "playlists" {
+            return;
+        }
+        ui.folder_busy.set(false);
+        match result {
+            Ok(updated) => {
+                if let Some(entry) = ui.playlists.write().iter_mut().find(|list| list.id == id) {
+                    *entry = updated.clone();
+                }
+                if let Ok(detail) = account.client.playlist(&id, ticket.cancel.clone()).await
+                    && ticket.current(&ui)
+                    && *ui.view.peek() == "playlists"
+                {
+                    ui.playlist.set(Some(detail));
+                }
+                if let Ok(folders) = account.client.playlist_folders(ticket.cancel.clone()).await
+                    && ticket.current(&ui)
+                    && *ui.view.peek() == "playlists"
+                {
+                    ui.folders.set(folders);
+                }
+                ui.notice.set("Playlist folder updated.".into());
             }
             Err(error) => {
                 if !expired(ui.clone(), &error) {
@@ -2054,6 +2286,25 @@ fn playlists_view(ui: Ui) -> Element {
     let loading = *ui.playlist_loading.read();
     let error = ui.playlist_error.read().clone();
     let lists = ui.playlists.read().clone();
+    let folders = ui.folders.read().clone();
+    let folder_filter_value = ui.folder_filter.read().clone();
+    let filtered_lists = lists
+        .iter()
+        .filter(|list| {
+            folder_filter_value
+                .as_deref()
+                .is_none_or(|id| list.folder_id.as_deref() == Some(id))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let folder_busy = *ui.folder_busy.read();
+    let folder_confirm = ui.folder_confirm.read().clone();
+    let playlist_folder_target_value = ui.playlist_folder_target.read().clone();
+    let mut playlist_folder_target = ui.playlist_folder_target;
+    let folder_create = ui.clone();
+    let folder_rename_ui = ui.clone();
+    let mut folder_name = ui.folder_name_draft;
+    let mut folder_rename = ui.folder_rename_draft;
     let detail = ui.playlist.read().clone();
     let refresh = ui.clone();
     let back = ui.clone();
@@ -2065,6 +2316,8 @@ fn playlists_view(ui: Ui) -> Element {
     let candidates = ui.playlist_candidates.read().clone();
     let mut candidate = ui.playlist_candidate;
     let add = ui.clone();
+    let move_folder = ui.clone();
+    let select_all = ui.clone();
     let mut draft = ui.playlist_name_draft;
     let mut confirm = ui.playlist_delete_confirm;
     let is_owner = detail.as_ref().is_some_and(|detail| {
@@ -2114,6 +2367,14 @@ fn playlists_view(ui: Ui) -> Element {
                     }
                     button { class: "button secondary small", disabled: *busy.read() || candidate.read().is_empty(), onclick: move |_| add_selected_playlist_track(add.clone()), "Add selected track" }
                 }
+                div { class: "inline-form",
+                    label { class: "sr-only", r#for: "native-playlist-folder", "Playlist folder" }
+                    select { id: "native-playlist-folder", value: "{playlist_folder_target_value}", disabled: *busy.read() || folder_busy, onchange: move |event| playlist_folder_target.set(event.value()),
+                        option { value: "", "Unfiled" }
+                        for folder in folders.iter().cloned() { option { value: "{folder.id}", "{folder.name}" } }
+                    }
+                    button { class: "button secondary small", disabled: *busy.read() || folder_busy, onclick: move |_| move_playlist_folder(move_folder.clone()), "Move to folder" }
+                }
             }
             if detail.items.is_empty() {
                 div { class: "native-empty", Icon { name: "queue" } h2 { "This playlist is empty" } p { "Add an owned track above, or manage it from the web app." } }
@@ -2141,6 +2402,45 @@ fn playlists_view(ui: Ui) -> Element {
                 }
             }
         } else {
+            div { class: "catalog-caption", p { "Playlist folders" } span { "PRIVATE GROUPING" } }
+            form { class: "inline-form", onsubmit: move |event| { event.prevent_default(); create_folder(folder_create.clone()); },
+                label { class: "sr-only", r#for: "native-folder-name", "New folder name" }
+                input { id: "native-folder-name", maxlength: 120, placeholder: "New folder name", value: "{folder_name}", disabled: folder_busy, oninput: move |event| folder_name.set(event.value()) }
+                button { class: "button primary small", r#type: "submit", disabled: folder_busy || folder_name.read().trim().is_empty(), if folder_busy { "Creating…" } else { "Create folder" } }
+            }
+            div { class: "inline-form", role: "group", "aria-label": "Folder filters",
+                button { class: if folder_filter_value.is_none() { "button secondary small" } else { "button small" }, "aria-pressed": folder_filter_value.is_none(), onclick: move |_| select_folder(select_all.clone(), None), "All playlists" }
+                for folder in folders.iter().cloned() {
+                    {
+                        let filter = folder.id.clone();
+                        let select_ui = ui.clone();
+                        let delete_ui = ui.clone();
+                        let set_confirm_ui = ui.clone();
+                        let folder_id = folder.id.clone();
+                        let confirm_id = folder.id.clone();
+                        let name = folder.name.clone();
+                        let selected = folder_filter_value.as_deref() == Some(folder.id.as_str());
+                        rsx! { div { class: "inline-form", "data-native-folder": "{folder.id}",
+                            button { class: if selected { "button secondary small" } else { "button small" }, "aria-pressed": selected, onclick: move |_| select_folder(select_ui.clone(), Some(filter.clone())), "{name} ({folder.playlist_count})" }
+                            if folder_confirm == folder_id {
+                                button { class: "button danger small", "aria-label": "Confirm delete folder {folder.name}", onclick: move |_| delete_folder(delete_ui.clone(), confirm_id.clone()), "Confirm folder delete" }
+                                button { class: "button secondary small", onclick: move |_| set_confirm_ui.clone().folder_confirm.set(String::new()), "Keep folder" }
+                            } else {
+                                button { class: "icon-button", "aria-label": "Delete folder {folder.name}", onclick: move |_| set_confirm_ui.clone().folder_confirm.set(folder_id.clone()), Icon { name: "close" } }
+                            }
+                        } }
+                    }
+                }
+            }
+            if let Some(folder) = folders.iter().find(|folder| folder_filter_value.as_deref() == Some(folder.id.as_str())).cloned() {
+                form { class: "inline-form", onsubmit: move |event| { event.prevent_default(); rename_folder(folder_rename_ui.clone()); },
+                    label { class: "sr-only", r#for: "native-folder-rename", "Folder name" }
+                    input { id: "native-folder-rename", maxlength: 120, value: "{folder_rename}", disabled: folder_busy, oninput: move |event| folder_rename.set(event.value()) }
+                    button { class: "button secondary small", r#type: "submit", disabled: folder_busy || folder_rename.read().trim().is_empty(), "Save folder name" }
+                }
+                small { "Deleting this folder unfiles its playlists; their tracks and shares stay." }
+                if folder_confirm == folder.id { "" }
+            }
             form { class: "inline-form", onsubmit: move |event| { event.prevent_default(); create_playlist_ui(create.clone()); },
                 label { class: "sr-only", r#for: "native-playlist-name", "New playlist name" }
                 input { id: "native-playlist-name", maxlength: 120, placeholder: "New playlist name", value: "{draft}", disabled: *busy.read(), oninput: move |event| draft.set(event.value()) }
@@ -2150,7 +2450,7 @@ fn playlists_view(ui: Ui) -> Element {
                 div { class: "native-empty", Icon { name: "queue" } h2 { "No playlists yet" } p { "Create one above with your own account, or create it in the web app." } }
             }
             div { class: "native-queue-list",
-                for list in lists {
+                for list in filtered_lists {
                     {
                         let open = ui.clone();
                         let list_id = list.id.clone();
@@ -2904,6 +3204,7 @@ pub fn App() -> Element {
         feedback_gate: use_hook(Gate::default),
         playlist_gate: use_hook(Gate::default),
         playlist_write_gate: use_hook(Gate::default),
+        folder_gate: use_hook(Gate::default),
         browse_gate: use_hook(Gate::default),
         remote_gate: use_hook(Gate::default),
         offline_gate: use_hook(Gate::default),
@@ -2933,6 +3234,13 @@ pub fn App() -> Element {
         playlist_loading: use_signal(|| false),
         playlist_error: use_signal(String::new),
         playlist_name_draft: use_signal(String::new),
+        folders: use_signal(Vec::new),
+        folder_filter: use_signal(|| None),
+        folder_name_draft: use_signal(String::new),
+        folder_rename_draft: use_signal(String::new),
+        folder_busy: use_signal(|| false),
+        folder_confirm: use_signal(String::new),
+        playlist_folder_target: use_signal(String::new),
         playlist_candidates: use_signal(Vec::new),
         playlist_candidate: use_signal(String::new),
         playlist_busy: use_signal(|| false),

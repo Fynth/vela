@@ -53,7 +53,9 @@ seek/volume where the bus is available.
   a playlist context. Owners can create, CAS-rename and confirm-delete playlists via
   the same authenticated/CSRF/Origin-safe client; entry reorder/removal use the
   revisioned order/remove APIs with selected-id guards and update list counts/detail;
-  playlist folders remain web-only. Bounded entry counts/IDs are validated; a metadata-only entry is labelled.
+  native folders use the owner-scoped folder APIs for create, per-folder filtering, CAS
+rename/delete and CAS playlist move; folder deletion unfiles playlists. Bounded entry
+counts/IDs are validated; a metadata-only entry is labelled.
 - Albums and artists use the existing owner-scoped `GET /api/albums`,
   `/api/albums/{id}`, `/api/albums/{id}/tracks` and artist equivalents. The native
   views render real group summaries, open read-only detail, and queue/play the
@@ -104,12 +106,13 @@ metadata is never treated as a current grant, and there is no background refresh
 ## Explicit non-goals / limitations
 
 This first adapter downloads the whole authorized original before decoding. It is
-not progressive streaming, gapless, offline, a download entitlement, background
-mobile playback, secure credential persistence, device handoff, packaged install,
-adding library tracks to playlists, folders, album/artist editing or a federated
-source resolver. Peer catalogs are limited to the first20 records, direct reachable
-origins and stream-only playback; no saved peers, remote search, cross-server queue,
-download/offline, Internet TLS or two-host network validation is claimed. It sends no
+not progressive streaming, gapless, background mobile playback, secure credential
+persistence, device handoff, signed/packaged install, album/artist editing, Internet
+TLS/two-host validation or a general federated source resolver. Offline copies are an
+explicit private cache with a local queue, not a server entitlement or background sync.
+Peer catalogs support saved canonical origins, concurrent search, browse-only cached
+fallback and 20-record cursor pagination; cached rows never authorize playback, and no
+cross-server download or automatic cache refresh is claimed. It sends no
 native listening events. Only Linux x86_64 is built/tested on this host; Windows,
 macOS, Android and iOS remain separate targets. Hardware output, screen readers and
 physical media keys are not certified.
