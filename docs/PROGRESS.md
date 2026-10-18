@@ -1,6 +1,6 @@
 # Verified progress
 
-## Bounded onset-tempo DSP spectral-2 — verified (2026-10-18)
+## Bounded onset-tempo DSP spectral-2 — verified (2026-10-18, `966505d`)
 
 The local analysis extractor is now `vela-pcm-spectral-2`. It measures a normalized
 half-wave-rectified spectral-flux envelope, detects onsets at least twice the mean
@@ -18,7 +18,8 @@ onset-regularity disclaimer. Full Chromium run with the rebuilt web assets:40 pa
 1 live-import skip in2.0m, including G08/G09, G07 and PC01–02. Screenshot:
 `target/checks/dsp-tempo-v2/radio-1440-dark.png` (Drift is a steady tone, so the row
 correctly shows "Not established"). No schema, server HTTP, native or original-data
-runtime change.
+runtime change. The frozen live0.12.0 runtime still contains spectral-1 rows and was
+not upgraded; exposing spectral-2 requires a later verified package/upgrade.
 
 ## Portable Linux desktop package0.12 — verified launch smoke (2026-10-18)
 
