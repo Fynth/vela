@@ -21,7 +21,7 @@ correctly shows "Not established"). No schema, server HTTP, native or original-d
 runtime change. The live runtime was subsequently upgraded to0.12.1; existing
 analysis rows remain spectral-1 until explicitly reanalyzed.
 
-## DSP chroma spectral-3 — verified (2026-10-18)
+## DSP chroma spectral-3 — verified (2026-10-18, `2be441f`)
 
 `vela-pcm-spectral-3` adds chroma: accumulated55Hz–5kHz power is folded to12
 equal-tempered pitch classes by nearest semitone relative to A4=440Hz and normalized
