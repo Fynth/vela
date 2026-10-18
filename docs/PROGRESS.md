@@ -13,6 +13,16 @@ executed for this pass; this entry is a documentation record, not evidence. The 
 package/run logs remain valid for their own dates, and the audit package under
 `docs/PLANS/2026-10-19/` is untouched.
 
+## Offline routing follow-ups — source verified (2026-10-19, `dbf90c5`)
+
+Fixed the four regressions observed during the offline repair: natural EOF during
+offline playback now advances the saved-copy queue (Repeat::One keeps the replay
+path) instead of routing to server prepare; MPRIS Next/Previous dispatch through the
+offline-aware handlers; `start_offline_at` no longer early-returns outside
+Library/Favorites; `cancel_all` cancels `folder_gate`. Desktop56 passed/3 ignored and
+strict native Clippy pass. Natural-EOF behavior is covered by inspection/compilation,
+not a new real-window EOF assertion.
+
 ## AUD-03/07/08/12 offline repair — source+native verified (2026-10-19)
 
 `e225b63` moves offline prepare off the UI thread: a ticket/checking state is shown,

@@ -243,6 +243,7 @@ impl Ui {
         self.playlist_write_gate.cancel();
         self.browse_gate.cancel();
         self.remote_gate.cancel();
+        self.folder_gate.cancel();
         self.offline_gate.cancel();
         self.offline_list_gate.cancel();
         self.offline_play_gate.cancel();
@@ -1732,6 +1733,13 @@ fn advance(mut ui: Ui, command: Command) {
     if !ui.signed_in() || ui.current_track().is_none() {
         return;
     }
+    // Natural EOF during offline playback must stay on the device queue; the
+    // generic transition would route to server prepare and fail with the server
+    // stopped. Repeat-one keeps the existing replay path.
+    if command == Command::Ended && *ui.offline_active.peek() && *ui.repeat.peek() != Repeat::One {
+        offline_step(ui, 1);
+        return;
+    }
     let elapsed = ui.snapshot.peek().position_ms as f64 / 1000.0;
     let random = uuid::Uuid::new_v4();
     let bytes = random.as_bytes();
@@ -1916,8 +1924,8 @@ fn apply_system_control(mut ui: Ui, command: mpris::Command) -> bool {
         mpris::Command::Pause => pause_system(ui),
         mpris::Command::PlayPause => toggle(ui),
         mpris::Command::Stop => stop_system(ui),
-        mpris::Command::Next => advance(ui, Command::Next),
-        mpris::Command::Previous => advance(ui, Command::Previous),
+        mpris::Command::Next => player_next(ui),
+        mpris::Command::Previous => player_previous(ui),
         mpris::Command::SeekRelative(offset) => {
             if ui.signed_in() && ui.prepared.peek().is_some() {
                 let position = ui.snapshot.peek().position_ms;
@@ -2394,7 +2402,7 @@ fn play_offline(ui: Ui, saved: crate::offline::OfflineTrack) {
 }
 
 fn start_offline_at(mut ui: Ui, index: usize) {
-    if !ui.signed_in() || (*ui.view.peek() != "library" && *ui.view.peek() != "favorites") {
+    if !ui.signed_in() {
         return;
     }
     let Some(saved) = ui.offline.peek().get(index).cloned() else {

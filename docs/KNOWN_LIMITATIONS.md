@@ -118,11 +118,10 @@ plus explicit checking/Cancel harness assertions remain unexecuted. AUD-05 (cold
 offline launch) and AUD-06 (origin-scoped offline namespace) remain open. AUD-01/02/04/11
 are fixed in `3094754`, AUD-13 in `48b2fa4`.
 
-Newly observed (not fixed): offline natural EOF calls `advance(Ended)`, which routes
-to server prepare instead of the next saved copy when the server is stopped; MPRIS
-Next/Previous bypass offline routing; `start_offline_at` early-returns outside the
-Library/Favorites view; `cancel_all` does not cancel `folder_gate`. These are pending
-regressions, not claimed fixes.
+Offline routing regressions observed during the repair are now fixed in source
+`dbf90c5`: natural EOF advances the device queue instead of server prepare (Repeat-one
+keeps replay), MPRIS Next/Previous use the offline-aware handlers, Play offline is no
+longer restricted to Library/Favorites, and `cancel_all` cancels `folder_gate`.
 
 The0.12.6 Linux x86_64 desktop application is a real Dioxus/WebKitGTK window with a
 Rodio/CPAL output thread and MPRIS2 observer, verified against an isolated fixture
