@@ -56,6 +56,23 @@ Tests cover malicious numeric/IP/IPv6/credential URL forms, mixed public/private
 
 **2026-10-19 update:** the fresh `cargo-deny` run **FAILED** the advisories check on three INFO Unmaintained notices — `zvariant5.15.1` RUSTSEC-2026-0370, `zbus_names4.3.5` RUSTSEC-2026-0371, `zvariant_derive5.15.1` RUSTSEC-2026-0372 — through `vela-desktop → mpris-server0.10.0 → zbus5.19.0`. Bans/licenses/sources passed. No exception was added for these three; they are maintenance notices, not published runtime vulnerabilities. The PASS statements above are dated to the earlier lockfile/advisory database and are not the current gate. Log: `target/checks/audit-20261019/dependencies.log`; next work is a compatible MPRIS/ZBus6 upgrade or reviewed patch plus real D-Bus tests. See [CURRENT_STATE.md](CURRENT_STATE.md).
 
+**AUD-20 assessment (2026-10-19, read-only):** the gate cannot be fixed offline. The
+only path is zbus5→6, but `mpris-server0.10.0` (latest, published 2026-04-19) pins
+`zbus ^5.14`; zbus6.0.0 shipped 2026-10-16 and its mandatory `zbus_utils`/`zbus_macros`
+crates are not in the local registry. `cargo update -p zbus --precise 6.0.0 --offline
+--dry-run` fails on mpris-server's requirement. Keep the FAIL visible; revisit on the
+next mpris-server release or any new RUSTSEC on zbus5.19.0/zvariant5.15.1. Do not hide
+it by making mpris-server optional, and do not add an unreviewed ignore.
+
+**Gate blind spot found the same day:** `cargo audit0.22.2 --no-fetch` (same advisory
+DB) reports `glib0.18.5` RUSTSEC-2024-0429 (unsound `VariantStrIter`, patched ≥0.20.0)
+in the **compiled** desktop graph `glib ← atk ← gtk0.18.2 ← libappindicator ←
+tray-icon ← dioxus-desktop0.7.10`, while the pinned cargo-deny advisories check does
+not report it. It also reports `rsa0.9.10` RUSTSEC-2023-0071 and `rand0.7.3`
+RUSTSEC-2026-0097, which are lockfile-only (optional sqlx-mysql / inactive rand
+generation, not compiled). This is recorded as AUD-21, not silently accepted; no
+ignore was added and no fix is claimed.
+
 Generated notices preserve crate-provided license texts and public upstream license files at packaged VCS commits where available, including source URL/SHA256 records. Metadata-only notices remain explicitly reported; review them before external redistribution. Nothing was externally published by this session.
 
 Public/unlisted views disclose only the playlist owner's track metadata. Private contributor entries remain available only through authenticated playlist grants and are omitted from link views. Diagnostic Debug implementations redact passwords, session/CSRF/share tokens and import URLs; serialization still carries the appropriate authorized API fields. Arbitrary static filenames and unknown API paths receive404 even if a web-root configuration points at additional files.

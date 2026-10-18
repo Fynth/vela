@@ -78,7 +78,7 @@ Examples of the split:
 - Native Windows/macOS/Android/iOS clients: NOT_STARTED/BLOCKED, not inferred from
   Linux.
 
-## 4. Dependency gate (AUD-20)
+## 4. Dependency gate (AUD-20 / AUD-21)
 
 - The fresh `cargo-deny check` (advisories) **FAILED** on three INFO Unmaintained
   notices: `zvariant5.15.1` RUSTSEC-2026-0370, `zbus_names4.3.5`

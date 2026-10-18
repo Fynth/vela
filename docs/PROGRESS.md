@@ -13,6 +13,18 @@ executed for this pass; this entry is a documentation record, not evidence. The 
 package/run logs remain valid for their own dates, and the audit package under
 `docs/PLANS/2026-10-19/` is untouched.
 
+## AUD-20/21 dependency assessment — read-only (2026-10-19)
+
+A subagent traced the advisory gate: mpris-server0.10.0 is the only consumer of
+zbus5.19.0 and pins `zbus ^5.14`; zbus6.0.0 (2026-10-16) requires zbus_utils/macros
+crates absent from the local registry, so `cargo update --offline --dry-run` cannot
+resolve. No fix applied, no ignore added; the FAIL stays visible with a review
+trigger. The same pass ran `cargo audit --no-fetch` and found a **compiled**
+`glib0.18.5` RUSTSEC-2024-0429 via gtk/tray-icon/dioxus, which the pinned
+cargo-deny advisories check does not report (AUD-21); rsa0.9.10 and rand0.7.3 are
+lockfile-only/not compiled. Recorded in SECURITY/CURRENT_STATE/KNOWN_LIMITATIONS;
+no implementation or dependency change is claimed.
+
 ## AUD repair slice: session lifecycle + history snapshots — source verified (2026-10-19)
 
 Three subagents worked in disjoint zones; docs reconciliation plus two code repairs
