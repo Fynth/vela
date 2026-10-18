@@ -125,12 +125,14 @@ release binary, `vela-desktop.desktop`, scalable icon, README, LICENSE and BUILD
 `--version`, missing-library check, a real GUI launch/screenshot and normal window
 close with zero temporary originals. This is not a `.deb`/AppImage/Flatpak, signature,
 app-store or physical-audio certification. Evidence:
-`target/desktop-releases/vela-desktop-0.12.5-linux-x86_64-unknown-linux-gnu.tar.gz`
-(SHA256 `c6bd29810be2da28faecfa02bc90a0b56b10b52a89add77905385aaa5349d3e7`,
-BUILD commit `3eedf1b`); prior0.12.0–0.12.4 archives are preserved. It includes saved
+`target/desktop-releases/vela-desktop-0.12.6-linux-x86_64-unknown-linux-gnu.tar.gz`
+(SHA256 `7abe3982073470d36e4680b56845aa6858a0c21b3c86f2007862ba9ba16d6063`,
+BUILD commit `7fe1ca0`); prior0.12.0–0.12.5 archives are preserved. It adds the
+opt-in Secret Service session resume flow, v2 BLAKE3 offline manifests, the startup
+integrity sweep and the folder/filter/move controls. It includes saved
 peers, cached browse-only metadata and preview/per-peer search pagination. Evidence:
-`target/checks/desktop-0.12.5-verify.log`,
-`desktop-package-screens/vela-desktop-0.12.5-package-launch.png`.
+`target/checks/desktop-0.12.6-verify.log`,
+`desktop-package-screens/vela-desktop-0.12.6-package-launch.png`.
 
 ## Opt-in saved session
 

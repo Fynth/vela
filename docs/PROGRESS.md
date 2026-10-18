@@ -67,6 +67,32 @@ downloads two tracks, checks v2 digest manifests and plays/Next/Previous/removes
 server down. Evidence:`target/checks/native-offline-hash2/`;28/30 desktop tests with both
 opt-ins, strict Clippy/fmt. Source postdates0.12.5; no schema/server/web/runtime change.
 
+## 0.12.6 session/offline integrity handover — verified (2026-10-18)
+
+`target/releases/vela-0.12.6-{x86_64-unknown-linux-gnu,source}.tar.gz` and
+`vela-0.12.6-SHA256SUMS` were built from commit `7fe1ca0` (native
+`a02cb38e1f9a38288cefa9a55d0206c6c25fcab518d6c3dcd1bfb184ebf633bf`, source
+`e31f817279b2356748d3f341f6aeec13d1632c1baf45967a88a59dab83c2d865`) and extracted to
+`target/runtime/vela-0.12.6/` (schema12). Exact-package Chromium passed41+1 live-import
+skip in1.9m and Firefox41+1 skip in2.2m, covering opt-in session resume, the offline
+integrity sweep, folder lifecycle, spectral-4 Radio and player/publication regressions.
+
+A portable native0.12.6 archive
+(`target/desktop-releases/vela-desktop-0.12.6-linux-x86_64-unknown-linux-gnu.tar.gz`,
+SHA256 `7abe3982073470d36e4680b56845aa6858a0c21b3c86f2007862ba9ba16d6063`, BUILD commit
+`7fe1ca0`) passed exact manifest/modes, `vela-desktop 0.12.6`, ldd, styled sign-in
+launch, normal close exit0 and zero temporary originals. It includes the session resume
+flow, v2 offline manifests with startup sweep, folder UI and all prior native features.
+
+`before-0.12.6-20261018T204840Z.tar.gz` (440464582 bytes,0600) was created while the
+live DB was schema12 and restore-verified in an empty isolated directory (integrity/FK
+ok, schema12,20 tracks). The0.12.5 unit file was preserved at0600. The service was
+stopped gracefully and the installer validated/installed0.12.6 without migration.
+
+Post-handover: health0.12.6; MainPID544183 active/enabled,0 restarts; integrity/FK ok;
+schema12; counts unchanged (1user/20tracks/20assets/20analysis/1artwork/0playlists/
+0folders). Rollback remains the preserved0.12.5 runtime/unit and this backup.
+
 ## Native opt-in Secret Service session — source verified (2026-10-18, `2e12554`)
 
 Native sign-in now offers an explicit Remember-this-session checkbox (default off). When
