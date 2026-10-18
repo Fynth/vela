@@ -377,6 +377,10 @@ def main():
                         raise RuntimeError('Saved-session envelope is malformed')
                     if 'password' in envelope or 'csrf' in envelope or 'username' in envelope:
                         raise RuntimeError('Saved-session envelope contains forbidden credentials')
+                    offline_path = Path(result['offline_copies']['audio'])
+                    tampered = bytearray(offline_path.read_bytes())
+                    tampered[0] ^= 0x7f
+                    offline_path.write_bytes(tampered)
                     resume_env = environment.copy()
                     with (evidence / 'session-resume-server.log').open('wb') as resume_log:
                         server = subprocess.Popen([str(args.server.resolve())], env=resume_env, stdout=resume_log, stderr=subprocess.STDOUT)

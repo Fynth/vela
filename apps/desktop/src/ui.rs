@@ -174,6 +174,7 @@ struct Ui {
     offline: Signal<Vec<crate::offline::OfflineTrack>>,
     offline_busy: Signal<String>,
     offline_error: Signal<String>,
+    offline_corrupt: Signal<Vec<String>>,
     offline_active: Signal<bool>,
     offline_confirm: Signal<String>,
     saved_peers: Signal<Vec<String>>,
@@ -314,6 +315,7 @@ impl Ui {
         self.offline.set(Vec::new());
         self.offline_busy.set(String::new());
         self.offline_error.set(String::new());
+        self.offline_corrupt.set(Vec::new());
         self.offline_active.set(false);
         self.offline_confirm.set(String::new());
         self.queue.set(Vec::new());
@@ -514,6 +516,31 @@ fn adopt_account(
             Err(_) => offline_ui
                 .offline_error
                 .set("Saved offline music could not be read.".into()),
+        }
+        if let Ok(Ok(report)) = tokio::task::spawn_blocking({
+            let account_id = offline_ui
+                .account
+                .peek()
+                .as_ref()
+                .map(|account| account.user.id.clone())
+                .unwrap_or_default();
+            move || crate::offline::verify(&account_id)
+        })
+        .await
+            && offline_ui
+                .account
+                .peek()
+                .as_ref()
+                .map(|account| account.user.id.as_str())
+                == Some(account_id.as_str())
+        {
+            if !report.corrupt.is_empty() {
+                offline_ui.notice.set(format!(
+                    "{} offline copy(ies) failed their integrity check. Save them again.",
+                    report.corrupt.len()
+                ));
+            }
+            offline_ui.offline_corrupt.set(report.corrupt);
         }
     });
     load_catalog(ui, String::new(), None, false);
@@ -1999,6 +2026,9 @@ fn download_offline(mut ui: Ui, track: Track) {
                         .offline_error
                         .set("Saved offline music could not be read.".into()),
                 }
+                ui.offline_corrupt
+                    .write()
+                    .retain(|track| track != &track_id);
                 ui.notice.set("Saved for offline listening.".into());
             }
             Ok(Err(error)) => ui.offline_error.set(error),
@@ -2124,6 +2154,9 @@ fn remove_offline(mut ui: Ui, track_id: String) {
                         .offline_error
                         .set("Saved offline music could not be read.".into()),
                 }
+                ui.offline_corrupt
+                    .write()
+                    .retain(|track| track != &track_id);
                 ui.notice.set("Offline copy removed.".into());
             }
             Ok(Err(error)) => ui.offline_error.set(error),
@@ -2157,6 +2190,12 @@ fn library(ui: Ui) -> Element {
     let offline_busy = ui.offline_busy.read().clone();
     let offline_error = ui.offline_error.read().clone();
     let offline_confirm = ui.offline_confirm.read().clone();
+    let offline_corrupt = ui
+        .offline_corrupt
+        .read()
+        .iter()
+        .cloned()
+        .collect::<std::collections::HashSet<_>>();
     let offline_ids = offline
         .iter()
         .map(|saved| saved.track.id.clone())
@@ -2180,13 +2219,14 @@ fn library(ui: Ui) -> Element {
                     let set_confirm_ui = ui.clone();
                     let confirm_id = saved.track.id.clone();
                     let offline_id = saved.track.id.clone();
+                    let offline_damaged = offline_corrupt.contains(&offline_id);
                     let set_confirm_id = offline_id.clone();
                     let play_saved = saved.clone();
                     let title = saved.track.title.clone();
                     rsx! { article {class:"native-queue-row",key:"offline-{offline_id.clone()}","data-offline-track-id":"{offline_id.clone()}",
                         div {class:"neutral-cover","aria-hidden":"true",Icon {name:"down"}}
-                        div {class:"native-queue-select",div {strong {"{saved.track.title}"} small {"{saved.track.artist} · {saved.length_bytes / 1024} KiB on this device"} small {"Private offline copy"}}}
-                        button {class:"button primary small","aria-label":"Play offline {title}",onclick:move |_|play_offline(play_handler.clone(),play_saved.clone()),Icon {name:"play"} "Play offline"}
+                        div {class:"native-queue-select",div {strong {"{saved.track.title}"} small {"{saved.track.artist} · {saved.length_bytes / 1024} KiB on this device"} small {if offline_damaged {"Integrity check failed · save it again"} else {"Private offline copy"}}}}
+                        button {class:"button primary small",disabled:offline_damaged,"aria-label":"Play offline {title}",onclick:move |_|play_offline(play_handler.clone(),play_saved.clone()),Icon {name:"play"} "Play offline"}
                         if offline_confirm == offline_id {
                             button {class:"button danger small","aria-label":"Confirm remove offline {title}",onclick:move |_|remove_offline(confirm_ui.clone(),confirm_id.clone()),"Confirm remove"}
                             button {class:"button secondary small","aria-label":"Cancel remove offline {title}",onclick:move |_|{let mut ui=cancel_ui.clone();ui.offline_confirm.set(String::new());},"Cancel"}
@@ -3360,6 +3400,7 @@ pub fn App() -> Element {
         offline: use_signal(Vec::new),
         offline_busy: use_signal(String::new),
         offline_error: use_signal(String::new),
+        offline_corrupt: use_signal(Vec::new),
         offline_active: use_signal(|| false),
         offline_confirm: use_signal(String::new),
         saved_peers: use_signal(|| crate::peers::load().unwrap_or_default()),

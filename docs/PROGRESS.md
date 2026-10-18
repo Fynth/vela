@@ -21,6 +21,21 @@ correctly shows "Not established"). No schema, server HTTP, native or original-d
 runtime change. The live runtime was subsequently upgraded to0.12.1; existing
 analysis rows remain spectral-1 until explicitly reanalyzed.
 
+## Native offline startup integrity sweep — verified (2026-10-18)
+
+After sign-in/resume, a bounded blocking sweep re-hashes up to100 saved offline copies
+against their v2 BLAKE3 manifests. Corrupt rows are labelled "Integrity check failed"
+and their Play offline control is disabled; bytes are retained for explicit removal or
+re-save. Legacy v1 length-only rows are reported as unverified rather than healthy.
+This is integrity maintenance, not content/entitlement sync.
+
+Real-window verification tampers one byte of the remaining saved copy after the full
+journey, restarts the primary server, resumes the saved session in a fresh native
+process, and confirms the startup sweep labels the row and disables its Play button;
+the session then signs out and keyring deletion is verified. Unit test covers the sweep
+report. Evidence:`target/checks/native-offline-sweep/`;28/30 desktop tests with both
+opt-ins, strict Clippy/fmt. No schema/server/web/original-data/runtime change.
+
 ## Native/offline/folder hardening — verified (2026-10-18, `8d7d565`)
 
 Self-review of the newest slices found and fixed concrete issues:

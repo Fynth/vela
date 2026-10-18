@@ -48,6 +48,10 @@ if (config.sessionPhase === 'resume') {
     await click('Continue saved session');
     await wait(() => document.querySelectorAll('[data-native-track-id]').length === 3, 'Saved session resume');
     assert(button('Sign out'), 'Saved session resumes the private account without a password');
+    if (config.testSession) {
+      await wait(() => (el('[data-offline-track-id]')?.textContent || '').includes('Integrity check failed'), 'Offline startup integrity sweep');
+      assert(el('[data-offline-track-id] button')?.disabled, 'Corrupt offline copy disables Play offline');
+    }
     await click('Sign out'); await wait(() => button('Sign in'), 'Resume sign-out');
     assert(!el('.native-player') && !document.querySelector('[data-native-track-id]'), 'Resume sign-out clears private state');
     dioxus.send({ok:true, checks});

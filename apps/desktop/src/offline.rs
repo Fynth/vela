@@ -26,6 +26,14 @@ pub struct OfflineTrack {
     pub digest: Option<String>,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct VerifyReport {
+    pub checked: usize,
+    pub healthy: usize,
+    pub unverified: usize,
+    pub corrupt: Vec<String>,
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Record {
@@ -278,6 +286,48 @@ fn save_to(
     Ok(())
 }
 
+pub fn verify(account_id: &str) -> Result<VerifyReport, String> {
+    verify_from(&data_root(account_id)?, account_id)
+}
+
+fn verify_from(root: &Path, account_id: &str) -> Result<VerifyReport, String> {
+    let entries = load_from(root, account_id)?;
+    let mut report = VerifyReport::default();
+    for entry in entries {
+        report.checked += 1;
+        let Some(expected) = entry.digest.as_deref() else {
+            report.unverified += 1;
+            continue;
+        };
+        let path = audio_path_from(root, &entry.track.id)?;
+        let Ok(mut file) = fs::File::open(&path) else {
+            report.corrupt.push(entry.track.id);
+            continue;
+        };
+        let mut hasher = blake3::Hasher::new();
+        let mut buffer = [0_u8; 64 * 1024];
+        let mut failed = false;
+        loop {
+            match std::io::Read::read(&mut file, &mut buffer) {
+                Ok(0) => break,
+                Ok(read) => {
+                    hasher.update(&buffer[..read]);
+                }
+                Err(_) => {
+                    failed = true;
+                    break;
+                }
+            }
+        }
+        if failed || hasher.finalize().to_hex().as_str() != expected {
+            report.corrupt.push(entry.track.id);
+        } else {
+            report.healthy += 1;
+        }
+    }
+    Ok(report)
+}
+
 pub fn prepare(account_id: &str, track_id: &str) -> Result<std::sync::Arc<PreparedAudio>, String> {
     prepare_from(&data_root(account_id)?, account_id, track_id)
 }
@@ -415,7 +465,12 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
-        fs::write(root.join(format!("{id}.audio")), b"tampered").unwrap();
-        assert!(load_from(&root, &account).unwrap().is_empty());
+        let mut tampered = bytes.clone();
+        tampered[0] ^= 0x7f;
+        fs::write(root.join(format!("{id}.audio")), &tampered).unwrap();
+        let report = verify_from(&root, &account).unwrap();
+        assert_eq!(report.checked, 1);
+        assert_eq!(report.corrupt, vec![id.to_string()]);
+        assert!(prepare_from(&root, &account, &id.to_string()).is_err());
     }
 }
