@@ -13,6 +13,26 @@ executed for this pass; this entry is a documentation record, not evidence. The 
 package/run logs remain valid for their own dates, and the audit package under
 `docs/PLANS/2026-10-19/` is untouched.
 
+## AUD-03/07/08/12 offline repair — source+native verified (2026-10-19)
+
+`e225b63` moves offline prepare off the UI thread: a ticket/checking state is shown,
+`offline::prepare` runs in spawn_blocking, the same opened descriptor is hashed and
+decoded, cancellation is checked between64KiB blocks, and late/cancelled results
+drop the lease without writes. Removing a non-current saved copy remaps queue/order
+and keeps the active source/position; only removing the current occurrence stops
+playback. Every offline await re-checks gate generation, account epoch, user id,
+origin, cancellation and window lifetime. Manifests are capped before allocation;
+staging names are unique/0600; quota counts staging/orphan bytes and only the
+replacement delta; failed publication restores the previous healthy pair.
+
+Verified: fmt, strict workspace+WASM Clippy, desktop56 passed/3 ignored, and the real
+native window/server-stopped QA (`target/checks/aud-offline-p1/`) covering offline
+listing, queue advance/return, removal of the other copy and Secret Service resume.
+Still NOT_RUN: two-process concurrent save, disk-full/power-loss boundaries, explicit
+checking/Cancel harness assertions. Newly observed but unfixed: offline EOF routes to
+server prepare, MPRIS next/prev bypass offline routing, offline start limited to
+Library/Favorites, folder_gate not canceled by cancel_all.
+
 ## AUD-20/21 dependency assessment — read-only (2026-10-19)
 
 A subagent traced the advisory gate: mpris-server0.10.0 is the only consumer of

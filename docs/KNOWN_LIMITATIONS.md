@@ -111,10 +111,18 @@ handoff and Apple/Android hardware validation remain unfinished.
 the0.12.5/0.12.6 package adds explicit offline copies, opt-in Secret Service resume
 and native playlist folders, documented below and in
 [NATIVE_CLIENT_CONTRACTS.md](NATIVE_CLIENT_CONTRACTS.md). The audit's native
-AUD-03/05/06/07/08/12 (offline prepare on UI thread, cold launch,
-origin-scoped cache, queue removals, freshness, quota/crash consistency) remain open;
-AUD-01/02/04/11 session/keyring fixes are source-verified in `3094754`, AUD-13 in
-`48b2fa4`.
+AUD-03/07/08/12 are fixed in source `e225b63` (off-thread cancellable prepare,
+current-vs-other removal remap, per-await origin/epoch guards, quota/staging/
+recoverable publication); concurrent two-process and disk-full/power-loss boundaries
+plus explicit checking/Cancel harness assertions remain unexecuted. AUD-05 (cold
+offline launch) and AUD-06 (origin-scoped offline namespace) remain open. AUD-01/02/04/11
+are fixed in `3094754`, AUD-13 in `48b2fa4`.
+
+Newly observed (not fixed): offline natural EOF calls `advance(Ended)`, which routes
+to server prepare instead of the next saved copy when the server is stopped; MPRIS
+Next/Previous bypass offline routing; `start_offline_at` early-returns outside the
+Library/Favorites view; `cancel_all` does not cancel `folder_gate`. These are pending
+regressions, not claimed fixes.
 
 The0.12.6 Linux x86_64 desktop application is a real Dioxus/WebKitGTK window with a
 Rodio/CPAL output thread and MPRIS2 observer, verified against an isolated fixture

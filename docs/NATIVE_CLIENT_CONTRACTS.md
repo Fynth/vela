@@ -5,7 +5,7 @@ explicit offline device copies, opt-in Secret Service session resume and native
 playlist folders. It is not a system installer/auto-updater, not mobile/background
 audio and not completion of G18. The audit's keyring/offline lifecycle defects
 AUD-01/02/04/11 are fixed in source `3094754` (real two-process Secret Service QA);
-AUD-03/05/06/07/08/12 remain open; see [CURRENT_STATE.md](CURRENT_STATE.md).
+AUD-03/07/08/12 fixed in source `e225b63` (basic native offline QA passed); AUD-05/06 remain open; see [CURRENT_STATE.md](CURRENT_STATE.md).
 Evidence is listed at the end; see ADR0017 for the decision record.
 
 ## Ownership

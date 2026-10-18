@@ -29,10 +29,11 @@ changed for this page.
   - 100k artist-grouping/stats planner pins (`1a6bf32`, `05b4c37`). Their numbers
     exist only in the isolated benchmark scope in PERFORMANCE; they are not a live
     runtime measurement.
-  - desktop saved-session P0 repair (`3094754`: AUD-01/02/04/11) and listening
-    snapshot reads (`48b2fa4`: AUD-13). Verified at source with fmt/strict Clippy,
-    desktop43/2 ignored, core26+7, API31, red/green AUD-13 tests, and the real
-    two-process Secret Service save/resume/sign-out QA. Not deployed.
+  - desktop saved-session P0 repair (`3094754`: AUD-01/02/04/11), listening
+    snapshot reads (`48b2fa4`: AUD-13), and offline lifecycle/quota repair
+    (`e225b63`: AUD-03/07/08/12). Verified at source with fmt/strict Clippy,
+    desktop56/3 ignored, core26+7, API31, red/green AUD-13 tests, and the real
+    two-process Secret Service/offline native-window QA. Not deployed.
 
 ## 2. Deployed runtime — frozen0.12.6, schema12
 
@@ -95,7 +96,7 @@ Examples of the split:
 
 ## 5. Open items this documentation pass cannot close
 
-AUD-03/05/06/07/08/12 (offline/cold-launch/queue/quota), AUD-09 (search/stats remain
+AUD-05/06 (cold offline launch, origin-scoped namespace), AUD-09 (search/stats remain
 measured costs), AUD-10/14–AUD-20
 and AUD-19/20 remain open. This reconciliation fixed stale documentation only
 (AUD-10/16 subset, AUD-17 framing, AUD-20 wording); it added no red test and fixed
