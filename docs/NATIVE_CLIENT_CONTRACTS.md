@@ -138,6 +138,21 @@ peers, cached browse-only metadata and preview/per-peer search pagination. Evide
 `target/checks/desktop-0.12.6-verify.log`,
 `desktop-package-screens/vela-desktop-0.12.6-package-launch.png`.
 
+## Reusable complete-file media cache
+
+Native `prepare` first re-authorizes with one bounded authenticated HEAD on the
+stream route, then may reuse a complete verified original from
+`$XDG_CACHE_HOME/vela/media/<origin-hash>/<account-id>/<track-id>.audio` plus a
+JSON sidecar (origin/account/track/size/ETag/BLAKE3/saved_at, 0700/0600). A hit
+requires the sidecar to match the response and the cached descriptor to re-hash
+to that ETag; the same fd is rewound for decode. A denial never consults cached
+bytes. Misses keep the unchanged whole-file size+BLAKE3 unnamed lease, then warm
+the cache best-effort with unique staging, fsync and atomic publish. Bounds are
+200 entries/2GiB per account, staging/orphans counted, cache-only FIFO eviction;
+pinned offline copies live elsewhere and are never evicted. ADR
+[DECISIONS/0022](DECISIONS/0022-native-media-cache.md). Real-process body
+counters, ENOSPC and production-budget eviction remain NOT_RUN.
+
 ## Opt-in saved session
 
 Sign-in offers an explicit **Remember this session on this device** checkbox (default
