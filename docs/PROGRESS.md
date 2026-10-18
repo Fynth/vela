@@ -21,6 +21,34 @@ correctly shows "Not established"). No schema, server HTTP, native or original-d
 runtime change. The live runtime was subsequently upgraded to0.12.1; existing
 analysis rows remain spectral-1 until explicitly reanalyzed.
 
+## 0.12.3 privacy/offline runtime handover — verified (2026-10-18)
+
+`target/releases/vela-0.12.3-{x86_64-unknown-linux-gnu,source}.tar.gz` and
+`vela-0.12.3-SHA256SUMS` were built from commit `6cd407c` (native
+`925fafc957ac0bc784aa49834b73b0a9eff557594341045a6ca02430f462d68f`, source
+`c6f516950271100a1e3d43329e7bbf8412a6fa8eb237a7b0a4dedbb1937f2d8f`) and extracted to
+`target/runtime/vela-0.12.3/` (schema11). `verify_package.py` passed. Exact-package
+Chromium and Firefox each passed40 scenarios with1 live-import skip (1.9m/2.2m),
+including listening-device listing/revocation, spectral-3 chroma, G07 and player/
+publication regressions.
+
+A portable native0.12.3 archive was built
+(`target/desktop-releases/vela-desktop-0.12.3-linux-x86_64-unknown-linux-gnu.tar.gz`,
+SHA256 `13d75a236da331fa56cd90e49df6aff828614df7088270278c03338595811593`, BUILD
+commit `6cd407c`) and passed exact manifest/modes, `vela-desktop 0.12.3`, ldd, styled
+sign-in launch, normal close exit0 and zero temporary originals. It includes private
+offline copies/queue/removal, cached metadata age/Retry live and public pagination.
+
+`before-0.12.3-20261018T185213Z.tar.gz` (440464320 bytes,0600) was created and
+restore-verified into an empty isolated directory: integrity/FK ok and1user/20tracks/
+20assets/20analysis/1artwork/0playlists. The0.12.2 unit file was preserved at0600. The
+service was stopped gracefully, the installer validated the new runtime, and the unit
+handed over without touching `data/`.
+
+Post-upgrade: health0.12.3; MainPID432696 active/enabled,0 restarts; integrity/FK ok;
+counts unchanged. Existing spectral-1/2 rows remain; new jobs use spectral-3. Rollback
+remains the preserved0.12.2 runtime/archive/unit and this backup.
+
 ## Listening-device listing and revocation — verified (2026-10-18, `ade8969`)
 
 Settings now lists the owner's consented listening devices with session counts,
@@ -37,7 +65,7 @@ second device grant through the API, Settings listing, 320px layout, confirmatio
 revocation while history/DSP/export/erasure checks remain green. Evidence:
 `target/checks/listening-devices/` (320px privacy screenshot), Chromium40 passed+1
 live-import skip in2.4m, API30 tests, web20 tests, strict core/server/web Clippy/fmt.
-Source postdates the0.12.2 runtime; next patch release will deploy it. No schema
+Shipped in the verified0.12.3 runtime. No schema
 migration, original-data rewrite or native change.
 
 ## Native offline queue + removal0.12.2 — verified (2026-10-18, `b0bf085`)
@@ -54,7 +82,7 @@ through the two-copy offline queue, removes one copy with confirmation while the
 is still down, and leaves exactly one0600 audio+manifest pair. Evidence:
 `target/checks/native-offline-queue2/`;27/29 desktop tests plus both opt-ins, strict
 Clippy/fmt. No automatic/background offline sync, bulk storage manager, mobile/background
-or entitlement refresh. Source postdates the preserved0.12.2 desktop archive. No
+or entitlement refresh. Shipped in the verified0.12.3 portable desktop archive. No
 schema, server HTTP, web or original-data/runtime change.
 
 ## Native explicit offline copies0.12.2 — verified (2026-10-18, `46bd390`)

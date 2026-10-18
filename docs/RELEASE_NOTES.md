@@ -5,7 +5,9 @@ devices and revoke one with privacy-revision CAS, deleting only that device's sa
 sessions. The portable native client now includes private offline copies with a local
 Previous/Next queue and confirmed removal, cached public metadata with age/Retry live,
 and preview/per-peer search cursor pagination. No schema migration or original-data
-rewrite.
+rewrite. Exact-package Chromium and Firefox each passed40 scenarios with1 live-import
+skip (1.9m/2.2m); the0600 backup was restore-verified and the handover kept schema11
+and all catalog/media/analysis counts.
 
 # 0.12.2 — spectral-3 chroma + source pagination checkpoint
 
