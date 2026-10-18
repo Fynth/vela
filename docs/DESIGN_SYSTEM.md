@@ -33,3 +33,10 @@ hide actions. Coverage, algorithm and refresh details live in a disclosure rathe
 than dominate the listening flow. Pending privacy or preference writes clear
 stale actionable cards; successful Undo and explicit confirmation remain visible.
 Responsive assertions/screenshots are executed separately from source presence.
+
+Executed0.10 visual evidence: exact package37scenarios in each Chromium/Firefox,
+320/768/1440/1920 dark/light viewport shots in target/checks/personal-packaged-
+{chromium,firefox}-screens. Disable CSS transitions only during screenshot capture
+to avoid intermediate theme colors; full functional playback/race tests retain
+normal app behavior. Main inspected actual desktop/phone images. Square-cover
+and document-width assertions pass; screen-reader/Safari/native remain unverified.

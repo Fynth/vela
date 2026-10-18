@@ -87,3 +87,17 @@ This increment keeps schema7, media ownership, original files, HTTP APIs and ups
 A tool-owned foreground process can end independently of a source/build checkpoint. Reinspect health, executable and original data before starting another process; never assume a recorded PID is still current. The local review instance can be run as the current user's transient systemd unit vela-local-development.service, pointing at one frozen versioned binary/asset directory and the original private data directory, bound only to127.0.0.1:3210. Its Restart=on-failure policy is bounded to3 starts per60s with a2s delay. SIGTERM/20s shutdown still uses the application’s normal worker cleanup.
 
 Inspect with `systemctl --user show vela-local-development.service -p MainPID -p ExecStart -p ActiveState -p NRestarts` and confirm the expected executable before stopping this owned unit for an upgrade. This unit needs no root account or global package installation. It is transient: automatic startup after a reboot/user-manager restart is not configured. Use the existing deploy/vela.service installation recipe for an operator-managed persistent installation. PROGRESS and ignored runtime JSON identify the actually running version/unit/PID; do not replace frozen files in place.
+
+## Local review0.10 checkpoint (2026-10-18)
+
+Frozen source902dd47 is installed from its verified native archive to
+target/runtime/vela-0.10.0 with original data/ on loopback3210. The owned non-root
+transient user unit has Restart=on-failure and60s graceful stop; it is not enabled
+for reboot/user-manager startup. On resume first verify unit/PID/executable, health
+and SQLite schema/integrity rather than assume it remains active. Reuse the frozen
+assets/binary when restarting the matching schema; never use an old0.9 binary on
+schema10. Before any forward upgrade stop gracefully, create a fresh private
+backup and restore it into a disposable empty directory; compare all logical rows
+and media checksums. Keep all older archives/snapshots and original data. Details
+and actual backup paths are in PROGRESS. Production persistent systemd/Compose
+installation remains administrator-controlled; no public deployment occurred.

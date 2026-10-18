@@ -1,14 +1,26 @@
+# Verified0.10 package/runtime checkpoint
+
+Application/source 902dd47f9dca2d9b6f405cd50c21bf4dab5a73d8. Exact extracted binary passed37Chromium +37Firefox
+with live licensed import; static bytes match frozen package before/after runs.
+Screenshots8 size/theme combinations per engine; main inspected desktop/phone.
+Packaged20clean restarts +4worker DB faults, default/schema10/assets/SIGTERM,
+all preserved release checksums and9frozen hashes pass. Fresh stopped0.9backup
+restored with every SQL row/media hash; original20tracks/assets and20analysis
+rows preserved after9→10, quick_check ok/FK0, no auto consent/exclusions.
+Current supervised loopback0.10 PID34675 uses original data,0restarts.
+Source gates176Rust/strict native+WASM/fmt/9Python/JS/deny pass. Evidence paths
+and exact limits are in PROGRESS; no native/Safari/screen-reader/Docker claim.
+
 # Personal discovery0.10 source evidence
 
-Source checkpoint is the local application commit identified by the packaged BUILD.txt;
-final exact archive/runtime evidence is recorded in PROGRESS after packaging.
+Source/application902dd47; final archive/runtime evidence is recorded above and in PROGRESS.
 
 | Feature | Exact paths | Verified source | Executed evidence | Status | Next / owner |
 | --- | --- | --- | --- | --- | --- |
-| Private mix/service/feedback | crates/media/src/recommendations.rs; apps/server/src/recommendations.rs; migrations/0010_recommendation_exclusions.sql |0.10 source pending package |176 Rust tests, strict native/all-target+WASM Clippy, real TCP, legacy9upgrade, owner/consent/retention/concurrency | PASS | Preserve gates / main |
-| Home/root playback/exclusions | apps/web/src/personal_mixes.rs; tests/browser/music.spec.mjs |0.10 source pending package |Chromium37; G07 rendered actual rotation/erase; PC01 real playback/hide/undo/restore/export/catalog race; PC02 held read cancellation | PASS for source run | Exact package two-engine/screenshots / main |
+| Private mix/service/feedback | crates/media/src/recommendations.rs; apps/server/src/recommendations.rs; migrations/0010_recommendation_exclusions.sql |902dd47 |176 Rust tests, strict native/all-target+WASM Clippy, real TCP, legacy9upgrade, owner/consent/retention/concurrency | PASS | Preserve gates / main |
+| Home/root playback/exclusions | apps/web/src/personal_mixes.rs; tests/browser/music.spec.mjs |902dd47 |Chromium37; G07 rendered actual rotation/erase; PC01 real playback/hide/undo/restore/export/catalog race; PC02 held read cancellation | PASS for source run | Preserve exact package two-engine gates / main |
 | SQL performance | media/src/recommendations.rs; examples/benchmark_recommendations.rs | SHA256 in final resource JSON |10k/100k/1m actual release + baseline projection/plan equality; raw samples/hardware/scope in PERFORMANCE | PASS within recorded scope | Tied timestamps/dense history and calibrated quality / main |
-| Visual/platform scope | tests/browser screenshots; PLATFORM_MATRIX | Final screenshots pending | Source shots inspected; corrected capture for CSS transition settling; Docker daemon and in-app browser absent | PARTIAL | Exact package screenshots + Firefox / main |
+| Visual/platform scope | tests/browser screenshots; PLATFORM_MATRIX | Final screenshots pending | Source shots inspected; corrected capture for CSS transition settling; Docker daemon and in-app browser absent | PASS for recorded browser scope | Native/Safari/screen-reader remain unverified / main |
 
 Preserved failed runs remain FAILED, not passing evidence. Original20tracks and20analysis
 rows were backed up/restored; frozen0.9 runtime restored separately from0.10 candidate.

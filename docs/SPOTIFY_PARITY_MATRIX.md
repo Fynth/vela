@@ -1,12 +1,12 @@
 # Music experience parity
 
-## Personal discovery checkpoint0.10 (final verification in progress)
+## Personal discovery checkpoint0.10 — source902dd47, verified2026-10-18
 
 | Feature / priority | Status | Exact implementation | Acceptance / evidence | Platform / caveat |
 | --- | --- | --- | --- | --- |
-| Private Home exploration / rotation P0 | PARTIAL pending final browser gate | crates/media/src/recommendations.rs; apps/web/src/personal_mixes.rs; domain/src/recommendations.rs; server/src/recommendations.rs |176 Rust tests and strict native/WASM Clippy; source-driven SQL/retention/privacy/owner/quota; PC01/PC02 and G07 | Native server + web only; on-demand owned catalog, max500 candidates/12anchors, no scheduled/network model |
-| Reversible recommendation exclusions P0 | PARTIAL pending final browser gate | migrations/0010_recommendation_exclusions.sql; same media/server/web modules | Owner FK, serialized1000 limit, desired-state hide/undo/clear, UUID-only export; real TCP and concurrency tests | Separate from history erase, no change to media rights/favorites/playlists |
-| Query scaling P0 | PARTIAL until final1m measurement | crates/media/examples/benchmark_recommendations.rs | Preserved baseline + actual release10k/100k/1m; output projection equivalence | Synthetic metadata, unique timestamps and small history; no human relevance/stream capacity claim |
+| Private Home exploration / rotation P0 | VERIFIED for documented web/server scope | crates/media/src/recommendations.rs; apps/web/src/personal_mixes.rs; domain/src/recommendations.rs; server/src/recommendations.rs |176 Rust tests and strict native/WASM Clippy; exact package Chromium37/Firefox37; PC01/PC02 and G07 | Native server + web only; on-demand owned catalog, max500 candidates/12anchors, no scheduled/network model |
+| Reversible recommendation exclusions P0 | VERIFIED for documented web/server scope | migrations/0010_recommendation_exclusions.sql; same media/server/web modules | Owner FK, serialized1000 limit, desired-state hide/undo/clear, UUID-only export; real TCP and concurrency tests | Separate from history erase, no change to media rights/favorites/playlists |
+| Query scaling P0 | VERIFIED within recorded synthetic scope | crates/media/examples/benchmark_recommendations.rs | Preserved baseline + actual release10k/100k/1m; output projection equivalence | Synthetic metadata, unique timestamps and small history; no human relevance/stream capacity claim |
 
 The earlier ten-gap inventory is historical. Personal on-demand shelves and feedback
 are implemented in this slice; durable daily/weekly refresh, calibrated quality,
@@ -25,7 +25,7 @@ Baseline was re-established at main f6cc845/application ac31d74:110 Rust tests,3
 | Lawful public network P0 | NOT_STARTED | docs/FEDERATION_PROTOCOL.md,NETWORK_RIGHTS.md only | G11/G12/G14/G15/G22: two real nodes + hostile peer, private negatives, rights/revoke | No federation routes, publication or network catalog |
 | Native audio clients P0 | NOT_STARTED / Apple validation BLOCKED | docs/PLATFORM_MATRIX.md only | G16/G17/G18 real Media3/AVFoundation/desktop engines/device evidence | Browser WASM/native server are not native clients |
 
-Ten highest remaining experience gaps (precise scope, not product-completion promises):
+Historical0.9 ten-gap inventory (current0.10 implementation/evidence above supersedes the personal baseline entry):
 
 1. P0 personal Home/mixes: core listening aggregates + media discovery ranking and web/experience.rs; G04/G10 consented real taste/favorites, sparse/cold-start, exclusions and durable refresh.
 2. P0 DSP completeness/quality: media/analysis.rs,analysis_service.rs,discovery.rs; G08/G09 evaluate real music relevance, optional validated tempo/chroma, broader lawful codecs, large-catalog candidate index and contention.

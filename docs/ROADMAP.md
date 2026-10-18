@@ -20,7 +20,7 @@ Status meanings: implemented=source exists; verified=checks recorded in PROGRESS
 ## Current0.10 increment
 
 Personal Home exploration, qualified rotation, reversible exclusions and owner-only
-export are implemented; final browser/package evidence remains in PROGRESS. Current
+export are implemented; exact package Chromium37/Firefox37 and original-data upgrade passed; see PROGRESS.
 Rust gates176 and source-derived SQL-equivalence checks pass. Preserve real audio,
 permissions, private defaults and original20-track data plus20 completed analysis
 rows observed on resume. Next complete product work: lawful opt-in origin/license/
