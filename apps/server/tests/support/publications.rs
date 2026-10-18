@@ -389,6 +389,7 @@ async fn publication_http_enforces_explicit_rights_private_ownership_and_every_m
             .request(Method::POST, "/api/network/preview", &member)
             .json(&PreviewPeer {
                 origin: origin.into(),
+                cursor: None,
             })
             .send()
             .await

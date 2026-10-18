@@ -161,7 +161,18 @@ async fn preview(
     input: std::result::Result<Json<PreviewPeer>, axum::extract::rejection::JsonRejection>,
 ) -> Result<Json<PeerPreview>> {
     let Json(input) = input.map_err(|_| invalid("Invalid public server origin"))?;
-    Ok(Json(s.peers.preview(&input.origin).await?))
+    if input
+        .cursor
+        .as_deref()
+        .is_some_and(|cursor| cursor.is_empty() || cursor.len() > 64)
+    {
+        return Err(invalid("Invalid public server cursor"));
+    }
+    Ok(Json(
+        s.peers
+            .preview(&input.origin, input.cursor.as_deref())
+            .await?,
+    ))
 }
 
 #[derive(Clone)]
@@ -180,8 +191,13 @@ impl Default for PeerClient {
     }
 }
 impl PeerClient {
-    async fn preview(&self, input: &str) -> Result<PeerPreview> {
+    async fn preview(&self, input: &str, cursor: Option<&str>) -> Result<PeerPreview> {
         let origin = canonical_public_origin(input).map_err(invalid)?;
+        if let Some(cursor) = cursor
+            && !canonical_id(cursor)
+        {
+            return Err(remote_error());
+        }
         let _permit = self.slots.clone().try_acquire_owned().map_err(|_| {
             HttpError(
                 StatusCode::TOO_MANY_REQUESTS,

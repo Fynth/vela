@@ -149,6 +149,10 @@ struct PeerSnapshot {
     query: String,
     data: PeerPreview,
     origin: String,
+    /// Whether another validated page exists for this exact preview.
+    has_more: bool,
+    /// Cursor from the last accepted page, when one exists.
+    cursor: Option<String>,
 }
 
 #[derive(Clone)]
@@ -179,6 +183,7 @@ struct Ui {
     peer: Signal<Option<PeerSnapshot>>,
     peer_loading: Signal<bool>,
     peer_error: Signal<String>,
+    peer_more_busy: Signal<bool>,
     busy: Signal<bool>,
     write_error: Signal<String>,
     notice: Signal<String>,
@@ -239,6 +244,7 @@ impl Ui {
         self.peer.set(None);
         self.peer_loading.set(false);
         self.peer_error.set(String::new());
+        self.peer_more_busy.set(false);
         self.busy.set(false);
         self.write_error.set(String::new());
         self.notice.set(String::new());
@@ -427,6 +433,7 @@ fn preview_peer(mut ui: Ui) {
         }
         let body = serde_json::to_value(PreviewPeer {
             origin: query.clone(),
+            cursor: None,
         })
         .ok();
         let result = request::<PeerPreview>(&ticket, "POST", "/api/network/preview", body).await;
@@ -436,12 +443,89 @@ fn preview_peer(mut ui: Ui) {
         ui.peer_loading.set(false);
         match result {
             Ok(data) => match preview_origin(&data) {
-                Some(origin) => ui.peer.set(Some(PeerSnapshot { query, data, origin })),
+                Some(origin) => ui.peer.set(Some(PeerSnapshot {
+                    has_more: data.catalog.next_cursor.is_some(),
+                    cursor: data.catalog.next_cursor.clone(),
+                    query,
+                    data,
+                    origin,
+                })),
                 None => ui.peer_error.set("The server returned an unsupported or inconsistent public catalog. No audio links were opened.".into()),
             },
             Err(error) => ui.peer_error.set(error),
         }
     });
+}
+
+fn peer_more(mut ui: Ui) {
+    let Some(snapshot) = ui.peer.peek().cloned() else {
+        return;
+    };
+    if snapshot.cursor.is_none() {
+        return;
+    };
+    if !ui.current() || *ui.peer_more_busy.peek() {
+        return;
+    }
+    match ui.peer_gate.begin(token(ui.auth)) {
+        Err(error) => {
+            ui.peer_error.set(error);
+        }
+        Ok(ticket) => {
+            let query = snapshot.query.clone();
+            let page_cursor = snapshot.cursor.clone();
+            let body = serde_json::to_value(PreviewPeer {
+                origin: query.clone(),
+                cursor: page_cursor,
+            })
+            .ok();
+            ui.peer_more_busy.set(true);
+            ui.peer_error.set(String::new());
+            spawn_local(async move {
+                if !ticket.current(&ui) || ui.peer_query.peek().trim() != query {
+                    return;
+                }
+                let result =
+                    request::<PeerPreview>(&ticket, "POST", "/api/network/preview", body).await;
+                if !ticket.current(&ui) || ui.peer_query.peek().trim() != query {
+                    return;
+                }
+                ui.peer_more_busy.set(false);
+                let Some(mut current) = ui.peer.peek().cloned() else {
+                    return;
+                };
+                match result {
+                    Ok(data) => match preview_origin(&data) {
+                        Some(origin) if origin == current.origin => {
+                            let snapshot = &mut current;
+                            let mut seen = snapshot
+                                .data
+                                .catalog
+                                .items
+                                .iter()
+                                .map(|track| track.id.clone())
+                                .collect::<std::collections::HashSet<_>>();
+                            for track in data.catalog.items {
+                                if seen.insert(track.id.clone()) {
+                                    snapshot.data.catalog.items.push(track);
+                                }
+                            }
+                            snapshot.cursor = data.catalog.next_cursor.clone();
+                            snapshot.has_more = snapshot.cursor.is_some();
+                            ui.peer.set(Some(current));
+                        }
+                        _ => ui.peer_error.set(
+                            "The server returned an inconsistent catalog. The page was ignored."
+                                .into(),
+                        ),
+                    },
+                    Err(error) => {
+                        ui.peer_error.set(error);
+                    }
+                }
+            });
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -883,7 +967,9 @@ fn peer_panel(ui: Ui) -> Element {
         .filter(|snapshot| snapshot.query == query.trim());
     let input_ui = ui.clone();
     let preview_ui = ui.clone();
+    let more_ui = ui.clone();
     let retry_ui = ui.clone();
+
     rsx! { section { class: "panel network-peers", "aria-label": "Preview a public server",
         span { class: "eyebrow", "A WINDOW INTO ANOTHER CATALOG" } h2 { "Preview a public server" }
         p { "Enter a compatible Vela public HTTPS origin to request its declared public metadata. Previewing does not import music or send your private library or listening history." }
@@ -924,7 +1010,14 @@ fn peer_panel(ui: Ui) -> Element {
                         }
                     } }
                 } } } }
-                if peer.data.catalog.next_cursor.is_some() { p { "This preview shows the first 20 public records; it does not crawl or cache the remote catalog." } }
+                if peer.has_more {
+                    div { class: "inline-form",
+                        button { class: "button secondary small", disabled: *ui.peer_more_busy.peek(), onclick: move |_| peer_more(more_ui.clone()), if *ui.peer_more_busy.peek() { "Loading more…" } else { "Load more public records" } }
+                    }
+                    small { "Each page is revalidated against the same canonical origin; results are deduplicated by track ID. This preview does not crawl or cache the remote catalog." }
+                } else if peer.data.catalog.next_cursor.is_some() {
+                    p { "This preview shows the first 20 public records; it does not crawl or cache the remote catalog." }
+                }
                 p { class: "network-peer-note", "Audio opens directly on the public server in another tab. Its permissions are rechecked there and may have changed. Remote tracks are not added to your private playback queue." }
             }
         }
@@ -961,6 +1054,7 @@ pub fn Network(auth: Signal<Option<AuthResponse>>, actions: Actions) -> Element 
         peer: use_signal(|| None),
         peer_loading: use_signal(|| false),
         peer_error: use_signal(String::new),
+        peer_more_busy: use_signal(|| false),
         busy: use_signal(|| false),
         write_error: use_signal(String::new),
         notice: use_signal(String::new),

@@ -74,7 +74,9 @@ bytes. Revoking access cannot revoke received licenses or recall copies. Retaine
 revoked records count toward quotas; no purge/edit UI is implemented (revoke and
 republish creates a new ID). Public metadata follows current owner catalog edits.
 
-The Network view previews one HTTPS DNS origin's first20 published tracks; it does
+The Network view previews one HTTPS DNS origin's first20 published tracks with a
+revalidated cursor "Load more" (server validates the cursor per page and the web client
+dedupes by track ID); it does
 not save peers, fan out search, follow users, mirror music, proxy audio or integrate
 remote tracks into the root queue. Public links open the granted origin separately.
 The native desktop Public view is separate: it saves origins, fans out search with

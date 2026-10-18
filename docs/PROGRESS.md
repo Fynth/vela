@@ -67,6 +67,19 @@ downloads two tracks, checks v2 digest manifests and plays/Next/Previous/removes
 server down. Evidence:`target/checks/native-offline-hash2/`;28/30 desktop tests with both
 opt-ins, strict Clippy/fmt. Source postdates0.12.5; no schema/server/web/runtime change.
 
+## Web peer preview cursor pagination — source verified (2026-10-18)
+
+The web Network preview now supports bounded page continuation: `PreviewPeer` gained an
+optional UUID cursor the server validates on every page (canonical ID, empty/oversized
+rejected), the web Load more button revalidates the same canonical origin, dedupes rows
+by track ID and disables at exhaustion. Existing per-page invariants (ID ordering,
+next_cursor==last item, per-track text/duration/rights checks) are unchanged.
+
+Evidence: server network lib tests4 and API31 pass; strict workspace+WASM Clippy/fmt;
+full Chromium41 passed+1 live-import skip in2.0m. Source postdates the live0.12.6
+runtime; the next patch will deploy it. Firefox rerun pending. No schema or
+original-data change.
+
 ## 0.12.6 session/offline integrity handover — verified (2026-10-18, `4a4351e`)
 
 `target/releases/vela-0.12.6-{x86_64-unknown-linux-gnu,source}.tar.gz` and

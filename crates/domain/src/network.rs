@@ -119,6 +119,8 @@ pub struct NetworkCapabilities {
 #[serde(deny_unknown_fields)]
 pub struct PreviewPeer {
     pub origin: String,
+    #[serde(default)]
+    pub cursor: Option<String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PeerPreview {

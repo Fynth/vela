@@ -134,6 +134,7 @@ async fn two_independent_origins_preview_only_declared_music_and_revocation_reau
         .header("X-CSRF-Token", &auth.csrf_token)
         .json(&PreviewPeer {
             origin: "https://a.vela.example.org".into(),
+            cursor: None,
         })
         .send()
         .await
@@ -180,7 +181,7 @@ async fn two_independent_origins_preview_only_declared_music_and_revocation_reau
     assert!(
         b.state
             .peers
-            .preview("https://a.vela.example.org")
+            .preview("https://a.vela.example.org", None)
             .await
             .unwrap_or_else(|e| panic!("Peer preview failed with {}", e.0))
             .catalog
@@ -206,7 +207,7 @@ async fn two_independent_origins_preview_only_declared_music_and_revocation_reau
     assert!(
         b.state
             .peers
-            .preview("https://a.vela.example.org")
+            .preview("https://a.vela.example.org", None)
             .await
             .is_err()
     );
@@ -347,7 +348,7 @@ async fn hostile_peers_cannot_spoof_origin_inject_grants_or_escape_response_boun
             fixture: Some((origin.into(), address)),
             ..Default::default()
         };
-        let result = peer.preview(origin).await;
+        let result = peer.preview(origin, None).await;
         assert!(matches!(result, Err(HttpError(StatusCode::BAD_GATEWAY, _))));
         assert_eq!(peer.slots.available_permits(), 2);
         server.abort();
@@ -367,7 +368,7 @@ async fn hostile_peers_cannot_spoof_origin_inject_grants_or_escape_response_boun
         fixture: Some((origin.into(), address)),
         ..Default::default()
     };
-    assert!(peer.preview(origin).await.is_err());
+    assert!(peer.preview(origin, None).await.is_err());
     assert_eq!(peer.slots.available_permits(), 2);
     server.abort();
 }
