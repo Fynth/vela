@@ -12,9 +12,12 @@ import math
 import os
 from pathlib import Path
 import secrets
+import select
 import signal
 import socket
+import ssl
 import struct
+import threading
 import subprocess
 import tempfile
 import time
@@ -99,6 +102,7 @@ def main():
                     request = urllib.request.Request(origin + f"/api/playlists/{playlist['id']}/items", data=body, headers={'Content-Type': 'application/json', 'X-CSRF-Token': auth['csrf_token'], 'Origin': origin})
                     with opener.open(request, timeout=15) as response:
                         revision = json.load(response)['playlist']['revision']
+                tls_connections = []
                 if args.test_peer:
                     with socket.socket() as peer_listener:
                         peer_listener.bind(('127.0.0.1', 0))
@@ -236,8 +240,58 @@ def main():
                         }],
                     }))
                     cache_file.chmod(0o600)
+                    tls_dir = private / 'tls'
+                    tls_dir.mkdir(mode=0o700)
+                    ca_key = tls_dir / 'ca.key'
+                    ca_pem = tls_dir / 'ca.pem'
+                    server_key = tls_dir / 'server.key'
+                    server_csr = tls_dir / 'server.csr'
+                    server_pem = tls_dir / 'server.pem'
+                    san = tls_dir / 'san.ext'
+                    san.write_text('subjectAltName=IP:127.0.0.1\n')
+                    subprocess.run(['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', str(ca_key), '-out', str(ca_pem), '-days', '1', '-subj', '/CN=Vela QA CA'], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    subprocess.run(['openssl', 'req', '-newkey', 'rsa:2048', '-nodes', '-keyout', str(server_key), '-out', str(server_csr), '-subj', '/CN=127.0.0.1'], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    subprocess.run(['openssl', 'x509', '-req', '-in', str(server_csr), '-CA', str(ca_pem), '-CAkey', str(ca_key), '-CAcreateserial', '-out', str(server_pem), '-days', '1', '-extfile', str(san)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    for key_file in (ca_key, server_key):
+                        key_file.chmod(0o600)
+                    tls_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+                    tls_context.load_cert_chain(certfile=server_pem, keyfile=server_key)
+                    with socket.socket() as tls_listener_probe:
+                        tls_listener_probe.bind(('127.0.0.1', 0))
+                        tls_port = tls_listener_probe.getsockname()[1]
+                    def relay_tls(client_socket):
+                        try:
+                            with tls_context.wrap_socket(client_socket, server_side=True) as tls:
+                                with socket.create_connection(('127.0.0.1', peer2_port), timeout=10) as upstream:
+                                    sockets = [tls, upstream]
+                                    while True:
+                                        readable, _, _ = select.select(sockets, [], [], 20)
+                                        if not readable:
+                                            break
+                                        for source in readable:
+                                            data = source.recv(65536)
+                                            if not data:
+                                                return
+                                            target = upstream if source is tls else tls
+                                            target.sendall(data)
+                        except (OSError, ssl.SSLError):
+                            return
+                    def tls_accept_loop(listener):
+                        while True:
+                            try:
+                                client_socket, _ = listener.accept()
+                            except OSError:
+                                return
+                            tls_connections.append(client_socket.getpeername())
+                            threading.Thread(target=relay_tls, args=(client_socket,), daemon=True).start()
+                    tls_listener = socket.socket()
+                    tls_listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    tls_listener.bind(('127.0.0.1', tls_port))
+                    tls_listener.listen(16)
+                    threading.Thread(target=tls_accept_loop, args=(tls_listener,), daemon=True).start()
                     environment.update({
-                        'VELA_NATIVE_PEER_TRANSPORTS': json.dumps({peer_origin + '/': peer_transport, peer2_origin + '/': peer2_transport}),
+                        'VELA_NATIVE_PEER_CA': str(ca_pem),
+                        'VELA_NATIVE_PEER_TRANSPORTS': json.dumps({peer_origin + '/': peer_transport, peer2_origin + '/': f'https://127.0.0.1:{tls_port}'}),
                         'VELA_NATIVE_QA_PEER_ORIGIN': peer_origin,
                         'VELA_NATIVE_QA_PEER2_ORIGIN': peer2_origin,
                         'VELA_NATIVE_QA_CACHED_ORIGIN': cached_origin,
@@ -284,6 +338,14 @@ def main():
                 }
                 report.write_text(json.dumps(result, indent=2) + '\n')
                 if args.test_peer:
+                    if not tls_connections:
+                        raise RuntimeError('TLS-terminated peer received no native TLS connections')
+                    result['tls_peer'] = {
+                        'origin': peer2_origin,
+                        'connections': len(tls_connections),
+                        'ca': str(ca_pem),
+                    }
+                    report.write_text(json.dumps(result, indent=2) + '\n')
                     config_path = private / 'home' / 'vela' / 'peers.json'
                     config = json.loads(config_path.read_text())
                     expected = sorted([peer_origin + '/', peer2_origin + '/', cached_origin + '/'])

@@ -21,6 +21,23 @@ correctly shows "Not established"). No schema, server HTTP, native or original-d
 runtime change. The live runtime was subsequently upgraded to0.12.1; existing
 analysis rows remain spectral-1 until explicitly reanalyzed.
 
+## Native TLS federation — source verified (2026-10-18)
+
+Native peer transport now supports a debug-only HTTPS loopback override with a test CA,
+so the real reqwest client performs certificate-chain/SNI/handshake validation for
+public catalog, search, cached fallback and stream preparation. The isolated harness
+generates a one-day local CA and IP-SAN server certificate, runs a TLS terminator in
+front of the second Vela peer and records accepted TLS connections. Release builds
+exclude both the CA and transport overrides; a release example contains neither
+environment string.
+
+The WebKitGTK journey completed unified search, public playback and cache/pagination/
+offline checks through the TLS-terminated peer with3 recorded TLS connections. Evidence:
+`target/checks/native-tls3/`;27/29 desktop tests with opt-ins, strict Clippy/fmt, and a
+release example string check (0 occurrences of both override env names). This is
+loopback TLS only; Internet DNS, public CA, two physical hosts and deployment hardening
+remain NOT_RUN. No schema, server HTTP, web or original-data/runtime behavior change.
+
 ## 0.12.5 spectral-4/native folders handover — verified (2026-10-18, `b8b9ef5`)
 
 `target/releases/vela-0.12.5-{x86_64-unknown-linux-gnu,source}.tar.gz` and

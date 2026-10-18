@@ -90,7 +90,7 @@ fn peer(input: &str) -> Result<Peer, String> {
         if let Some(value) = overrides.get(canonical.as_str())
             && let Ok(url) = Url::parse(value)
             && canonical_origin(value).is_ok()
-            && url.scheme() == "http"
+            && (url.scheme() == "http" || url.scheme() == "https")
             && matches!(url.host(), Some(Host::Ipv4(ip)) if ip.is_loopback())
             && url.port_or_known_default().is_some_and(|port| port != 0)
         {
@@ -110,14 +110,25 @@ fn endpoint(origin: &Url, path: &str) -> Url {
 }
 
 fn client() -> Result<Client, String> {
-    Client::builder()
+    let builder = Client::builder()
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(Duration::from_secs(5))
         .read_timeout(Duration::from_secs(20))
-        .timeout(Duration::from_secs(60))
-        .build()
-        .map_err(|_| NETWORK_ERROR.to_owned())
+        .timeout(Duration::from_secs(60));
+    #[cfg(debug_assertions)]
+    let builder = if let Ok(path) = std::env::var("VELA_NATIVE_PEER_CA") {
+        match fs::read(path)
+            .map_err(|_| ())
+            .and_then(|bytes| reqwest::Certificate::from_pem(&bytes).map_err(|_| ()))
+        {
+            Ok(certificate) => builder.add_root_certificate(certificate),
+            Err(()) => builder,
+        }
+    } else {
+        builder
+    };
+    builder.build().map_err(|_| NETWORK_ERROR.to_owned())
 }
 
 pub async fn preview(input: &str, cancel: CancellationToken) -> Result<RemotePreview, String> {
