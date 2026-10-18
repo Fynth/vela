@@ -15,7 +15,9 @@ use std::{
 };
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use url::{Host, Url};
+#[cfg(debug_assertions)]
+use url::Host;
+use url::Url;
 use vela_domain::{PublicCatalog, PublicTrack};
 
 const MAX_CATALOG_BYTES: usize = 128 * 1024;
@@ -46,7 +48,10 @@ struct Peer {
 /// Validate the requested origin and decide which transport URL to dial.
 fn peer(input: &str) -> Result<Peer, String> {
     let canonical = canonical_origin(input)?;
+    #[cfg(debug_assertions)]
     let mut transport = canonical.clone();
+    #[cfg(not(debug_assertions))]
+    let transport = canonical.clone();
     #[cfg(debug_assertions)]
     {
         if let (Ok(expected), Ok(value)) = (
