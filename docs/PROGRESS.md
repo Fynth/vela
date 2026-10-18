@@ -21,7 +21,7 @@ correctly shows "Not established"). No schema, server HTTP, native or original-d
 runtime change. The live runtime was subsequently upgraded to0.12.1; existing
 analysis rows remain spectral-1 until explicitly reanalyzed.
 
-## Native/offline/folder hardening — verified (2026-10-18)
+## Native/offline/folder hardening — verified (2026-10-18, `8d7d565`)
 
 Self-review of the newest slices found and fixed concrete issues:
 - Secret Service save now clears the fixed service attribute first, preventing duplicate
