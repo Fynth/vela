@@ -85,6 +85,8 @@ def main():
             if window is None:
                 process.terminate()
                 raise RuntimeError('Packaged desktop window did not appear')
+            # Dioxus injects the embedded stylesheet after the native window maps.
+            time.sleep(2)
             screenshot = Path('/tmp') / 'vela-desktop-package-launch.png'
             subprocess.run(['import', '-window', window, str(screenshot)], check=True)
             subprocess.run(['xdotool', 'windowclose', window], check=True)
