@@ -368,6 +368,8 @@ mod tests {
             tempo_bpm: None,
             tempo_confidence: None,
             chroma: None,
+            key: None,
+            key_confidence: None,
         }
     }
 

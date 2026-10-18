@@ -4,7 +4,9 @@ Owner-scoped playlist folders: create/list, CAS rename/delete, CAS move of owned
 playlists and unfiling on folder deletion. Migration0012 is additive; original playlists
 remain visible and unfiled. Chromium/Firefox each pass42 scenarios (41+1 skip). The
 native client consumes the additive playlist field and adds folder create/filter/move/
-rename/delete in source; the preserved0.12.4 desktop archive predates that native UI. Exact-package
+rename/delete in source; the preserved0.12.4 desktop archive predates that native UI.
+Source DSP spectral-4 adds a heuristic Krumhansl major/minor key label with profile
+margin; it also postdates the0.12.4 runtime. Exact-package
 Chromium and Firefox each passed42 scenarios with1 live-import skip (1.9m/2.3m; Firefox
 needed one clean rerun after a sleep-timer pause flake). The schema11 backup was
 restore-verified, then the new runtime applied schema12 on an isolated temporary port

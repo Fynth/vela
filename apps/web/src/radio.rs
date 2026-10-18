@@ -260,9 +260,10 @@ fn Measurements(features: AudioFeatures) -> Element {
             dt { "FFT windows" } dd { "{features.spectral_windows}" }
             dt { "Estimated tempo" } dd { match features.tempo_bpm { Some(bpm) => format!("{bpm:.1} BPM · {:.0}% onset regularity", features.tempo_confidence.unwrap_or(0.0) * 100.0), None => "Not established".to_owned() } }
             dt { "Chroma pitch classes" } dd { match features.chroma { Some(chroma) => chroma_label(&chroma), None => "Not established".to_owned() } }
+            dt { "Estimated key" } dd { match features.key { Some(key) => format!("{key} · {:.0}% profile margin", features.key_confidence.unwrap_or(0.0) * 100.0), None => "Not established".to_owned() } }
             dt { "Extractor" } dd { "{features.extractor_version}" }
         }
-        small { "RMS and peak describe digital samples. They are not LUFS, ReplayGain or perceived loudness. Tempo is an onset-regularity estimate, not a calibrated beat annotation. Chroma is nearest-semitone spectral pitch-class energy with no tuning or key estimate. This extractor does not infer genre, mood or key." }
+        small { "RMS and peak describe digital samples. They are not LUFS, ReplayGain or perceived loudness. Tempo is an onset-regularity estimate, not a calibrated beat annotation. Chroma is nearest-semitone spectral pitch-class energy. Estimated key applies Krumhansl major/minor profiles to chroma; it is a heuristic profile fit, not calibrated key detection. This extractor does not infer genre or mood." }
     } }
 }
 

@@ -435,6 +435,7 @@ async fn actual_analysis_worker_and_radio_remain_private_and_preserve_original_s
     assert!(features.rms > 0.0 && features.rms < 1.0 && features.peak > features.rms);
     assert!(features.spectral_centroid_hz.is_some());
     assert!(features.tempo_bpm.is_none());
+    assert!(features.key.is_none() && features.key_confidence.is_none());
     let chroma = features.chroma.expect("tonal fixture exposes chroma");
     assert!((chroma.iter().sum::<f64>() - 1.0).abs() < 1e-9);
     let centroid = features.spectral_centroid_hz.unwrap();

@@ -33,8 +33,14 @@ pub struct AudioFeatures {
     pub tempo_bpm: Option<f64>,
     pub tempo_confidence: Option<f64>,
     /// Nearest-semitone spectral pitch-class energy, normalized to sum1.
-    /// No tuning estimation or key label is implied.
+    /// No tuning estimate is implied; key is estimated separately.
     pub chroma: Option<[f64; 12]>,
+    /// Heuristic Krumhansl-profile key label, e.g. "C major". Not calibrated.
+    #[serde(default)]
+    pub key: Option<String>,
+    /// Relative fit margin between the best and next key profile, 0..=1.
+    #[serde(default)]
+    pub key_confidence: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

@@ -21,6 +21,20 @@ correctly shows "Not established"). No schema, server HTTP, native or original-d
 runtime change. The live runtime was subsequently upgraded to0.12.1; existing
 analysis rows remain spectral-1 until explicitly reanalyzed.
 
+## DSP heuristic key spectral-4 — source verified (2026-10-18)
+
+`vela-pcm-spectral-4` adds a bounded Krumhansl–Kessler key estimate from normalized
+chroma. At least three pitch classes must exceed5%; all24 major/minor rotations are
+Pearson-correlated, the best is labelled and confidence is the clamped margin over the
+next-best profile. Single pitch classes, silence and missing chroma return no key.
+Spectral-3 caches are retained unchanged.
+
+Unit evidence: synthetic C-major→`C major` and A-minor→`A minor` triads, A440 single
+tone→None, finite/bounded descriptors;22 analysis tests and full media tests. Web Radio
+shows Estimated key with the heuristic margin and disclaimer. Full Chromium41 passed+1
+live-import skip in2.2m. Source postdates the live0.12.4/spectral-3 runtime; next patch
+will deploy. No schema, HTTP, native or original-data change.
+
 ## Native playlist folders — source verified (2026-10-18, `9bfdb39`)
 
 The native Playlists view now uses the real folder APIs: create, per-folder filtering,

@@ -22,7 +22,7 @@ use symphonia::core::{
     meta::MetadataOptions,
 };
 
-pub const EXTRACTOR_VERSION: &str = "vela-pcm-spectral-3";
+pub const EXTRACTOR_VERSION: &str = "vela-pcm-spectral-4";
 const FFT_SIZE: usize = 2048;
 const HOP_SIZE: usize = FFT_SIZE / 2;
 const BIN_COUNT: usize = FFT_SIZE / 2 + 1;
@@ -395,6 +395,59 @@ fn estimate_chroma(power: &[f64; BIN_COUNT], rate: u32) -> Option<[f64; 12]> {
     Some(chroma)
 }
 
+/// Heuristic key estimate from normalized chroma using the Krumhansl–Kessler
+/// major/minor profiles. Requires at least three pitch classes above5%; returns the
+/// best profile's relative margin over the next best, not a calibrated probability.
+fn estimate_key(chroma: &[f64; 12]) -> Option<(String, f64)> {
+    const MAJOR: [f64; 12] = [
+        6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88,
+    ];
+    const MINOR: [f64; 12] = [
+        6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17,
+    ];
+    const NAMES: [&str; 12] = [
+        "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
+    ];
+    if chroma.iter().filter(|value| **value >= 0.05).count() < 3 {
+        return None;
+    }
+    let correlation = |profile: &[f64; 12], tonic: usize| {
+        let rotated = (0..12)
+            .map(|index| chroma[(index + tonic) % 12])
+            .collect::<Vec<_>>();
+        let mean_chroma = rotated.iter().sum::<f64>() / 12.0;
+        let mean_profile = profile.iter().sum::<f64>() / 12.0;
+        let mut numerator = 0.0;
+        let mut chroma_energy = 0.0;
+        let mut profile_energy = 0.0;
+        for (value, expected) in rotated.iter().zip(profile.iter()) {
+            numerator += (value - mean_chroma) * (expected - mean_profile);
+            chroma_energy += (value - mean_chroma).powi(2);
+            profile_energy += (expected - mean_profile).powi(2);
+        }
+        if chroma_energy <= 0.0 {
+            0.0
+        } else {
+            numerator / (chroma_energy * profile_energy).sqrt()
+        }
+    };
+    let mut scored = Vec::with_capacity(24);
+    for tonic in 0..12 {
+        scored.push((correlation(&MAJOR, tonic), tonic, "major"));
+        scored.push((correlation(&MINOR, tonic), tonic, "minor"));
+    }
+    scored.sort_by(|left, right| right.0.total_cmp(&left.0));
+    let best = scored[0];
+    let second = scored.get(1).map_or(0.0, |value| value.0);
+    if !best.0.is_finite() || best.0 <= 0.0 {
+        return None;
+    }
+    Some((
+        format!("{} {}", NAMES[best.1], best.2),
+        (best.0 - second).clamp(0.0, 1.0),
+    ))
+}
+
 /// Estimate tempo from detected onset peaks in the normalized spectral-flux
 /// envelope. Inter-onset intervals are filtered to a 60–200 BPM range and the
 /// median interval sets the BPM; confidence is 1 − normalized median absolute
@@ -624,6 +677,7 @@ impl Accumulator {
         }
         let tempo = estimate_tempo(&self.flux, self.rate as f64 / HOP_SIZE as f64);
         let chroma = estimate_chroma(&self.power, self.rate);
+        let key = chroma.and_then(|chroma| estimate_key(&chroma));
         AudioFeatures {
             extractor_version: EXTRACTOR_VERSION.to_owned(),
             sample_rate: self.rate,
@@ -649,6 +703,8 @@ impl Accumulator {
             tempo_bpm: tempo.map(|(bpm, _)| bpm),
             tempo_confidence: tempo.map(|(_, confidence)| confidence),
             chroma,
+            key: key.as_ref().map(|(name, _)| name.clone()),
+            key_confidence: key.map(|(_, confidence)| confidence),
         }
     }
 }
@@ -887,6 +943,34 @@ mod tests {
         assert!(chroma[9] > 0.2 && chroma[1] > 0.2);
         assert!((chroma.iter().sum::<f64>() - 1.0).abs() < 1e-9);
         assert_finite_descriptors(&mixed);
+    }
+
+    #[test]
+    fn krumhansl_profiles_estimate_major_and_minor_triads() {
+        let rate = 44_100_u32;
+        let frames = rate as usize * 2;
+        let triad = |frequencies: [f64; 3]| {
+            (0..frames)
+                .map(|sample| {
+                    let t = sample as f64 / f64::from(rate);
+                    frequencies
+                        .iter()
+                        .map(|frequency| (std::f64::consts::TAU * frequency * t).sin())
+                        .sum::<f64>() as f32
+                        * 0.2
+                })
+                .collect::<Vec<_>>()
+        };
+        let c_major = accumulate(rate, 1, &triad([261.63, 329.63, 392.0])).finish(true);
+        assert_eq!(c_major.key.as_deref(), Some("C major"));
+        assert!(c_major.key_confidence.unwrap() >= 0.0);
+        assert_finite_descriptors(&c_major);
+        let a_minor = accumulate(rate, 1, &triad([220.0, 261.63, 329.63])).finish(true);
+        assert_eq!(a_minor.key.as_deref(), Some("A minor"));
+        assert_finite_descriptors(&a_minor);
+        let single = tone(44_100, 440.0, 0.5, 1);
+        assert_eq!(single.key, None, "one pitch class must not fabricate a key");
+        assert_eq!(single.key_confidence, None);
     }
 
     #[test]

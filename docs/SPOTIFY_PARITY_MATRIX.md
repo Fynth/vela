@@ -43,7 +43,7 @@ Baseline was re-established at main f6cc845/application ac31d74:110 Rust tests,3
 Historical0.9 ten-gap inventory (current0.10 implementation/evidence above supersedes the personal baseline entry):
 
 1. P0 personal Home/mixes: core listening aggregates + media discovery ranking and web/experience.rs; G04/G10 consented real taste/favorites, sparse/cold-start, exclusions and durable refresh.
-2. P0 DSP completeness/quality: media/analysis.rs,analysis_service.rs,discovery.rs; G08/G09 evaluate real music relevance; measured onset-interval tempo is now descriptive, while calibrated beat/key, broader lawful codecs, large-catalog candidate index and contention remain.
+2. P0 DSP completeness/quality: media/analysis.rs,analysis_service.rs,discovery.rs; G08/G09 evaluate real music relevance; measured onset-interval tempo is now descriptive, while calibrated beat/key/chord, broader lawful codecs, large-catalog candidate index and contention remain.
 3. P1 history/analysis management: web/listening.rs,radio.rs and core/jobs.rs; G07/G08 device-grant removal, analysis cancel/task-center projection, accurate failure/reconnect UX and browser privacy-race expansion.
 4. P0 lawful origin/publication model: core policy/domain/migrations + server discovery; G11/G22 explicit rights, provenance, private-by-default and revocation.
 5. P0 native Linux/Android engines: future platform bridges and shared playback contracts; G16/G18 actual background/media keys, codec/audio-focus validation.
