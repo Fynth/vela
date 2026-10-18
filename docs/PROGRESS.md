@@ -83,7 +83,8 @@ successful public preview (PN02 covers rejection paths), so Chromium's green res
 non-regression only for this success path.
 
 Evidence: server network lib tests4 (including cursor forwarding) and API31 pass; strict
-workspace+WASM Clippy/fmt; full Chromium41 passed+1 live-import skip in2.0m. Source postdates the live0.12.6
+workspace+WASM Clippy/fmt; full Chromium41 passed+1 live-import skip in2.0m and
+Firefox41+1 skip in two clean runs (159s/175s) from `target/checks/preview-cursor-firefox/`. Source postdates the live0.12.6
 runtime; the next patch will deploy it. Firefox rerun pending. No schema or
 original-data change.
 
