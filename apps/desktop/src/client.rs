@@ -15,7 +15,7 @@ use std::{
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, watch};
 use tokio_util::sync::CancellationToken;
 use url::{Host, Url};
-use vela_domain::{AuthResponse, Credentials, Track, TrackPage};
+use vela_domain::{AuthResponse, Credentials, PlaylistDetail, PlaylistSummary, Track, TrackPage};
 
 const CANCELED: &str = "Request canceled.";
 const SIGNED_OUT: &str = "Sign in again to continue.";
@@ -291,6 +291,84 @@ impl VelaClient {
                 }
                 drop(sender);
                 writer.await.map_err(|_| AUDIO_ERROR.to_owned())?
+            },
+        )
+        .await
+    }
+
+    pub async fn playlists(
+        &self,
+        cancel: CancellationToken,
+    ) -> Result<Vec<PlaylistSummary>, String> {
+        let session = self.session()?;
+        bounded(
+            &cancel,
+            &self.inner.lifetime,
+            Duration::from_secs(20),
+            async {
+                let response = self
+                    .request(
+                        Method::GET,
+                        endpoint(&self.inner.origin, "/api/playlists"),
+                        &session,
+                    )
+                    .send()
+                    .await
+                    .map_err(|_| NETWORK_ERROR.to_owned())?;
+                if response.status() != StatusCode::OK {
+                    return Err(status_error(response.status()));
+                }
+                let playlists: Vec<PlaylistSummary> = json(response, MAX_JSON_BYTES).await?;
+                if playlists.len() > 200
+                    || playlists
+                        .iter()
+                        .any(|playlist| !canonical_uuid(&playlist.id))
+                {
+                    return Err(INVALID_RESPONSE.into());
+                }
+                Ok(playlists)
+            },
+        )
+        .await
+    }
+
+    pub async fn playlist(
+        &self,
+        id: &str,
+        cancel: CancellationToken,
+    ) -> Result<PlaylistDetail, String> {
+        if !canonical_uuid(id) {
+            return Err("Select a valid playlist.".into());
+        }
+        let session = self.session()?;
+        bounded(
+            &cancel,
+            &self.inner.lifetime,
+            Duration::from_secs(20),
+            async {
+                let response = self
+                    .request(
+                        Method::GET,
+                        endpoint(&self.inner.origin, &format!("/api/playlists/{id}")),
+                        &session,
+                    )
+                    .send()
+                    .await
+                    .map_err(|_| NETWORK_ERROR.to_owned())?;
+                if response.status() != StatusCode::OK {
+                    return Err(status_error(response.status()));
+                }
+                let detail: PlaylistDetail = json(response, MAX_JSON_BYTES).await?;
+                if detail.playlist.id != id
+                    || detail.items.len() > 1000
+                    || detail
+                        .items
+                        .iter()
+                        .any(|item| !canonical_uuid(&item.id) || !canonical_uuid(&item.track.id))
+                {
+                    return Err(INVALID_RESPONSE.into());
+                }
+                Ok(detail)
             },
         )
         .await

@@ -171,6 +171,14 @@ sent, so consent/history is not bypassed or inferred.
   (exactly one row)→unfavorite→empty→Library restores three tracks, with screenshot
   `target/checks/native-favorites-window9/native-favorites-dark.png`; desktop23/25
   tests (both opt-ins separately), strict Clippy, and233 workspace tests pass.
+- Native read-only playlists follow-up: the desktop client now reads the real
+  `GET /api/playlists`/`GET /api/playlists/{id}` APIs, shows list/detail metadata and
+  per-entry `can_stream`, and queues only the stream-authorized subset under a
+  playlist context. The fixture creates a two-entry playlist through the real API;
+  the window test verifies list→detail→Play playlist→native playback→shared queue
+  two entries→Library return (`target/checks/native-playlists-window/`, screenshot
+  `native-playlists-dark.png`). Playlist creation/editing/folders, albums/artists
+  and packaging remain native gaps.
 - The same session's DSP packet added9 deterministic numerical tests (module now19:
   pure/two-tone spectra, silence, sub-window, clipping/oversized PCM, determinism,
   click/ZCR, -60dBFS, non-finite bounds) inside `crates/media/src/analysis.rs`; one

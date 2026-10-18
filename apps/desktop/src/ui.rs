@@ -100,6 +100,7 @@ struct Ui {
     login_gate: Gate,
     catalog_gate: Gate,
     feedback_gate: Gate,
+    playlist_gate: Gate,
     source_gate: Gate,
     logout_gate: Gate,
     epoch: Signal<u64>,
@@ -120,6 +121,11 @@ struct Ui {
     catalog_loading: Signal<bool>,
     catalog_error: Signal<String>,
     favorite_busy: Signal<String>,
+    playlists: Signal<Vec<vela_domain::PlaylistSummary>>,
+    playlist: Signal<Option<vela_domain::PlaylistDetail>>,
+    playlist_id: Signal<Option<String>>,
+    playlist_loading: Signal<bool>,
+    playlist_error: Signal<String>,
     queue: Signal<Vec<Track>>,
     order: Signal<PlaybackOrder>,
     shuffle: Signal<bool>,
@@ -170,6 +176,7 @@ impl Ui {
         self.login_gate.cancel();
         self.catalog_gate.cancel();
         self.feedback_gate.cancel();
+        self.playlist_gate.cancel();
         self.source_gate.cancel();
         self.logout_gate.cancel();
     }
@@ -210,6 +217,11 @@ impl Ui {
         self.catalog_loading.set(false);
         self.catalog_error.set(String::new());
         self.favorite_busy.set(String::new());
+        self.playlists.set(Vec::new());
+        self.playlist.set(None);
+        self.playlist_id.set(None);
+        self.playlist_loading.set(false);
+        self.playlist_error.set(String::new());
         self.queue.set(Vec::new());
         self.order.set(PlaybackOrder::default());
         self.shuffle.set(false);
@@ -508,6 +520,99 @@ fn start_source(mut ui: Ui, reuse: bool, autoplay: bool, position_ms: u64) {
             }
         }
     });
+}
+
+fn load_playlists(mut ui: Ui) {
+    let Some(account) = ui.account.peek().clone().filter(|_| ui.signed_in()) else {
+        return;
+    };
+    ui.playlist_gate.cancel();
+    ui.playlist.set(None);
+    ui.playlist_id.set(None);
+    ui.playlist_loading.set(true);
+    ui.playlist_error.set(String::new());
+    ui.view.set("playlists");
+    let ticket = ui.playlist_gate.begin(account.epoch);
+    spawn(async move {
+        let result = account.client.playlists(ticket.cancel.clone()).await;
+        if !ticket.current(&ui) || *ui.view.peek() != "playlists" {
+            return;
+        }
+        ui.playlist_loading.set(false);
+        match result {
+            Ok(playlists) => {
+                ui.playlist_error.set(String::new());
+                ui.playlists.set(playlists);
+            }
+            Err(error) => {
+                if !expired(ui.clone(), &error) {
+                    ui.playlist_error.set(error);
+                }
+            }
+        }
+    });
+}
+
+fn open_playlist(mut ui: Ui, id: String) {
+    let Some(account) = ui.account.peek().clone().filter(|_| ui.signed_in()) else {
+        return;
+    };
+    if !uuid::Uuid::parse_str(&id).is_ok_and(|parsed| parsed.to_string() == id) {
+        ui.playlist_error.set("Select a valid playlist.".into());
+        return;
+    }
+    ui.playlist_gate.cancel();
+    ui.playlist_id.set(Some(id.clone()));
+    ui.playlist.set(None);
+    ui.playlist_loading.set(true);
+    ui.playlist_error.set(String::new());
+    let ticket = ui.playlist_gate.begin(account.epoch);
+    spawn(async move {
+        let result = account.client.playlist(&id, ticket.cancel.clone()).await;
+        if !ticket.current(&ui)
+            || *ui.view.peek() != "playlists"
+            || ui.playlist_id.peek().as_deref() != Some(id.as_str())
+        {
+            return;
+        }
+        ui.playlist_loading.set(false);
+        match result {
+            Ok(detail) => {
+                ui.playlist_error.set(String::new());
+                ui.playlist.set(Some(detail));
+            }
+            Err(error) => {
+                if !expired(ui.clone(), &error) {
+                    ui.playlist_error.set(error);
+                }
+            }
+        }
+    });
+}
+
+fn play_playlist(mut ui: Ui) {
+    let Some(detail) = ui.playlist.peek().clone().filter(|_| ui.signed_in()) else {
+        return;
+    };
+    if *ui.view.peek() != "playlists" || ui.audio.peek().is_none() {
+        return;
+    }
+    let tracks = detail
+        .items
+        .iter()
+        .filter(|item| item.can_stream)
+        .map(|item| item.track.clone())
+        .collect::<Vec<_>>();
+    if tracks.is_empty() {
+        ui.playlist_error
+            .set("This playlist has no tracks your account may stream.".into());
+        return;
+    }
+    ui.order.write().reset(tracks.len(), 0);
+    ui.queue.set(tracks);
+    ui.context
+        .set(format!("Playlist · {}", detail.playlist.name));
+    start_source(ui, false, true, 0);
 }
 
 fn toggle_favorite(mut ui: Ui, catalog: Catalog, track: Track) {
@@ -1042,6 +1147,67 @@ fn library(ui: Ui) -> Element {
     } }
 }
 
+fn playlists_view(ui: Ui) -> Element {
+    let loading = *ui.playlist_loading.read();
+    let error = ui.playlist_error.read().clone();
+    let lists = ui.playlists.read().clone();
+    let detail = ui.playlist.read().clone();
+    let refresh = ui.clone();
+    let back = ui.clone();
+    let play = ui.clone();
+    rsx! {section {class:"native-library","aria-label":"Playlists",
+        div {class:"library-intro",div {span {class:"eyebrow","YOUR COLLECTIONS"} h1 {"Playlists, ready to play"} p {"Owner-authorized playlist metadata. Audio still needs the same per-track stream rights as the library."}}
+            button {class:"button secondary",disabled:loading,onclick:move |_|{load_playlists(refresh.clone());},Icon {name:"history"} "Refresh playlists"}
+        }
+        if loading {div {class:"native-loading",role:"status",span {class:"loading-mark","aria-hidden":"true"} "Loading playlists…"}}
+        if !error.is_empty() {div {class:"alert error",role:"alert","{error}"}}
+        if let Some(detail) = detail {
+            div { class: "library-intro",
+                div {
+                    span { class: "eyebrow", "PLAYLIST" }
+                    h1 { "{detail.playlist.name}" }
+                    p { "{detail.items.len()} tracks · Revision {detail.playlist.revision}" if detail.playlist.can_edit { " · editable" } else { " · shared" } }
+                }
+            }
+            div { class: "native-track-actions",
+                button { class: "button secondary small", onclick: move |_| { let mut ui = back.clone(); ui.playlist.set(None); ui.playlist_id.set(None); }, "Back to playlists" }
+                button { class: "button primary small", disabled: !ui.audio_ready() || detail.items.iter().all(|item| !item.can_stream), onclick: move |_| play_playlist(play.clone()), Icon { name: "play" } "Play playlist" }
+            }
+            if detail.items.is_empty() {
+                div { class: "native-empty", Icon { name: "queue" } h2 { "This playlist is empty" } p { "Add tracks from the web app; native playlist editing is not implemented yet." } }
+            } else {
+                div { class: "native-queue-list",
+                    for entry in detail.items.iter().cloned() {
+                        article { class: "native-queue-row", key: "{entry.id}",
+                            div { class: "neutral-cover", "aria-hidden": "true", Icon { name: "music" } }
+                            div { class: "native-queue-select", div { strong { "{entry.track.title}" } small { "{entry.track.artist}" } } }
+                            if entry.can_stream { span { class: "queue-current", "Playable" } } else { small { "Metadata only" } }
+                        }
+                    }
+                }
+            }
+        } else {
+            if !loading && lists.is_empty() && error.is_empty() {
+                div { class: "native-empty", Icon { name: "queue" } h2 { "No playlists yet" } p { "Create a playlist in the web app, then refresh here. Native playlist editing is not implemented yet." } }
+            }
+            div { class: "native-queue-list",
+                for list in lists {
+                    {
+                        let open = ui.clone();
+                        let list_id = list.id.clone();
+                        rsx! { article { class: "native-queue-row", key: "{list.id}",
+                            button { class: "native-queue-select", "aria-label": "Open playlist {list.name}", onclick: move |_| open_playlist(open.clone(), list_id.clone()),
+                                div { class: "neutral-cover", "aria-hidden": "true", Icon { name: "queue" } }
+                                div { strong { "{list.name}" } small { "{list.item_count} tracks" if !list.can_edit { " · shared" } } }
+                            }
+                        } }
+                    }
+                }
+            }
+        }
+    } }
+}
+
 fn queue_view(ui: Ui) -> Element {
     let queue = ui.queue.read().clone();
     let queue_empty = queue.is_empty();
@@ -1143,6 +1309,7 @@ pub fn App() -> Element {
         login_gate: use_hook(Gate::default),
         catalog_gate: use_hook(Gate::default),
         feedback_gate: use_hook(Gate::default),
+        playlist_gate: use_hook(Gate::default),
         source_gate: use_hook(Gate::default),
         logout_gate: use_hook(Gate::default),
         epoch: use_signal(|| 1),
@@ -1163,6 +1330,11 @@ pub fn App() -> Element {
         catalog_loading: use_signal(|| false),
         catalog_error: use_signal(String::new),
         favorite_busy: use_signal(String::new),
+        playlists: use_signal(Vec::new),
+        playlist: use_signal(|| None),
+        playlist_id: use_signal(|| None),
+        playlist_loading: use_signal(|| false),
+        playlist_error: use_signal(String::new),
         queue: use_signal(Vec::new),
         order: use_signal(PlaybackOrder::default),
         shuffle: use_signal(|| false),
@@ -1275,23 +1447,25 @@ pub fn App() -> Element {
     let logout = ui.clone();
     let nav_library = ui.clone();
     let nav_favorites = ui.clone();
+    let nav_playlists = ui.clone();
     let compact_library = ui.clone();
     let compact_favorites = ui.clone();
+    let compact_playlists = ui.clone();
     let css = include_str!("../style.css");
     rsx! {
         document::Style {"{css}"}
         div {class:"native-app","data-theme":theme,
             if ui.signed_in(){
                 aside {class:"native-sidebar",div {class:"native-brand",Icon {name:"music"} span {"vela"} small {"NATIVE"}}
-                    nav {"aria-label":"Main navigation",button {class:if view=="library"{"native-nav active"}else{"native-nav"},"aria-label":"Library",onclick:move |_|{view_signal.set("library");load_catalog(nav_library.clone(),String::new(),None,false);},Icon {name:"library"}"Library"} button {class:if view=="favorites"{"native-nav active"}else{"native-nav"},"aria-label":"Favorites",onclick:move |_|{view_signal.set("favorites");load_catalog(nav_favorites.clone(),String::new(),None,true);},Icon {name:"heart"}"Favorites"} button {class:if view=="queue"{"native-nav active"}else{"native-nav"},"aria-label":"Queue",onclick:move |_|view_signal.set("queue"),Icon {name:"queue"}"Queue"}}
+                    nav {"aria-label":"Main navigation",button {class:if view=="library"{"native-nav active"}else{"native-nav"},"aria-label":"Library",onclick:move |_|{view_signal.set("library");load_catalog(nav_library.clone(),String::new(),None,false);},Icon {name:"library"}"Library"} button {class:if view=="favorites"{"native-nav active"}else{"native-nav"},"aria-label":"Favorites",onclick:move |_|{view_signal.set("favorites");load_catalog(nav_favorites.clone(),String::new(),None,true);},Icon {name:"heart"}"Favorites"} button {class:if view=="playlists"{"native-nav active"}else{"native-nav"},"aria-label":"Playlists",onclick:move |_|{load_playlists(nav_playlists.clone());},Icon {name:"playlists"}"Playlists"} button {class:if view=="queue"{"native-nav active"}else{"native-nav"},"aria-label":"Queue",onclick:move |_|view_signal.set("queue"),Icon {name:"queue"}"Queue"}}
                     div {class:"native-private-note",Icon {name:"check"} strong {"Private by default"} p {"Your account and queue stay in this running app. Temporary audio is released on replacement or sign-out."} p {class:"native-mpris-note",role:"status","data-testid":"native-mpris-status","{ui.mpris_note}"}}
                 }
                 main {class:"native-content",header {class:"native-topbar",div {span {class:"eyebrow","YOUR PERSONAL MUSIC SPACE"} if let Some(account)=ui.account.read().as_ref(){strong {"{account.user.username}"} small {"{account.origin}"}}}
                     div {class:"topbar-actions",button {class:"icon-button","aria-label":"Change color theme",onclick:move |_|theme_signal.set(if theme=="dark"{"light"}else{"dark"}),if theme=="dark"{Icon {name:"sun"}}else{Icon {name:"moon"}}} button {class:"button secondary small",onclick:move |_|sign_out(logout.clone()),"Sign out"}}
                 }
-                    nav {class:"native-compact-nav","aria-label":"Compact navigation",button {class:if view=="library"{"active"}else{""},onclick:move |_|{view_signal.set("library");load_catalog(compact_library.clone(),String::new(),None,false);},"Library"} button {class:if view=="favorites"{"active"}else{""},onclick:move |_|{view_signal.set("favorites");load_catalog(compact_favorites.clone(),String::new(),None,true);},"Favorites"} button {class:if view=="queue"{"active"}else{""},onclick:move |_|view_signal.set("queue"),"Queue"}}
+                    nav {class:"native-compact-nav","aria-label":"Compact navigation",button {class:if view=="library"{"active"}else{""},onclick:move |_|{view_signal.set("library");load_catalog(compact_library.clone(),String::new(),None,false);},"Library"} button {class:if view=="favorites"{"active"}else{""},onclick:move |_|{view_signal.set("favorites");load_catalog(compact_favorites.clone(),String::new(),None,true);},"Favorites"} button {class:if view=="playlists"{"active"}else{""},onclick:move |_|{load_playlists(compact_playlists.clone());},"Playlists"} button {class:if view=="queue"{"active"}else{""},onclick:move |_|view_signal.set("queue"),"Queue"}}
                     if !notice.is_empty(){div {class:"alert notice",role:"status","{notice}"}}
-                    if view=="queue"{{queue_view(ui.clone())}}else{{library(ui.clone())}}
+                    if view=="queue"{{queue_view(ui.clone())}}else if view=="playlists"{{playlists_view(ui.clone())}}else{{library(ui.clone())}}
                     p {class:"native-preparation-note","Tracks are prepared before playing. This device keeps no offline library; sign in again after closing Vela."}
                 }
                 {player(ui.clone())}

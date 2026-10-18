@@ -109,7 +109,9 @@ session, device handoff or remote-control protocol exists.
 
 The native UI currently covers Library, Queue, transport, theme, sign-in and sign-out.
 Favorites are implemented natively (filtered view, per-row favorite/unfavorite and
-queue-state synchronization). Playlists, albums, artists, search history,
+queue-state synchronization). Native playlists are read-only: real list/detail
+metadata, per-entry `can_stream` labels and playback of the authorized subset. Native
+playlist create/rename/delete/reorder, folders, albums, artists, search history,
 settings/privacy, listening history and recommendations remain browser-web features
 only. Native listening events
 are not sent, so consent/history cannot be inferred from native preparation or

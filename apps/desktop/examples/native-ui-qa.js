@@ -100,6 +100,20 @@ try {
   await click('Play Beacon');
   try { await wait(() => phase() === 'Playing' && position() > 100, 'Real MP3 native decoder advances'); }
   catch { const library = el('.native-library'); throw new Error(`Real MP3 native decoder advances (phase=${phase()} position=${position()} preparing=${!!el('.preparation-progress')} error=${el('.player-error')?.textContent?.trim() || '-'} library=${library ? JSON.stringify(library.dataset) : 'none'} search=${el('#native-search')?.value || '-'} rows=${document.querySelectorAll('[data-native-track-id]').length} api=${JSON.stringify(performance.getEntriesByType('resource').map(e=>e.name).filter(n=>n.includes('/api/tracks')).slice(-3))})`); }
+  await click('Playlists');
+  await wait(() => button('Open playlist Native evening'), 'Real playlist list');
+  await click('Open playlist Native evening');
+  await wait(() => button('Play playlist') && document.querySelectorAll('.native-queue-row').length === 2, 'Real playlist detail with two entries');
+  assert(document.querySelectorAll('.native-queue-row').length === 2 && button('Play playlist'), 'Playlist detail shows both owned entries');
+  await capture('playlists-dark');
+  await click('Play playlist');
+  await wait(() => phase() === 'Playing' && position() > 200, 'Playlist playback starts through native audio');
+  assert(phase() === 'Playing', 'Playlist playback starts through native audio');
+  await click('Queue');
+  await wait(() => document.querySelectorAll('[data-native-queue-index]').length === 2, 'Playlist queue populated');
+  assert(document.querySelectorAll('[data-native-queue-index]').length === 2, 'Playlist playback populates the shared native queue');
+  await click('Library');
+  await wait(() => document.querySelectorAll('[data-native-track-id]').length === 3, 'Library after playlist playback');
   if (config.closeWhilePlaying) {
     await click('Pause');
     fill('#native-search', 'Native Continuity'); el('.native-search').requestSubmit();

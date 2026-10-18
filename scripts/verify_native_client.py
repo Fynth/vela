@@ -19,6 +19,7 @@ import subprocess
 import tempfile
 import time
 import urllib.request
+import uuid
 import wave
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -86,6 +87,17 @@ def main():
                     request = urllib.request.Request(origin + '/api/upload', data=body, headers={'Content-Type': f'multipart/form-data; boundary={boundary}', 'X-CSRF-Token': auth['csrf_token'], 'Origin': origin})
                     with opener.open(request, timeout=20) as response:
                         assert response.status == 200
+                with opener.open(urllib.request.Request(origin + '/api/tracks?limit=50', headers={'Origin': origin}), timeout=15) as response:
+                    track_page = json.load(response)
+                playlist_request = urllib.request.Request(origin + '/api/playlists', data=json.dumps({'name': 'Native evening'}).encode(), headers={'Content-Type': 'application/json', 'X-CSRF-Token': auth['csrf_token'], 'Origin': origin})
+                with opener.open(playlist_request, timeout=15) as response:
+                    playlist = json.load(response)
+                revision = playlist['revision']
+                for track in track_page['items'][:2]:
+                    body = json.dumps({'revision': revision, 'mutation_id': str(uuid.uuid4()), 'track_id': track['id']}).encode()
+                    request = urllib.request.Request(origin + f"/api/playlists/{playlist['id']}/items", data=body, headers={'Content-Type': 'application/json', 'X-CSRF-Token': auth['csrf_token'], 'Origin': origin})
+                    with opener.open(request, timeout=15) as response:
+                        revision = json.load(response)['playlist']['revision']
                 # Per-process ALSA and Pulse routing, never a global default change.
                 environment.update({'TMPDIR': str(private / 'temporary'), 'ALSA_CONFIG_PATH': str(alsa), 'PULSE_SINK': SINK, 'GDK_BACKEND': 'x11', 'VELA_NATIVE_TEST_SINK': SINK, 'VELA_DESKTOP_SERVER_URL': origin, 'VELA_NATIVE_QA_USERNAME': 'nativefixture', 'VELA_NATIVE_QA_PASSWORD': password, 'VELA_NATIVE_QA_REPORT': str(report), 'XDG_DATA_HOME': str(private / 'home'), 'XDG_CACHE_HOME': str(private / 'home/cache'), 'CARGO_BUILD_JOBS': '2'})
                 if args.test_audio_engine:

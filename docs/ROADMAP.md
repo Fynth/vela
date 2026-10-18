@@ -41,7 +41,9 @@ size/BLAKE3 ETag and released on replacement/sign-out/failure/exit; a dead outpu
 worker is disabled and can be reconnected explicitly. MPRIS2 state/commands run on a
 separate thread with bounded channels and fail open to in-app controls. The native
 client also has an owner-only Favorites view with per-row favorite/unfavorite,
-queue-state synchronization and a verified empty/unfavorite/Library-return journey. A real-window
+queue-state synchronization and a verified empty/unfavorite/Library-return journey.
+Read-only Playlists list/detail and playback of the stream-authorized subset are
+verified; native playlist editing/folders remain future work. A real-window
 automated journey verified playback, seek, navigation continuity, queue duplicates/
 reorder, light theme,640×700 element bounds and zero temporary directory entries;
 MPRIS and null-sink audio tests also ran.
