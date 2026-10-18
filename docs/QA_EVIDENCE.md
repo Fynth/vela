@@ -1,3 +1,17 @@
+# Verified0.12.0 package and preserved runtime checkpoint
+
+Source `d3bde0c`; archived package SHA256 above. Exact extracted0.12.0 binary/assets
+served the original data directory after a verified backup/isolated restore; the
+service is healthy with schema11 and all prior rows/media intact.
+
+| Feature | Exact paths | Verified source | Executed evidence | Result | Next | Owner |
+| --- | --- | --- | --- | --- | --- | --- |
+| Local package/defaults | scripts/package-release.sh; target/releases/vela-0.12.0-*.tar.gz | d3bde0c | Extracted startup/setup/schema11/assets/SIGTERM;19 frozen hash matches; preserved earlier release checksums | PASS | Docker/ARM64 unverified | main |
+| Exact packaged browser regression | apps/web; tests/browser | d3bde0c package | Chromium41/41 1.9m + Firefox41/41 2.4m with licensed live import; sleep/playlist/queue/history/DSP/radio/publication regressions | PASS | Safari/mobile NOT_RUN | web/main |
+| Backup/restore before upgrade | scripts/backup.py; target/upgrade-backups/before-0.12.0-20261018T161750Z.tar.gz | d3bde0c |0600 440MB backup; isolated restore with30 table count equality, media/artwork SHA, quick_check/FK0 | PASS | Encryption/offsite not claimed | main |
+| Runtime switch | target/runtime/vela-0.12.0; enabled user unit; original data/ | d3bde0c | Graceful stop old PID; unit switched; health0.12.0/PID267247/0restarts; schema11/1user/20tracks/20analysis/0playlists; served hashes match | PASS | Boot/login behavior unverified | main/devops |
+| Shutdown/worker recovery | scripts/verify_shutdown.py | d3bde0c package |10 clean SIGTERM/restarts exit0; import/scanner/analysis/listening worker DB failures stopped correctly | PASS | No device/Docker claim | main |
+
 # Verified native Linux and web source slices0.12
 
 Source slices: native `3a285e0`/hardening `05951fd`, web queue/playlist `6421f3d`.

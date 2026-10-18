@@ -1,5 +1,45 @@
 # Verified progress
 
+## Verified0.12.0 package and preserved original-data runtime upgrade (2026-10-18)
+
+Package source `d3bde0c8e1c93324cf8628d8def8ba02e824bac4`. Local review artifacts
+`target/releases/vela-0.12.0-{x86_64-unknown-linux-gnu,source}.tar.gz` and
+`vela-0.12.0-SHA256SUMS` (native `e023288f13e57a7ae2e632365e0e5b5696318792d787204e06f47c49678e1e0e`,
+source `e735c692939a6bc49af153502e2ae6ef458e82b57a2703710e504e15005c6c7b`);
+never externally published. `verify_package.py` passed extracted startup/default
+setup/schema11/HTML/WASM/CSS/SIGTERM. The exact archive was extracted to new
+`target/runtime/vela-0.12.0/`; all19 frozen binary/static files match the archive and
+the built release/WASM assets (`release-0.12-frozen-package-match.json`), including
+the packaged notices file.
+
+Immediately before the upgrade, the owned persistent0.11 unit/PID78464 was verified
+and stopped normally. Fresh private0600
+`target/upgrade-backups/before-0.12.0-20261018T161750Z.tar.gz` (440464330 bytes) was
+created with SQLite backup semantics and restored into a disposable directory; all30
+existing non-ledger tables had identical row counts, both databases passed
+quick_check/FK0, and restore verified every referenced media SHA (20 media/1
+artwork). Original data was never restored/reset/deleted. No schema migration was
+needed (schema11 unchanged).
+
+The unit now runs the frozen0.12.0 binary/assets with the ORIGINAL data directory.
+Health reports0.12.0; MainPID267247 active with0 restarts; counts remain1 user/20
+tracks/20 assets/1 artwork/0 playlists/20 analysis rows; quick_check ok/FK0. Served
+HTML/WASM/style hashes equal the frozen runtime files. The installer `--dry-run`
+validated build0.12.0/schema11/19 frozen assets and the upgraded unit without writing
+anything; its same-build guard is why the actual cross-build switch used the documented
+backup/stop/unit-switch/start path. Ten real SIGTERM/restarts exited0 and four
+independent import/scanner/analysis/listening worker DB failures stopped correctly
+(`release-0.12-shutdown.log`).
+
+Exact-package browser gates: Chromium41/41 in1.9m and Firefox41/41 in2.4m against the
+extracted binary and packaged web assets with `VELA_LIVE_IMPORT_TEST=1`, including
+history/DSP/radio/publication/playlist/sleep/player regressions. Logs:
+`release-0.12-{chromium,firefox,package,package-verify,service-recheck,backup}.log`;
+screens preserved under `target/checks/release-0.12-{chromium,firefox}-screens`.
+Preserve the0.11 runtime, releases, backups and all earlier evidence. Six established
+metadata-only notice gaps remain; Docker/ARM64/native desktop packages, Internet TLS,
+mobile/Apple hardware and a real federated two-host deployment remain NOT_RUN.
+
 ## Native public peer playback0.12 — verified local two-instance slice (2026-10-18, `6bf1824`)
 
 The Linux native client can now enter an independently run Vela server's canonical
@@ -103,7 +143,8 @@ using the incoming cursor that produced the visible page.
 ### Scope and next work
 
 FUNCTIONAL_TESTED for the source web/API slice. No exact0.12 package was produced or
-installed, and the active runtime remains0.11.0; no Docker, Safari/WebKit, screen
+installed at that time; the later0.12.0 package checkpoint below now serves the
+original data. No Docker, Safari/WebKit, screen
 reader, physical-audio or mobile-hardware validation follows. Playlists still lack
 folders, smart rules, invitations/media grants, owner transfer and drag/drop. Next
 autonomous slices: package/verify0.12 only after deciding whether the native app
@@ -125,9 +166,9 @@ python3 scripts/verify_native_client.py --evidence target/checks/native-resume-$
 CARGO_BUILD_JOBS=2 VELA_WASM_BINDGEN="$PWD/target/tools/wasm-bindgen-0.2.129-x86_64-unknown-linux-musl/wasm-bindgen" scripts/build-web.sh
 (cd tests/browser && npx playwright test --browser=chromium)   # separate fresh server/data
 ```
-The live unit is `vela-local-development.service`, MainPID78464, frozen
-`target/runtime/vela-0.11.0/`, ORIGINAL `data/`; re-read them rather than trusting
-this paragraph. Playwright cleans `tests/browser/test-results` at each invocation:
+The live unit is `vela-local-development.service`, now running the frozen
+`target/runtime/vela-0.12.0/` binary/assets with the ORIGINAL `data/`; re-inspect the
+actual process/unit/data rather than trusting this paragraph. Playwright cleans `tests/browser/test-results` at each invocation:
 copy screenshots to `target/checks/` immediately after a run. The native QA opens a
 real window and creates/removes an owned Pulse null sink; never run it against the
 default output. `wasm-bindgen` is not on PATH; use the pinned target/tools binary.

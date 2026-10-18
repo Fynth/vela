@@ -1,4 +1,4 @@
-# 0.12.0 — verified Linux native client source slice
+# 0.12.0 — verified Linux native client + local package/runtime checkpoint
 
 `vela-desktop` is a real Dioxus Linux application with an in-memory native HTTP
 session, one supervised Rodio/CPAL output thread and an MPRIS2 observer. It signs in
@@ -34,7 +34,12 @@ collaborator grants and share links but preserves tracks, assets and audio right
 Real TCP ownership/CAS/idempotency/revocation tests pass, and Chromium40/40 plus
 Firefox40/40 source runs include these scenarios and all prior regressions.
 
-This is a source slice, not a packaged/installable desktop release. There is no
+A local server/web package is archived and verified: extracted schema11/default setup,
+19 matching frozen binary/static hashes, Chromium41/41 and Firefox41/41 against the
+exact package, ten clean SIGTERM/restarts, and a verified pre-upgrade backup/isolated
+restore. The persistent local unit now serves the frozen0.12.0 binary/assets with the
+ORIGINAL data (1 user/20 tracks/20 analysis/schema11). This is still not a native
+desktop installer or public release. There is no
 secure credential persistence, offline/download support, background mobile audio,
 favorites/playlists/albums native UI or Windows/macOS/Android/iOS implementation.
 The active service remains the verified0.11.0 runtime with the original data; no

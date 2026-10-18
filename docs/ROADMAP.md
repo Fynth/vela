@@ -60,7 +60,10 @@ replay/share-revocation/track-preservation tests pass, and Chromium40/40 plus
 Firefox40/40 source runs include the new lifecycle queue scenarios and all prior
 publication/history/DSP/radio/player regressions.
 
-This is FUNCTIONAL_TESTED for the Linux library/queue and source web slices only. It
+A local0.12.0 server/web package passed extracted-package and exact Chromium/Firefox
+gates and was installed over the original data after a verified backup/restore
+(schema11 unchanged, all rows/media preserved). This is still FUNCTIONAL_TESTED for
+the Linux library/queue and packaged web slices only. It
 is not a package, installer, secure credential store, offline client, background
 mobile service, favorites/playlists/albums native UI or Apple/Android/Windows
 implementation. Next native work: favorites/playlist/album surfaces and session
