@@ -6,7 +6,7 @@
 //! override lets the isolated two-instance QA reach a loopback peer while still
 //! validating the canonical advertised origin; release builds ignore it.
 use crate::{PreparedAudio, client::canonical_origin};
-use futures_util::StreamExt;
+use futures_util::{StreamExt, future::join_all};
 use reqwest::{Client, StatusCode, header};
 use std::{
     io::{Seek, Write},
@@ -34,6 +34,14 @@ pub struct RemoteNow {
 }
 
 #[derive(Clone)]
+pub struct PeerSearch {
+    pub origin: String,
+    pub server_id: Option<String>,
+    pub items: Vec<PublicTrack>,
+    pub error: Option<String>,
+}
+
+#[derive(Clone)]
 pub struct RemotePreview {
     pub origin: String,
     pub server_id: String,
@@ -54,13 +62,21 @@ fn peer(input: &str) -> Result<Peer, String> {
     let transport = canonical.clone();
     #[cfg(debug_assertions)]
     {
+        let mut overrides = std::collections::HashMap::<String, String>::new();
+        if let Ok(raw) = std::env::var("VELA_NATIVE_PEER_TRANSPORTS")
+            && let Ok(map) = serde_json::from_str::<std::collections::HashMap<String, String>>(&raw)
+        {
+            overrides.extend(map);
+        }
         if let (Ok(expected), Ok(value)) = (
             std::env::var("VELA_NATIVE_PEER_CANONICAL"),
             std::env::var("VELA_NATIVE_PEER_TRANSPORT"),
-        ) && canonical_origin(&expected)
-            .is_ok_and(|expected| expected.as_str() == canonical.as_str())
-            && let Ok(url) = Url::parse(&value)
-            && canonical_origin(&value).is_ok()
+        ) {
+            overrides.insert(expected, value);
+        }
+        if let Some(value) = overrides.get(canonical.as_str())
+            && let Ok(url) = Url::parse(value)
+            && canonical_origin(value).is_ok()
             && url.scheme() == "http"
             && matches!(url.host(), Some(Host::Ipv4(ip)) if ip.is_loopback())
             && url.port_or_known_default().is_some_and(|port| port != 0)
@@ -92,9 +108,29 @@ fn client() -> Result<Client, String> {
 }
 
 pub async fn preview(input: &str, cancel: CancellationToken) -> Result<RemotePreview, String> {
+    catalog(input, None, 20, cancel).await
+}
+
+async fn catalog(
+    input: &str,
+    query: Option<&str>,
+    limit: u32,
+    cancel: CancellationToken,
+) -> Result<RemotePreview, String> {
+    if !(1..=20).contains(&limit)
+        || query.is_some_and(|query| {
+            query.trim().is_empty() || query.len() > 128 || query.chars().any(char::is_control)
+        })
+    {
+        return Err("Use a public catalog query of 1–128 characters without controls.".into());
+    }
     let peer = peer(input)?;
     let mut url = endpoint(&peer.transport, "/api/public/catalog");
-    url.query_pairs_mut().append_pair("limit", "20");
+    url.query_pairs_mut()
+        .append_pair("limit", &limit.to_string());
+    if let Some(query) = query {
+        url.query_pairs_mut().append_pair("q", query.trim());
+    }
     let request = client()?
         .get(url)
         .header(header::ACCEPT, "application/json")
@@ -152,6 +188,63 @@ pub async fn preview(input: &str, cancel: CancellationToken) -> Result<RemotePre
         server_id: catalog.server_id,
         items: catalog.items,
     })
+}
+
+pub async fn search_peers(
+    origins: &[String],
+    query: &str,
+    cancel: CancellationToken,
+) -> Result<Vec<PeerSearch>, String> {
+    if query.trim().is_empty() || query.len() > 128 || query.chars().any(char::is_control) {
+        return Err("Use a public search of 1–128 characters without controls.".into());
+    }
+    let mut peers: Vec<String> = Vec::new();
+    for origin in origins {
+        let canonical = canonical_origin(origin)?;
+        let value = canonical.as_str().to_owned();
+        if !peers.contains(&value) {
+            peers.push(value);
+        }
+    }
+    peers.truncate(8);
+    if peers.is_empty() {
+        return Err("Save at least one public server first.".into());
+    }
+    let query = query.trim().to_owned();
+    let futures = peers.into_iter().map(|origin| {
+        let cancel = cancel.clone();
+        let query = query.clone();
+        async move {
+            let result = tokio::time::timeout(
+                Duration::from_secs(5),
+                catalog(&origin, Some(&query), 20, cancel),
+            )
+            .await;
+            match result {
+                Ok(Ok(preview)) => PeerSearch {
+                    origin,
+                    server_id: Some(preview.server_id),
+                    items: preview.items,
+                    error: None,
+                },
+                Ok(Err(error)) => PeerSearch {
+                    origin,
+                    server_id: None,
+                    items: Vec::new(),
+                    error: Some(error),
+                },
+                Err(_) => PeerSearch {
+                    origin,
+                    server_id: None,
+                    items: Vec::new(),
+                    error: Some("The public server did not answer within five seconds.".into()),
+                },
+            }
+        }
+    });
+    let mut results = join_all(futures).await;
+    results.sort_by(|left, right| left.origin.cmp(&right.origin));
+    Ok(results)
 }
 
 pub async fn prepare(

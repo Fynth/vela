@@ -46,7 +46,7 @@ def main():
     module = subprocess.check_output(['pactl', 'load-module', 'module-null-sink', f'sink_name={SINK}', 'sink_properties=device.description=Vela-isolated-QA'], text=True).strip()
     if not module.isdecimal():
         raise RuntimeError('Invalid owned Pulse module identity')
-    server = driver = peer_process = None
+    server = driver = peer_process = peer2_process = None
     try:
         with tempfile.TemporaryDirectory(prefix='vela-native-fixture-') as folder:
             private = Path(folder)
@@ -141,7 +141,62 @@ def main():
                         peer_catalog = json.load(response)
                     if not peer_catalog.get('items') or not peer_catalog['items'][0].get('can_stream'):
                         raise RuntimeError('Isolated peer public catalog did not expose the streaming fixture')
+                    with urllib.request.urlopen(peer_transport + '/api/public/catalog?q=Vela&limit=20', timeout=5) as response:
+                        if not json.load(response).get('items'):
+                            raise RuntimeError('Isolated peer public search did not match its fixture')
                     environment.update({'VELA_NATIVE_PEER_CANONICAL': peer_origin, 'VELA_NATIVE_PEER_TRANSPORT': peer_transport, 'VELA_NATIVE_QA_PEER_ORIGIN': peer_origin})
+                    with socket.socket() as peer2_listener:
+                        peer2_listener.bind(('127.0.0.1', 0))
+                        peer2_port = peer2_listener.getsockname()[1]
+                    peer2_origin = 'https://peer2.invalid'
+                    peer2_transport = f'http://127.0.0.1:{peer2_port}'
+                    peer2_data = private / 'peer2-data'
+                    peer2_environment = {**os.environ, 'VELA_BIND': f'127.0.0.1:{peer2_port}', 'VELA_DATA_DIR': str(peer2_data), 'VELA_WEB_DIR': str(ROOT / 'dist'), 'VELA_SCAN_ROOTS': '[]'}
+                    with (evidence / 'peer2-server.log').open('wb') as peer2_log:
+                        peer2_process = subprocess.Popen([str(args.server.resolve())], env=peer2_environment, stdout=peer2_log, stderr=subprocess.STDOUT)
+                    peer2_deadline = time.monotonic() + 15
+                    while True:
+                        try:
+                            with peer_health.open(peer2_transport + '/health', timeout=1) as response:
+                                if response.status == 200:
+                                    break
+                        except OSError:
+                            if peer2_process.poll() is not None or time.monotonic() > peer2_deadline:
+                                raise RuntimeError('Isolated second peer server failed readiness')
+                            time.sleep(.05)
+                    peer2_opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+                    setup2 = urllib.request.Request(peer2_transport + '/api/setup', data=json.dumps({'username': 'peerowner2', 'password': secrets.token_urlsafe(32)}).encode(), headers={'Content-Type': 'application/json', 'Origin': peer2_transport})
+                    with peer2_opener.open(setup2, timeout=15) as response:
+                        peer2_auth = json.load(response)
+                    peer2_audio = (ROOT / 'crates/media/tests/fixtures/beacon.mp3').read_bytes()
+                    boundary2 = 'VelaPeer2' + secrets.token_hex(16)
+                    peer2_body = f'--{boundary2}\r\nContent-Disposition: form-data; name="file"; filename="beacon.mp3"\r\nContent-Type: audio/mpeg\r\n\r\n'.encode() + peer2_audio + f'\r\n--{boundary2}--\r\n'.encode()
+                    upload2 = urllib.request.Request(peer2_transport + '/api/upload', data=peer2_body, headers={'Content-Type': f'multipart/form-data; boundary={boundary2}', 'X-CSRF-Token': peer2_auth['csrf_token'], 'Origin': peer2_transport})
+                    with peer2_opener.open(upload2, timeout=20) as response:
+                        peer2_track = json.load(response)['track']
+                    settings2 = urllib.request.Request(peer2_transport + '/api/network/settings', data=json.dumps({'revision': 0, 'enabled': True, 'origin': peer2_origin, 'name': 'Peer QA Two'}).encode(), headers={'Content-Type': 'application/json', 'X-CSRF-Token': peer2_auth['csrf_token'], 'Origin': peer2_transport}, method='PUT')
+                    with peer2_opener.open(settings2, timeout=15) as response:
+                        json.load(response)
+                    publication2 = urllib.request.Request(peer2_transport + '/api/publications', data=json.dumps({'track_id': peer2_track['id'], 'license': 'CC0-1.0', 'attribution': 'Peer QA two beacon fixture', 'rights_evidence': 'https://peer2.invalid/rights', 'allow_stream': True, 'allow_download': False, 'rights_confirmed': True}).encode(), headers={'Content-Type': 'application/json', 'X-CSRF-Token': peer2_auth['csrf_token'], 'Origin': peer2_transport})
+                    with peer2_opener.open(publication2, timeout=15) as response:
+                        json.load(response)
+                    with urllib.request.urlopen(peer2_transport + '/api/public/catalog?limit=20', timeout=5) as response:
+                        peer2_catalog = json.load(response)
+                    if not peer2_catalog.get('items') or not peer2_catalog['items'][0].get('can_stream'):
+                        raise RuntimeError('Second peer public catalog did not expose the streaming fixture')
+                    with urllib.request.urlopen(peer2_transport + '/api/public/catalog?q=Vela&limit=20', timeout=5) as response:
+                        if not json.load(response).get('items'):
+                            raise RuntimeError('Second peer public search did not match its fixture')
+                    config_dir = private / 'home' / 'vela'
+                    config_dir.mkdir(parents=True, mode=0o700)
+                    config_path = config_dir / 'peers.json'
+                    config_path.write_text(json.dumps({'version': 1, 'peers': [peer2_origin + '/']}))
+                    config_path.chmod(0o600)
+                    environment.update({
+                        'VELA_NATIVE_PEER_TRANSPORTS': json.dumps({peer_origin + '/': peer_transport, peer2_origin + '/': peer2_transport}),
+                        'VELA_NATIVE_QA_PEER_ORIGIN': peer_origin,
+                        'VELA_NATIVE_QA_PEER2_ORIGIN': peer2_origin,
+                    })
                 # Per-process ALSA and Pulse routing, never a global default change.
                 environment.update({'TMPDIR': str(private / 'temporary'), 'ALSA_CONFIG_PATH': str(alsa), 'PULSE_SINK': SINK, 'GDK_BACKEND': 'x11', 'VELA_NATIVE_TEST_SINK': SINK, 'VELA_DESKTOP_SERVER_URL': origin, 'VELA_NATIVE_QA_USERNAME': 'nativefixture', 'VELA_NATIVE_QA_PASSWORD': password, 'VELA_NATIVE_QA_REPORT': str(report), 'XDG_DATA_HOME': str(private / 'home'), 'XDG_CONFIG_HOME': str(private / 'home'), 'XDG_CACHE_HOME': str(private / 'home/cache'), 'CARGO_BUILD_JOBS': '2'})
                 if args.test_audio_engine:
@@ -161,16 +216,16 @@ def main():
                 if args.test_peer:
                     config_path = private / 'home' / 'vela' / 'peers.json'
                     config = json.loads(config_path.read_text())
-                    expected = peer_origin + '/'
-                    if config.get('version') != 1 or config.get('peers') != [expected]:
-                        raise RuntimeError('Saved peer config does not contain exactly the canonical origin')
+                    expected = sorted([peer_origin + '/', peer2_origin + '/'])
+                    if config.get('version') != 1 or config.get('peers') != expected:
+                        raise RuntimeError(f'Saved peer config mismatch: {config!r} expected {expected!r}')
                     if config_path.stat().st_mode & 0o077:
                         raise RuntimeError('Saved peer config is not private0600')
                     result['saved_peer_config'] = {'path': str(config_path), 'peers': config['peers']}
                     report.write_text(json.dumps(result, indent=2) + '\n')
                 print(json.dumps(result, indent=2))
     finally:
-        for process in (driver, server, peer_process):
+        for process in (driver, server, peer_process, peer2_process):
             if process is not None and process.poll() is None:
                 process.send_signal(signal.SIGTERM)
                 try:

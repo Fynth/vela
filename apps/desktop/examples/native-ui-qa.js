@@ -209,7 +209,9 @@ try {
     await capture('public-dark');
     el('[aria-label^="Remove saved server"]').click();
     await wait(() => (el('.alert.notice')?.textContent || '').includes('Public server removed.'), 'Remove public server');
-    assert(!document.querySelector('[aria-label^="Remove saved server"]'), 'Saved public server can be removed');
+    const remainingLabels = [...document.querySelectorAll('[aria-label^="Remove saved server"]')].map(node => node.getAttribute('aria-label'));
+    if (document.querySelector(`[aria-label="Remove saved server ${config.peerOrigin}/"]`)) throw new Error(`Saved public server can be removed failed labels=${JSON.stringify(remainingLabels)} expected=${config.peerOrigin}/`);
+    checks.push('Saved public server can be removed');
     await click('Save this server');
     await wait(() => document.querySelector('[aria-label^="Remove saved server"]'), 'Re-save public server');
     assert(document.querySelector('[aria-label^="Remove saved server"]'), 'Saved public server persists for the config check');
@@ -219,6 +221,17 @@ try {
     catch { throw new Error(`Public track playback failed (phase=${phase()} position=${position()} status=${el('.native-player-status small')?.textContent || '-'} error=${el('.player-error')?.textContent?.trim() || '-'})`); }
     assert(phase() === 'Playing', 'Authorized second-server public audio plays through the native engine');
     assert((el('.native-player-status small')?.textContent || '').includes('Public ·'), 'Player identifies the public origin context');
+    fill('#native-peer-query', 'Vela'); await click('Search saved servers');
+    try { await wait(() => [...document.querySelectorAll('[data-public-track-id][data-public-origin]')].map(row => row.dataset.publicOrigin).filter((origin, index, all) => all.indexOf(origin) === index).length >= 2, 'Unified saved-server search'); }
+    catch { throw new Error(`Unified saved-server search failed (error=${el('.alert.error')?.textContent?.trim() || '-'} query=${el('#native-peer-query')?.value || '-'} origins=${JSON.stringify([...document.querySelectorAll('[data-public-track-id][data-public-origin]')].map(row => row.dataset.publicOrigin))} saved=${JSON.stringify([...document.querySelectorAll('[aria-label^="Remove saved server"]')].map(node => node.getAttribute('aria-label')))} peers=${JSON.stringify([...document.querySelectorAll('[data-public-peer-summary]')].map(node => [node.dataset.publicOrigin, node.dataset.publicPeerError]))})`); }
+    const origins = [...document.querySelectorAll('[data-public-track-id][data-public-origin]')].map(row => row.dataset.publicOrigin);
+    assert(origins.some(origin => origin.startsWith(config.peerOrigin)) && origins.some(origin => origin.startsWith(config.peer2Origin)), 'Unified search returns both saved public origins');
+    await capture('public-search-dark');
+    const peer2Row = [...document.querySelectorAll('[data-public-track-id][data-public-origin]')].find(row => row.dataset.publicOrigin.startsWith(config.peer2Origin));
+    assert(peer2Row, 'Second saved origin is represented in unified results');
+    peer2Row.querySelector('button').click();
+    await wait(() => phase() === 'Playing' && (el('.native-player-status small')?.textContent || '').includes(config.peer2Origin), 'Second-origin public playback');
+    assert(phase() === 'Playing', 'Public audio from the second saved origin plays natively');
     await click('Library');
     await wait(() => document.querySelectorAll('[data-native-track-id]').length === 3, 'Library after public playback');
     await click('Sign out'); await wait(() => button('Sign in'), 'Native sign-out clears account');

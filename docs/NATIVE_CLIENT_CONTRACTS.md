@@ -74,7 +74,9 @@ seek/volume where the bus is available.
 - `peers.rs` stores at most32 canonical public origins in a versioned JSON file under
   the user config directory, private0600/atomic, rejecting credentials, malformed,
   oversized or unsupported files. It stores no server metadata, tokens or history;
-  the Public view can open/remove saved origins and save the current preview.
+  the Public view can open/remove saved origins, save the current preview, and search
+saved peers (`q`, at most eight peers×20 results) concurrently with independent
+five-second timeouts and per-origin error reporting.
 - `playback.rs` (reused by path from the web crate): bounded occurrence indices,
   fair shuffle deck/history, explicit next priority, repeat semantics. Structural
   queue edits synchronize the order model; metadata does not reset traversal.
@@ -133,9 +135,9 @@ app-store or physical-audio certification. Evidence:
   enumerating25 actual tests.
 - Two-instance public playback passes: the harness starts a second isolated Vela
   server, enables its canonical public origin and publishes the fixture with an
-  explicit stream grant; the native client lists that catalog, saves/removes the origin in an isolated
-  private config file, plays the public track through the native engine and shows the
-  public origin context. Evidence:
+  explicit stream grant; two isolated peers are published on canonical origins; the native client saves both,
+  searches them together, receives results from both, plays the second origin's public
+  track through the native engine and shows the public origin context. Evidence:
   `target/checks/native-public-peer5/` (`native-public-dark.png`). Internet TLS and a
   real remote host remain NOT_RUN; the QA uses a debug-only loopback transport.
 - Queue/favorite checks pass: move-down follows the current occurrence, move-up

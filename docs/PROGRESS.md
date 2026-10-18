@@ -33,6 +33,22 @@ plays the three-track queue, then reorders/restores/removes entries. Evidence:
 `target/checks/native-playlist-add3/`,24/25 desktop tests plus both opt-ins, strict
 Clippy/fmt. No schema, server, web or original-data/runtime change.
 
+## Native unified saved-peer search0.12 — verified (2026-10-18)
+
+The native Public view now searches up to eight saved canonical peers concurrently
+through each peer's public catalog `q` endpoint, with independent five-second
+timeouts, per-origin error reporting, at most20 results per peer, and no credential
+forwarding. Results are labelled with their advertised origin and any stream-authorized
+result plays through the single native engine.
+
+Two isolated Vela peers were published on distinct canonical origins with different
+tracks. The real-window journey saves both origins, searches them together with
+`Vela`, receives track rows from both origins, captures unified results, plays the
+second origin's public track natively and verifies the origin context. Evidence:
+`target/checks/native-unified-search11/` (including `native-public-search-dark.png`),
+desktop24/25 tests plus both opt-ins, strict Clippy/fmt. No schema, server HTTP, web
+or original-data runtime change.
+
 ## Native saved public peers0.12 — verified (2026-10-18, `db893b7`)
 
 The native Public view can now save/remove at most32 canonical public origins in a

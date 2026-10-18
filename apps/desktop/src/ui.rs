@@ -147,6 +147,10 @@ struct Ui {
     remote_loading: Signal<bool>,
     remote_error: Signal<String>,
     remote_now: Signal<Option<crate::remote::RemoteNow>>,
+    remote_query: Signal<String>,
+    remote_results: Signal<Vec<crate::remote::PeerSearch>>,
+    remote_searching: Signal<bool>,
+    remote_search_error: Signal<String>,
     saved_peers: Signal<Vec<String>>,
     queue: Signal<Vec<Track>>,
     order: Signal<PlaybackOrder>,
@@ -263,6 +267,10 @@ impl Ui {
         self.remote_loading.set(false);
         self.remote_error.set(String::new());
         self.remote_now.set(None);
+        self.remote_query.set(String::new());
+        self.remote_results.set(Vec::new());
+        self.remote_searching.set(false);
+        self.remote_search_error.set(String::new());
         self.queue.set(Vec::new());
         self.order.set(PlaybackOrder::default());
         self.shuffle.set(false);
@@ -1873,13 +1881,10 @@ fn explore_public(mut ui: Ui) {
     });
 }
 
-fn play_public(mut ui: Ui, track: PublicTrack) {
+fn play_public(mut ui: Ui, track: PublicTrack, origin: String) {
     if !track.can_stream || !ui.signed_in() {
         return;
     }
-    let Some(preview) = ui.remote_preview.peek().clone() else {
-        return;
-    };
     if *ui.view.peek() != "public" {
         return;
     }
@@ -1895,13 +1900,13 @@ fn play_public(mut ui: Ui, track: PublicTrack) {
         id: track.id.clone(),
         title: track.title.clone(),
         artist: track.artist.clone(),
-        origin: preview.origin.clone(),
+        origin: origin.clone(),
     }));
-    ui.context.set(format!("Public · {}", preview.origin));
+    ui.context.set(format!("Public · {origin}"));
     ui.preparing.set(true);
     let ticket = ui.source_gate.begin(account.epoch);
     spawn(async move {
-        let result = crate::remote::prepare(&preview.origin, &track, ticket.cancel.clone()).await;
+        let result = crate::remote::prepare(&origin, &track, ticket.cancel.clone()).await;
         if !ticket.current(&ui)
             || *ui.selection.peek() != selection
             || ui
@@ -1927,6 +1932,43 @@ fn play_public(mut ui: Ui, track: PublicTrack) {
                     ui.source_error.set(error);
                 }
                 ui.remote_now.set(None);
+            }
+        }
+    });
+}
+
+fn search_saved_peers(mut ui: Ui) {
+    let query = ui.remote_query.peek().trim().to_string();
+    if query.is_empty() {
+        ui.remote_search_error.set("Enter a public search.".into());
+        return;
+    }
+    let Some(account) = ui.account.peek().clone().filter(|_| ui.signed_in()) else {
+        return;
+    };
+    let origins = ui.saved_peers.peek().clone();
+    if origins.is_empty() {
+        ui.remote_search_error
+            .set("Save at least one public server first.".into());
+        return;
+    }
+    ui.remote_gate.cancel();
+    ui.remote_searching.set(true);
+    ui.remote_search_error.set(String::new());
+    ui.remote_results.set(Vec::new());
+    let ticket = ui.remote_gate.begin(account.epoch);
+    spawn(async move {
+        let result = crate::remote::search_peers(&origins, &query, ticket.cancel.clone()).await;
+        if !ticket.current(&ui) || *ui.view.peek() != "public" {
+            return;
+        }
+        ui.remote_searching.set(false);
+        match result {
+            Ok(results) => ui.remote_results.set(results),
+            Err(error) => {
+                if !expired(ui.clone(), &error) {
+                    ui.remote_search_error.set(error);
+                }
             }
         }
     });
@@ -1973,8 +2015,13 @@ fn public_view(ui: Ui) -> Element {
     let error = ui.remote_error.read().clone();
     let preview = ui.remote_preview.read().clone();
     let saved = ui.saved_peers.read().clone();
+    let searching = *ui.remote_searching.read();
+    let search_error = ui.remote_search_error.read().clone();
+    let results = ui.remote_results.read().clone();
     let explore = ui.clone();
     let save_current = ui.clone();
+    let search = ui.clone();
+    let mut query = ui.remote_query;
     let mut origin = ui.remote_origin;
     rsx! {section {class:"native-library","aria-label":"Public catalogs",
         div {class:"library-intro",div {span {class:"eyebrow","OPT-IN PUBLIC NETWORK"} h1 {"Public catalogs"} p {"Fetch one explicitly published catalog over its advertised origin. Private libraries, history and credentials are never sent."}}}
@@ -1984,6 +2031,51 @@ fn public_view(ui: Ui) -> Element {
             button {class:"button primary",r#type:"submit",disabled:loading,if loading {"Exploring…"} else {"Explore public catalog"}}
         }
         if !saved.is_empty() {
+            form { class: "native-search", onsubmit: move |event| { event.prevent_default(); search_saved_peers(search.clone()); },
+                Icon { name: "search" } label { class: "sr-only", r#for: "native-peer-query", "Search saved public servers" }
+                input { id: "native-peer-query", maxlength: 128, value: "{query}", placeholder: "Search all saved public servers", oninput: move |event| query.set(event.value()) }
+                button { class: "button primary", r#type: "submit", disabled: searching, if searching { "Searching…" } else { "Search saved servers" } }
+            }
+            if !search_error.is_empty() { div { class: "alert error", role: "alert", "{search_error}" } }
+            if !results.is_empty() {
+                div { class: "catalog-caption", p { "Unified saved-server results" } span { "{results.len()} SERVERS" } }
+                for peer in results.iter().cloned() {
+                    {
+                        let peer_origin = peer.origin.clone();
+                        let peer_label = peer.origin.clone();
+                        let peer_error = peer.error.clone();
+                        let peer_error_text = peer.error.clone().unwrap_or_default();
+                        rsx! {
+                            article { class: "native-queue-row", key: "search-{peer.origin}", "data-public-origin": "{peer.origin}", "data-public-peer-summary": "true", "data-public-peer-error": "{peer_error_text}",
+                                div { class: "neutral-cover", "aria-hidden": "true", Icon { name: "network" } }
+                                div { class: "native-queue-select",
+                                    div { strong { "Public origin" } small { "{peer_label}" } }
+                                }
+                                if peer_error.is_some() { small { "Unavailable" } } else { span { class: "queue-current", "{peer.items.len()} results" } }
+                            }
+                            if let Some(error) = peer_error { p { class: "muted", "{error}" } }
+                            div { class: "native-queue-list",
+                                for track in peer.items.iter().cloned() {
+                                    {
+                                        let play_ui = ui.clone();
+                                        let play_track = track.clone();
+                                        let play_origin = peer_origin.clone();
+                                        let track_title = track.title.clone();
+                                        rsx! { article { class: "native-queue-row", key: "{peer.origin}-{track.id}", "data-public-track-id": "{track.id}", "data-public-origin": "{peer.origin}",
+                                            div { class: "neutral-cover", "aria-hidden": "true", Icon { name: "music" } }
+                                            div { class: "native-queue-select", div { strong { "{track.title}" } small { "{track.artist} · {track.album}" } small { "{peer.origin}" } } }
+                                            span { class: "native-track-time", "{time_label(track.duration_ms.max(0) as u64)}" }
+                                            if track.can_stream {
+                                                button { class: "button primary small", disabled: !ui.audio_ready(), "aria-label": "Play public track {track_title}", onclick: move |_| play_public(play_ui.clone(), play_track.clone(), play_origin.clone()), Icon { name: "play" } "Play public track" }
+                                            } else { small { "Metadata only" } }
+                                        } }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             div { class: "catalog-caption", p { "Saved public servers" } span { "NO SECRETS" } }
             div { class: "native-queue-list",
                 for peer in saved.iter().cloned() {
@@ -2017,6 +2109,7 @@ fn public_view(ui: Ui) -> Element {
                             let play_track = track.clone();
                             let track_title = track.title.clone();
                             let origin_label = preview.origin.clone();
+                            let play_origin = preview.origin.clone();
                             rsx! { article { class: "native-queue-row", key: "{track.id}", "data-public-track-id": "{track.id}",
                                 div { class: "neutral-cover", "aria-hidden": "true", Icon { name: "music" } }
                                 div { class: "native-queue-select",
@@ -2028,7 +2121,7 @@ fn public_view(ui: Ui) -> Element {
                                 }
                                 span { class: "native-track-time", "{time_label(track.duration_ms.max(0) as u64)}" }
                                 if track.can_stream {
-                                    button { class: "button primary small", disabled: !ui.audio_ready(), "aria-label": "Play public track {track_title}", onclick: move |_| play_public(play_ui.clone(), play_track.clone()), Icon { name: "play" } "Play public track" }
+                                    button { class: "button primary small", disabled: !ui.audio_ready(), "aria-label": "Play public track {track_title}", onclick: move |_| play_public(play_ui.clone(), play_track.clone(), play_origin.clone()), Icon { name: "play" } "Play public track" }
                                 } else {
                                     small { "Metadata only" }
                                 }
@@ -2254,6 +2347,10 @@ pub fn App() -> Element {
         remote_loading: use_signal(|| false),
         remote_error: use_signal(String::new),
         remote_now: use_signal(|| None),
+        remote_query: use_signal(String::new),
+        remote_results: use_signal(Vec::new),
+        remote_searching: use_signal(|| false),
+        remote_search_error: use_signal(String::new),
         saved_peers: use_signal(|| crate::peers::load().unwrap_or_default()),
         queue: use_signal(Vec::new),
         order: use_signal(PlaybackOrder::default),
