@@ -78,9 +78,11 @@ seek/volume where the bus is available.
   oversized or unsupported files. It stores no server metadata, tokens or history;
   the Public view can open/remove saved origins, save the current preview, and search
 saved peers (`q`, at most eight peers×20 first-page results) concurrently with
-independent five-second timeouts and per-origin error reporting; cross-peer search
-pagination is not implemented. A single-preview `Load more` follows the peer's
-validated `next_cursor`, appends only new IDs and clears when exhausted. A successful catalog response
+independent five-second timeouts and per-origin error reporting. Both the single
+preview and each saved-peer search result page follow that peer's validated
+`next_cursor` through Load more, append only new IDs, keep cursors per origin and
+clear the control when exhausted. There is no merged global cursor or automatic
+cache refresh. A successful catalog response
 is cached as public metadata under the user cache directory (atomic private0600,
 versioned, at most64 files/128KiB each); when a saved peer is unreachable, search
 returns its cached rows as **browse-only** (`Cached metadata · stream unverified`)

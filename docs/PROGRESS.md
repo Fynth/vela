@@ -21,6 +21,22 @@ correctly shows "Not established"). No schema, server HTTP, native or original-d
 runtime change. The live runtime was subsequently upgraded to0.12.1; existing
 analysis rows remain spectral-1 until explicitly reanalyzed.
 
+## Native cross-peer search pagination0.12.1 — verified (2026-10-18)
+
+Each saved-peer search result now carries its own validated catalog cursor. A
+per-origin Load more follows only that peer's `next_cursor`, rechecks the exact
+origin/cursor generation, appends only unseen IDs and removes the control when
+exhausted; cached or failed peers have no cursor. There is no merged global cursor
+and no automatic cache refresh.
+
+The 21-record peer fixture now matches the unified `Vela` query. The real WebKitGTK
+journey sees20 peer results, loads the21st through that peer's own control, verifies
+no duplicate IDs across both origins, verifies the control disappears, and still
+runs cached fallback, public playback and remote Previous/Next. Evidence:
+`target/checks/native-cross-peer-pagination/`;26/28 desktop tests plus both opt-ins,
+strict Clippy/fmt. Source newer than the preserved0.12.1 desktop archive; next native
+package will include it. No schema, server HTTP, web or original-data runtime change.
+
 ## Native public preview cursor pagination0.12.1 — verified (2026-10-18, `2bf1936`)
 
 The native Public preview now follows a peer's validated public-catalog `next_cursor`

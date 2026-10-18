@@ -155,6 +155,8 @@ struct Ui {
     remote_search_error: Signal<String>,
     remote_more_busy: Signal<bool>,
     remote_more_error: Signal<String>,
+    remote_peer_more_busy: Signal<String>,
+    remote_peer_more_error: Signal<String>,
     saved_peers: Signal<Vec<String>>,
     queue: Signal<Vec<Track>>,
     order: Signal<PlaybackOrder>,
@@ -279,6 +281,8 @@ impl Ui {
         self.remote_search_error.set(String::new());
         self.remote_more_busy.set(false);
         self.remote_more_error.set(String::new());
+        self.remote_peer_more_busy.set(String::new());
+        self.remote_peer_more_error.set(String::new());
         self.queue.set(Vec::new());
         self.order.set(PlaybackOrder::default());
         self.shuffle.set(false);
@@ -2124,6 +2128,67 @@ fn search_saved_peers(mut ui: Ui) {
     });
 }
 
+fn load_more_peer(mut ui: Ui, origin: String) {
+    if !ui.remote_peer_more_busy.peek().is_empty() || *ui.view.peek() != "public" {
+        return;
+    }
+    let Some(peer) = ui
+        .remote_results
+        .peek()
+        .iter()
+        .find(|peer| peer.origin == origin)
+        .cloned()
+    else {
+        return;
+    };
+    let Some(cursor) = peer.next_cursor.clone() else {
+        return;
+    };
+    let Some(account) = ui.account.peek().clone().filter(|_| ui.signed_in()) else {
+        return;
+    };
+    let ticket = ui.remote_gate.begin(account.epoch);
+    ui.remote_peer_more_busy.set(origin.clone());
+    ui.remote_peer_more_error.set(String::new());
+    spawn(async move {
+        let result = crate::remote::more(&origin, &cursor, ticket.cancel.clone()).await;
+        if !ticket.current(&ui) || *ui.view.peek() != "public" {
+            return;
+        }
+        let mut results = ui.remote_results.peek().clone();
+        let Some(index) = results.iter().position(|peer| {
+            peer.origin == origin && peer.next_cursor.as_deref() == Some(cursor.as_str())
+        }) else {
+            return;
+        };
+        ui.remote_peer_more_busy.set(String::new());
+        match result {
+            Ok(page) if page.origin == origin => {
+                let mut seen = results[index]
+                    .items
+                    .iter()
+                    .map(|track| track.id.clone())
+                    .collect::<std::collections::HashSet<_>>();
+                for track in page.items {
+                    if seen.insert(track.id.clone()) {
+                        results[index].items.push(track);
+                    }
+                }
+                results[index].next_cursor = page.next_cursor;
+                ui.remote_results.set(results);
+            }
+            Ok(_) => ui
+                .remote_peer_more_error
+                .set("The public server changed origin; the page was ignored.".into()),
+            Err(error) => {
+                if !expired(ui.clone(), &error) {
+                    ui.remote_peer_more_error.set(error);
+                }
+            }
+        }
+    });
+}
+
 fn save_public_peer(mut ui: Ui) {
     let Some(preview) = ui.remote_preview.peek().clone() else {
         return;
@@ -2174,6 +2239,8 @@ fn public_view(ui: Ui) -> Element {
     let more = ui.clone();
     let more_busy = *ui.remote_more_busy.read();
     let more_error = ui.remote_more_error.read().clone();
+    let peer_more_busy = ui.remote_peer_more_busy.read().clone();
+    let peer_more_error = ui.remote_peer_more_error.read().clone();
     let mut query = ui.remote_query;
     let mut origin = ui.remote_origin;
     rsx! {section {class:"native-library","aria-label":"Public catalogs",
@@ -2199,6 +2266,9 @@ fn public_view(ui: Ui) -> Element {
                         let peer_error = peer.error.clone();
                         let peer_error_text = peer.error.clone().unwrap_or_default();
                         let peer_cached = peer.cached;
+                        let peer_has_more = peer.next_cursor.is_some();
+                        let peer_more_origin = peer.origin.clone();
+                        let more_ui = ui.clone();
                         rsx! {
                             article { class: "native-queue-row", key: "search-{peer.origin}", "data-public-origin": "{peer.origin}", "data-public-peer-summary": "true", "data-public-peer-error": "{peer_error_text}", "data-public-peer-cached": "{peer.cached}",
                                 div { class: "neutral-cover", "aria-hidden": "true", Icon { name: "network" } }
@@ -2226,10 +2296,14 @@ fn public_view(ui: Ui) -> Element {
                                     }
                                 }
                             }
+                            if peer_has_more {
+                                button { class: "button secondary small", "aria-label": "Load more from {peer_more_origin}", disabled: peer_more_busy == peer_more_origin, onclick: move |_| load_more_peer(more_ui.clone(), peer_more_origin.clone()), if peer_more_busy == peer_more_origin { "Loading more…" } else { "Load more from this server" } }
+                            }
                         }
                     }
                 }
             }
+            if !peer_more_error.is_empty() { p { class: "alert error", role: "alert", "{peer_more_error}" } }
             div { class: "catalog-caption", p { "Saved public servers" } span { "NO SECRETS" } }
             div { class: "native-queue-list",
                 for peer in saved.iter().cloned() {
@@ -2515,6 +2589,8 @@ pub fn App() -> Element {
         remote_search_error: use_signal(String::new),
         remote_more_busy: use_signal(|| false),
         remote_more_error: use_signal(String::new),
+        remote_peer_more_busy: use_signal(String::new),
+        remote_peer_more_error: use_signal(String::new),
         saved_peers: use_signal(|| crate::peers::load().unwrap_or_default()),
         queue: use_signal(Vec::new),
         order: use_signal(PlaybackOrder::default),

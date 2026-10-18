@@ -249,6 +249,14 @@ try {
     catch { throw new Error(`Unified saved-server search failed (error=${el('.alert.error')?.textContent?.trim() || '-'} query=${el('#native-peer-query')?.value || '-'} origins=${JSON.stringify([...document.querySelectorAll('[data-public-track-id][data-public-origin]')].map(row => row.dataset.publicOrigin))} saved=${JSON.stringify([...document.querySelectorAll('[aria-label^="Remove saved server"]')].map(node => node.getAttribute('aria-label')))} peers=${JSON.stringify([...document.querySelectorAll('[data-public-peer-summary]')].map(node => [node.dataset.publicOrigin, node.dataset.publicPeerError]))})`); }
     const origins = [...document.querySelectorAll('[data-public-track-id][data-public-origin]')].map(row => row.dataset.publicOrigin);
     assert(origins.some(origin => origin.startsWith(config.peerOrigin)) && origins.some(origin => origin.startsWith(config.peer2Origin)), 'Unified search returns both saved public origins');
+    const peer1Rows = () => [...document.querySelectorAll('[data-public-track-id][data-public-origin]')].filter(row => row.dataset.publicOrigin.startsWith(config.peerOrigin));
+    await wait(() => peer1Rows().length === 20, 'Cross-peer search first page');
+    assert(button(`Load more from ${config.peerOrigin}/`), 'Search peer keeps its own cursor');
+    await click(`Load more from ${config.peerOrigin}/`);
+    await wait(() => peer1Rows().length === 21, 'Cross-peer search next page');
+    const allIds = [...document.querySelectorAll('[data-public-track-id][data-public-origin]')].map(row => row.dataset.publicTrackId);
+    assert(allIds.length === new Set(allIds).size, 'Cross-peer Load more appends only new IDs');
+    assert(!button(`Load more from ${config.peerOrigin}/`), 'Exhausted search peer removes its Load more');
     const cachedRow = [...document.querySelectorAll('[data-public-track-id][data-public-origin]')].find(row => row.dataset.publicOrigin.startsWith(config.cachedOrigin));
     assert(cachedRow && cachedRow.dataset.publicCached === 'true' && !cachedRow.querySelector('button'), 'Unreachable saved peer falls back to browse-only cached metadata');
     await capture('public-search-dark');

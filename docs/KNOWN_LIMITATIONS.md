@@ -75,6 +75,9 @@ republish creates a new ID). Public metadata follows current owner catalog edits
 The Network view previews one HTTPS DNS origin's first20 published tracks; it does
 not save peers, fan out search, follow users, mirror music, proxy audio or integrate
 remote tracks into the root queue. Public links open the granted origin separately.
+The native desktop Public view is separate: it saves origins, fans out search with
+per-origin cursors/cache fallback and plays granted public streams through its own
+engine; the web Network view remains one first20 preview.
 No IP origins, custom HTTPS ports, signed inbox/activity, HTTP signatures, replay
 protection, peer blocklist, WebFinger, remote cache/tombstones or Funkwhale compatibility
 are implemented. Two-node tests use a production-absent exact test hostname pin;

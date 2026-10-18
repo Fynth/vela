@@ -43,6 +43,7 @@ pub struct PeerSearch {
     pub items: Vec<PublicTrack>,
     pub error: Option<String>,
     pub cached: bool,
+    pub next_cursor: Option<String>,
 }
 
 #[derive(Clone)]
@@ -246,6 +247,7 @@ fn cached_or_error(origin: String, error: String) -> PeerSearch {
             items,
             error: None,
             cached: true,
+            next_cursor: None,
         },
         _ => PeerSearch {
             origin,
@@ -253,6 +255,7 @@ fn cached_or_error(origin: String, error: String) -> PeerSearch {
             items: Vec::new(),
             error: Some(error),
             cached: false,
+            next_cursor: None,
         },
     }
 }
@@ -414,6 +417,7 @@ pub async fn search_peers(
                     items: preview.items,
                     error: None,
                     cached: false,
+                    next_cursor: preview.next_cursor,
                 },
                 Ok(Err(error)) => cached_or_error(origin, error),
                 Err(_) => cached_or_error(

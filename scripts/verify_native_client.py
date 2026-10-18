@@ -151,7 +151,7 @@ def main():
                             ))
                         data = tone.getvalue()
                         boundary_n = 'VelaPeerN' + secrets.token_hex(16)
-                        body_n = f'--{boundary_n}\r\nContent-Disposition: form-data; name="file"; filename="Peer Window {index + 1:02}.wav"\r\nContent-Type: audio/wav\r\n\r\n'.encode() + data + f'\r\n--{boundary_n}--\r\n'.encode()
+                        body_n = f'--{boundary_n}\r\nContent-Disposition: form-data; name="file"; filename="Vela Window {index + 1:02}.wav"\r\nContent-Type: audio/wav\r\n\r\n'.encode() + data + f'\r\n--{boundary_n}--\r\n'.encode()
                         request_n = urllib.request.Request(peer_transport + '/api/upload', data=body_n, headers={'Content-Type': f'multipart/form-data; boundary={boundary_n}', 'X-CSRF-Token': peer_auth['csrf_token'], 'Origin': peer_transport})
                         with peer_opener.open(request_n, timeout=20) as response:
                             track_n = json.load(response)['track']
