@@ -1,6 +1,6 @@
 # Verified progress
 
-## Native public peer playback0.12 — verified local two-instance slice (2026-10-18)
+## Native public peer playback0.12 — verified local two-instance slice (2026-10-18, `6bf1824`)
 
 The Linux native client can now enter an independently run Vela server's canonical
 origin, fetch only its explicitly published public catalog, and play a track whose
