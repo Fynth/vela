@@ -33,6 +33,7 @@ def main():
     parser.add_argument('--evidence', type=Path, default=ROOT / 'target/checks/native-window')
     parser.add_argument('--test-audio-engine', action='store_true', help='Also execute the opt-in actual output/seek/EOF test under the owned sink')
     parser.add_argument('--close-while-playing', action='store_true', help='Close the real window during active native playback and check original cleanup')
+    parser.add_argument('--test-peer', action='store_true', help='Start a second isolated Vela server and exercise its explicit public catalog')
     args = parser.parse_args()
     evidence = args.evidence.resolve()
     if evidence.exists() and any(evidence.iterdir()):
@@ -45,7 +46,7 @@ def main():
     module = subprocess.check_output(['pactl', 'load-module', 'module-null-sink', f'sink_name={SINK}', 'sink_properties=device.description=Vela-isolated-QA'], text=True).strip()
     if not module.isdecimal():
         raise RuntimeError('Invalid owned Pulse module identity')
-    server = driver = None
+    server = driver = peer_process = None
     try:
         with tempfile.TemporaryDirectory(prefix='vela-native-fixture-') as folder:
             private = Path(folder)
@@ -98,6 +99,49 @@ def main():
                     request = urllib.request.Request(origin + f"/api/playlists/{playlist['id']}/items", data=body, headers={'Content-Type': 'application/json', 'X-CSRF-Token': auth['csrf_token'], 'Origin': origin})
                     with opener.open(request, timeout=15) as response:
                         revision = json.load(response)['playlist']['revision']
+                if args.test_peer:
+                    with socket.socket() as peer_listener:
+                        peer_listener.bind(('127.0.0.1', 0))
+                        peer_port = peer_listener.getsockname()[1]
+                    peer_origin = 'https://peer.invalid'
+                    peer_transport = f'http://127.0.0.1:{peer_port}'
+                    peer_data = private / 'peer-data'
+                    peer_environment = {**os.environ, 'VELA_BIND': f'127.0.0.1:{peer_port}', 'VELA_DATA_DIR': str(peer_data), 'VELA_WEB_DIR': str(ROOT / 'dist'), 'VELA_SCAN_ROOTS': '[]'}
+                    with (evidence / 'peer-server.log').open('wb') as peer_log:
+                        peer_process = subprocess.Popen([str(args.server.resolve())], env=peer_environment, stdout=peer_log, stderr=subprocess.STDOUT)
+                    peer_deadline = time.monotonic() + 15
+                    peer_health = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+                    while True:
+                        try:
+                            with peer_health.open(peer_transport + '/health', timeout=1) as response:
+                                if response.status == 200:
+                                    break
+                        except OSError:
+                            if peer_process.poll() is not None or time.monotonic() > peer_deadline:
+                                raise RuntimeError('Isolated peer server failed readiness')
+                            time.sleep(.05)
+                    peer_password = secrets.token_urlsafe(32)
+                    peer_opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+                    setup_request = urllib.request.Request(peer_transport + '/api/setup', data=json.dumps({'username': 'peerowner', 'password': peer_password}).encode(), headers={'Content-Type': 'application/json', 'Origin': peer_transport})
+                    with peer_opener.open(setup_request, timeout=15) as response:
+                        peer_auth = json.load(response)
+                    peer_audio = (ROOT / 'crates/media/tests/fixtures/signal.flac').read_bytes()
+                    boundary = 'VelaPeer' + secrets.token_hex(16)
+                    peer_body = f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="signal.flac"\r\nContent-Type: audio/flac\r\n\r\n'.encode() + peer_audio + f'\r\n--{boundary}--\r\n'.encode()
+                    upload_request = urllib.request.Request(peer_transport + '/api/upload', data=peer_body, headers={'Content-Type': f'multipart/form-data; boundary={boundary}', 'X-CSRF-Token': peer_auth['csrf_token'], 'Origin': peer_transport})
+                    with peer_opener.open(upload_request, timeout=20) as response:
+                        peer_track = json.load(response)['track']
+                    settings_request = urllib.request.Request(peer_transport + '/api/network/settings', data=json.dumps({'revision': 0, 'enabled': True, 'origin': peer_origin, 'name': 'Peer QA'}).encode(), headers={'Content-Type': 'application/json', 'X-CSRF-Token': peer_auth['csrf_token'], 'Origin': peer_transport}, method='PUT')
+                    with peer_opener.open(settings_request, timeout=15) as response:
+                        json.load(response)
+                    publication_request = urllib.request.Request(peer_transport + '/api/publications', data=json.dumps({'track_id': peer_track['id'], 'license': 'CC-BY-4.0', 'attribution': 'Peer QA signal fixture', 'rights_evidence': 'https://peer.invalid/rights', 'allow_stream': True, 'allow_download': False, 'rights_confirmed': True}).encode(), headers={'Content-Type': 'application/json', 'X-CSRF-Token': peer_auth['csrf_token'], 'Origin': peer_transport})
+                    with peer_opener.open(publication_request, timeout=15) as response:
+                        json.load(response)
+                    with urllib.request.urlopen(peer_transport + '/api/public/catalog?limit=20', timeout=5) as response:
+                        peer_catalog = json.load(response)
+                    if not peer_catalog.get('items') or not peer_catalog['items'][0].get('can_stream'):
+                        raise RuntimeError('Isolated peer public catalog did not expose the streaming fixture')
+                    environment.update({'VELA_NATIVE_PEER_CANONICAL': peer_origin, 'VELA_NATIVE_PEER_TRANSPORT': peer_transport, 'VELA_NATIVE_QA_PEER_ORIGIN': peer_origin})
                 # Per-process ALSA and Pulse routing, never a global default change.
                 environment.update({'TMPDIR': str(private / 'temporary'), 'ALSA_CONFIG_PATH': str(alsa), 'PULSE_SINK': SINK, 'GDK_BACKEND': 'x11', 'VELA_NATIVE_TEST_SINK': SINK, 'VELA_DESKTOP_SERVER_URL': origin, 'VELA_NATIVE_QA_USERNAME': 'nativefixture', 'VELA_NATIVE_QA_PASSWORD': password, 'VELA_NATIVE_QA_REPORT': str(report), 'XDG_DATA_HOME': str(private / 'home'), 'XDG_CACHE_HOME': str(private / 'home/cache'), 'CARGO_BUILD_JOBS': '2'})
                 if args.test_audio_engine:
@@ -116,7 +160,7 @@ def main():
                     raise RuntimeError('Native process left a completed temporary original after exit')
                 print(json.dumps(result, indent=2))
     finally:
-        for process in (driver, server):
+        for process in (driver, server, peer_process):
             if process is not None and process.poll() is None:
                 process.send_signal(signal.SIGTERM)
                 try:

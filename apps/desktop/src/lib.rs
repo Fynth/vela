@@ -4,6 +4,7 @@ pub mod client;
 pub mod mpris;
 #[path = "../../web/src/playback.rs"]
 pub mod playback;
+pub mod remote;
 pub mod ui;
 
 /// A private temporary original. Its lease, not a public DTO, owns file cleanup.

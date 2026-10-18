@@ -107,7 +107,8 @@ credentials and CSRF are memory-only and no keychain/secure persistence is claim
 Sign-out clears the queue/catalog and stops native audio, but no cross-device
 session, device handoff or remote-control protocol exists.
 
-The native UI currently covers Library, Queue, transport, theme, sign-in and sign-out.
+The native UI covers Library, Favorites, Albums, Artists, Playlists, Public and Queue,
+transport, theme, sign-in and sign-out.
 Favorites are implemented natively (filtered view, per-row favorite/unfavorite and
 queue-state synchronization). Native playlists support real list/detail metadata, per-entry `can_stream`
 labels, playback of the authorized subset, and owner create/CAS-rename/confirm-delete.

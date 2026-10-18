@@ -18,7 +18,7 @@ use std::{
 };
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
-use vela_domain::{AlbumSummary, ArtistSummary, Track, TrackPage, User};
+use vela_domain::{AlbumSummary, ArtistSummary, PublicTrack, Track, TrackPage, User};
 
 #[path = "../../web/src/icons.rs"]
 mod icons;
@@ -103,6 +103,7 @@ struct Ui {
     playlist_gate: Gate,
     playlist_write_gate: Gate,
     browse_gate: Gate,
+    remote_gate: Gate,
     source_gate: Gate,
     logout_gate: Gate,
     epoch: Signal<u64>,
@@ -139,6 +140,11 @@ struct Ui {
     browse_title: Signal<String>,
     browse_loading: Signal<bool>,
     browse_error: Signal<String>,
+    remote_origin: Signal<String>,
+    remote_preview: Signal<Option<crate::remote::RemotePreview>>,
+    remote_loading: Signal<bool>,
+    remote_error: Signal<String>,
+    remote_now: Signal<Option<crate::remote::RemoteNow>>,
     queue: Signal<Vec<Track>>,
     order: Signal<PlaybackOrder>,
     shuffle: Signal<bool>,
@@ -192,6 +198,7 @@ impl Ui {
         self.playlist_gate.cancel();
         self.playlist_write_gate.cancel();
         self.browse_gate.cancel();
+        self.remote_gate.cancel();
         self.source_gate.cancel();
         self.logout_gate.cancel();
     }
@@ -247,6 +254,10 @@ impl Ui {
         self.browse_title.set(String::new());
         self.browse_loading.set(false);
         self.browse_error.set(String::new());
+        self.remote_preview.set(None);
+        self.remote_loading.set(false);
+        self.remote_error.set(String::new());
+        self.remote_now.set(None);
         self.queue.set(Vec::new());
         self.order.set(PlaybackOrder::default());
         self.shuffle.set(false);
@@ -260,6 +271,23 @@ impl Ui {
     /// Publish a bounded, credential-free snapshot to the OS media session.
     /// Ranking, HTTP and audio stay owned by this UI; MPRIS only observes.
     fn publish_system_controls(&self) {
+        if self.remote_now.peek().is_some() {
+            self.mpris.publish(mpris::Update {
+                status: mpris::Status::Stopped,
+                track: None,
+                position_ms: 0,
+                volume: self.snapshot.peek().volume as f64,
+                shuffle: *self.shuffle.peek(),
+                repeat: SystemRepeat::Off,
+                can_play: false,
+                can_pause: false,
+                can_seek: false,
+                can_go_next: false,
+                can_go_previous: false,
+                seek_serial: *self.mpris_seek_serial.peek(),
+            });
+            return;
+        }
         let track = self.current_track();
         let snapshot = self.snapshot.peek().clone();
         let preparing = *self.preparing.peek();
@@ -478,6 +506,7 @@ fn load_catalog(mut ui: Ui, query: String, cursor: Option<String>, favorites: bo
 }
 
 fn start_source(mut ui: Ui, reuse: bool, autoplay: bool, position_ms: u64) {
+    ui.remote_now.set(None);
     let Some(account) = ui.account.peek().clone().filter(|_| ui.signed_in()) else {
         return;
     };
@@ -1140,7 +1169,7 @@ fn toggle(mut ui: Ui) {
     let Some(audio) = ui.audio.peek().clone() else {
         return;
     };
-    if ui.current_track().is_none() {
+    if ui.current_track().is_none() && ui.remote_now.peek().is_none() {
         return;
     }
     let snapshot = ui.snapshot.peek().clone();
@@ -1345,6 +1374,7 @@ fn queue_move_down(mut ui: Ui, at: usize) {
     }
     if ui.order.write().swap(at, at + 1) {
         ui.queue.write().swap(at, at + 1);
+        ui.notice.set("Queue order updated.".into());
     }
 }
 
@@ -1730,6 +1760,151 @@ fn playlists_view(ui: Ui) -> Element {
     } }
 }
 
+fn explore_public(mut ui: Ui) {
+    let origin = ui.remote_origin.peek().trim().to_string();
+    if origin.is_empty() {
+        ui.remote_error.set("Enter a public server origin.".into());
+        return;
+    }
+    let Some(account) = ui.account.peek().clone().filter(|_| ui.signed_in()) else {
+        return;
+    };
+    ui.remote_gate.cancel();
+    ui.view.set("public");
+    ui.remote_loading.set(true);
+    ui.remote_error.set(String::new());
+    ui.remote_preview.set(None);
+    let ticket = ui.remote_gate.begin(account.epoch);
+    spawn(async move {
+        let result = crate::remote::preview(&origin, ticket.cancel.clone()).await;
+        if !ticket.current(&ui) || *ui.view.peek() != "public" {
+            return;
+        }
+        ui.remote_loading.set(false);
+        match result {
+            Ok(preview) => {
+                ui.remote_error.set(String::new());
+                ui.remote_preview.set(Some(preview));
+            }
+            Err(error) => {
+                if !expired(ui.clone(), &error) {
+                    ui.remote_error.set(error);
+                }
+            }
+        }
+    });
+}
+
+fn play_public(mut ui: Ui, track: PublicTrack) {
+    if !track.can_stream || !ui.signed_in() {
+        return;
+    }
+    let Some(preview) = ui.remote_preview.peek().clone() else {
+        return;
+    };
+    if *ui.view.peek() != "public" {
+        return;
+    }
+    let Some(account) = ui.account.peek().clone() else {
+        return;
+    };
+    let Some(audio) = ui.audio.peek().clone() else {
+        return;
+    };
+    let selection = ui.new_selection();
+    ui.prepared.set(None);
+    ui.remote_now.set(Some(crate::remote::RemoteNow {
+        id: track.id.clone(),
+        title: track.title.clone(),
+        artist: track.artist.clone(),
+        origin: preview.origin.clone(),
+    }));
+    ui.context.set(format!("Public · {}", preview.origin));
+    ui.preparing.set(true);
+    let ticket = ui.source_gate.begin(account.epoch);
+    spawn(async move {
+        let result = crate::remote::prepare(&preview.origin, &track, ticket.cancel.clone()).await;
+        if !ticket.current(&ui)
+            || *ui.selection.peek() != selection
+            || ui
+                .remote_now
+                .peek()
+                .as_ref()
+                .map(|remote| remote.id.as_str())
+                != Some(track.id.as_str())
+        {
+            return;
+        }
+        ui.preparing.set(false);
+        match result {
+            Ok(prepared) => match audio.load(selection, prepared.clone(), true, 0) {
+                Ok(()) => ui.prepared.set(Some(prepared)),
+                Err(error) => {
+                    ui.source_error.set(error);
+                    ui.remote_now.set(None);
+                }
+            },
+            Err(error) => {
+                if !expired(ui.clone(), &error) {
+                    ui.source_error.set(error);
+                }
+                ui.remote_now.set(None);
+            }
+        }
+    });
+}
+
+fn public_view(ui: Ui) -> Element {
+    let loading = *ui.remote_loading.read();
+    let error = ui.remote_error.read().clone();
+    let preview = ui.remote_preview.read().clone();
+    let explore = ui.clone();
+    let mut origin = ui.remote_origin;
+    rsx! {section {class:"native-library","aria-label":"Public catalogs",
+        div {class:"library-intro",div {span {class:"eyebrow","OPT-IN PUBLIC NETWORK"} h1 {"Public catalogs"} p {"Fetch one explicitly published catalog over its advertised origin. Private libraries, history and credentials are never sent."}}}
+        form {class:"native-search",onsubmit:move |event|{event.prevent_default();explore_public(explore.clone());},
+            Icon {name:"network"} label {class:"sr-only",r#for:"native-peer-origin","Public server origin"}
+            input {id:"native-peer-origin",r#type:"url",maxlength:2048,value:"{origin}",placeholder:"https://music.example.org",oninput:move |event|origin.set(event.value())}
+            button {class:"button primary",r#type:"submit",disabled:loading,if loading {"Exploring…"} else {"Explore public catalog"}}
+        }
+        if loading {div {class:"native-loading",role:"status",span {class:"loading-mark","aria-hidden":"true"} "Reading the public catalog…"}}
+        if !error.is_empty() {div {class:"alert error",role:"alert","{error}"}}
+        if let Some(preview) = preview {
+            div {class:"catalog-caption",p {"{preview.items.len()} explicit public records · origin {preview.origin}"} span {"PUBLIC RIGHTS"}}
+            if preview.items.is_empty() {
+                div { class: "native-empty", Icon { name: "network" } h2 { "This public catalog is empty" } p { "The server exposes metadata only when its owner explicitly publishes a licensed track." } }
+            } else {
+                div { class: "native-queue-list",
+                    for track in preview.items.iter().cloned() {
+                        {
+                            let play_ui = ui.clone();
+                            let play_track = track.clone();
+                            let track_title = track.title.clone();
+                            let origin_label = preview.origin.clone();
+                            rsx! { article { class: "native-queue-row", key: "{track.id}", "data-public-track-id": "{track.id}",
+                                div { class: "neutral-cover", "aria-hidden": "true", Icon { name: "music" } }
+                                div { class: "native-queue-select",
+                                    div {
+                                        strong { "{track.title}" }
+                                        small { "{track.artist} · {track.album}" }
+                                        small { "Public origin · {origin_label}" }
+                                    }
+                                }
+                                span { class: "native-track-time", "{time_label(track.duration_ms.max(0) as u64)}" }
+                                if track.can_stream {
+                                    button { class: "button primary small", disabled: !ui.audio_ready(), "aria-label": "Play public track {track_title}", onclick: move |_| play_public(play_ui.clone(), play_track.clone()), Icon { name: "play" } "Play public track" }
+                                } else {
+                                    small { "Metadata only" }
+                                }
+                            } }
+                        }
+                    }
+                }
+            }
+        }
+    } }
+}
+
 fn browse_view(ui: Ui) -> Element {
     let kind = *ui.browse_kind.read();
     let albums = ui.albums.read().clone();
@@ -1805,6 +1980,7 @@ fn queue_view(ui: Ui) -> Element {
 
 fn player(ui: Ui) -> Element {
     let track = ui.current_track();
+    let remote = ui.remote_now.read().clone();
     let snapshot = ui.snapshot.read().clone();
     let preparing = *ui.preparing.read();
     let progress = *ui.progress.read();
@@ -1822,7 +1998,7 @@ fn player(ui: Ui) -> Element {
     let cancel = ui.clone();
     let shuffle_ui = ui.clone();
     let repeat_ui = ui.clone();
-    let blocked = track.is_none() || !ui.audio_ready();
+    let blocked = (track.is_none() && remote.is_none()) || !ui.audio_ready();
     let playing = snapshot.phase == AudioPhase::Playing;
     let can_seek = !blocked
         && !preparing
@@ -1855,8 +2031,8 @@ fn player(ui: Ui) -> Element {
     rsx! {footer {class:"native-player","aria-label":"Native music player","data-audio-phase":"{snapshot.phase:?}","data-audio-generation":"{snapshot.generation}",
         div {class:"player-track",
             div {class:"neutral-cover player-cover","aria-hidden":"true",Icon {name:"music"}}
-            div {if let Some(track)=track.clone() {strong {"{track.title}"} small {"{track.artist}"}}else{strong {"Ready when you are"} small {"Choose something you love"}}}
-            if let Some(favorite_track)=track.clone() {
+            div {if let Some(remote)=remote.clone() {strong {"{remote.title}"} small {"{remote.artist} · public"} } else if let Some(track)=track.clone() {strong {"{track.title}"} small {"{track.artist}"}}else{strong {"Ready when you are"} small {"Choose something you love"}}}
+            if remote.is_none() && let Some(favorite_track)=track.clone() {
                 {
                     let favorite_ui=ui.clone();
                     rsx! { button {class:if favorite_track.favorite {"icon-button selected"}else{"icon-button"},"data-testid":"native-player-favorite","aria-pressed":favorite_track.favorite,disabled:favorite_disabled,"aria-label":if favorite_track.favorite {format!("Remove {} from favorites",favorite_track.title)} else {format!("Favorite {}",favorite_track.title)},title:if favorite_disabled {"Updating this favorite…"} else if favorite_track.favorite {"Remove from favorites"} else {"Add to favorites"},onclick:move |_|toggle_library_favorite(favorite_ui.clone(),favorite_track.clone()),Icon {name:"heart"}} }
@@ -1896,6 +2072,7 @@ pub fn App() -> Element {
         playlist_gate: use_hook(Gate::default),
         playlist_write_gate: use_hook(Gate::default),
         browse_gate: use_hook(Gate::default),
+        remote_gate: use_hook(Gate::default),
         source_gate: use_hook(Gate::default),
         logout_gate: use_hook(Gate::default),
         epoch: use_signal(|| 1),
@@ -1932,6 +2109,13 @@ pub fn App() -> Element {
         browse_title: use_signal(String::new),
         browse_loading: use_signal(|| false),
         browse_error: use_signal(String::new),
+        remote_origin: use_signal(|| {
+            std::env::var("VELA_NATIVE_QA_PEER_ORIGIN").unwrap_or_default()
+        }),
+        remote_preview: use_signal(|| None),
+        remote_loading: use_signal(|| false),
+        remote_error: use_signal(String::new),
+        remote_now: use_signal(|| None),
         queue: use_signal(Vec::new),
         order: use_signal(PlaybackOrder::default),
         shuffle: use_signal(|| false),
@@ -2028,7 +2212,12 @@ pub fn App() -> Element {
                 observer.publish_system_controls();
                 if ended && observer.ended.get() != Some(generation) {
                     observer.ended.set(Some(generation));
-                    advance(observer.clone(), Command::Ended);
+                    if observer.remote_now.peek().is_some() {
+                        observer.remote_now.set(None);
+                        observer.prepared.set(None);
+                    } else {
+                        advance(observer.clone(), Command::Ended);
+                    }
                 } else if !ended {
                     observer.ended.set(None);
                 }
@@ -2047,26 +2236,28 @@ pub fn App() -> Element {
     let nav_albums = ui.clone();
     let nav_artists = ui.clone();
     let nav_playlists = ui.clone();
+    let nav_public = ui.clone();
     let compact_library = ui.clone();
     let compact_favorites = ui.clone();
     let compact_albums = ui.clone();
     let compact_artists = ui.clone();
     let compact_playlists = ui.clone();
+    let compact_public = ui.clone();
     let css = include_str!("../style.css");
     rsx! {
         document::Style {"{css}"}
         div {class:"native-app","data-theme":theme,
             if ui.signed_in(){
                 aside {class:"native-sidebar",div {class:"native-brand",Icon {name:"music"} span {"vela"} small {"NATIVE"}}
-                    nav {"aria-label":"Main navigation",button {class:if view=="library"{"native-nav active"}else{"native-nav"},"aria-label":"Library",onclick:move |_|{view_signal.set("library");load_catalog(nav_library.clone(),String::new(),None,false);},Icon {name:"library"}"Library"} button {class:if view=="albums"{"native-nav active"}else{"native-nav"},"aria-label":"Albums",onclick:move |_|{load_groups(nav_albums.clone(),"albums",None);},Icon {name:"albums"}"Albums"} button {class:if view=="artists"{"native-nav active"}else{"native-nav"},"aria-label":"Artists",onclick:move |_|{load_groups(nav_artists.clone(),"artists",None);},Icon {name:"artists"}"Artists"} button {class:if view=="favorites"{"native-nav active"}else{"native-nav"},"aria-label":"Favorites",onclick:move |_|{view_signal.set("favorites");load_catalog(nav_favorites.clone(),String::new(),None,true);},Icon {name:"heart"}"Favorites"} button {class:if view=="playlists"{"native-nav active"}else{"native-nav"},"aria-label":"Playlists",onclick:move |_|{load_playlists(nav_playlists.clone());},Icon {name:"playlists"}"Playlists"} button {class:if view=="queue"{"native-nav active"}else{"native-nav"},"aria-label":"Queue",onclick:move |_|view_signal.set("queue"),Icon {name:"queue"}"Queue"}}
+                    nav {"aria-label":"Main navigation",button {class:if view=="library"{"native-nav active"}else{"native-nav"},"aria-label":"Library",onclick:move |_|{view_signal.set("library");load_catalog(nav_library.clone(),String::new(),None,false);},Icon {name:"library"}"Library"} button {class:if view=="albums"{"native-nav active"}else{"native-nav"},"aria-label":"Albums",onclick:move |_|{load_groups(nav_albums.clone(),"albums",None);},Icon {name:"albums"}"Albums"} button {class:if view=="artists"{"native-nav active"}else{"native-nav"},"aria-label":"Artists",onclick:move |_|{load_groups(nav_artists.clone(),"artists",None);},Icon {name:"artists"}"Artists"} button {class:if view=="favorites"{"native-nav active"}else{"native-nav"},"aria-label":"Favorites",onclick:move |_|{view_signal.set("favorites");load_catalog(nav_favorites.clone(),String::new(),None,true);},Icon {name:"heart"}"Favorites"} button {class:if view=="playlists"{"native-nav active"}else{"native-nav"},"aria-label":"Playlists",onclick:move |_|{load_playlists(nav_playlists.clone());},Icon {name:"playlists"}"Playlists"} button {class:if view=="public"{"native-nav active"}else{"native-nav"},"aria-label":"Public",onclick:move |_|{view_signal.set("public");explore_public(nav_public.clone());},Icon {name:"network"}"Public"} button {class:if view=="queue"{"native-nav active"}else{"native-nav"},"aria-label":"Queue",onclick:move |_|view_signal.set("queue"),Icon {name:"queue"}"Queue"}}
                     div {class:"native-private-note",Icon {name:"check"} strong {"Private by default"} p {"Your account and queue stay in this running app. Temporary audio is released on replacement or sign-out."} p {class:"native-mpris-note",role:"status","data-testid":"native-mpris-status","{ui.mpris_note}"}}
                 }
                 main {class:"native-content",header {class:"native-topbar",div {span {class:"eyebrow","YOUR PERSONAL MUSIC SPACE"} if let Some(account)=ui.account.read().as_ref(){strong {"{account.user.username}"} small {"{account.origin}"}}}
                     div {class:"topbar-actions",button {class:"icon-button","aria-label":"Change color theme",onclick:move |_|theme_signal.set(if theme=="dark"{"light"}else{"dark"}),if theme=="dark"{Icon {name:"sun"}}else{Icon {name:"moon"}}} button {class:"button secondary small",onclick:move |_|sign_out(logout.clone()),"Sign out"}}
                 }
-                    nav {class:"native-compact-nav","aria-label":"Compact navigation",button {class:if view=="library"{"active"}else{""},onclick:move |_|{view_signal.set("library");load_catalog(compact_library.clone(),String::new(),None,false);},"Library"} button {class:if view=="albums"{"active"}else{""},onclick:move |_|{load_groups(compact_albums.clone(),"albums",None);},"Albums"} button {class:if view=="artists"{"active"}else{""},onclick:move |_|{load_groups(compact_artists.clone(),"artists",None);},"Artists"} button {class:if view=="favorites"{"active"}else{""},onclick:move |_|{view_signal.set("favorites");load_catalog(compact_favorites.clone(),String::new(),None,true);},"Favorites"} button {class:if view=="playlists"{"active"}else{""},onclick:move |_|{load_playlists(compact_playlists.clone());},"Playlists"} button {class:if view=="queue"{"active"}else{""},onclick:move |_|view_signal.set("queue"),"Queue"}}
+                    nav {class:"native-compact-nav","aria-label":"Compact navigation",button {class:if view=="library"{"active"}else{""},onclick:move |_|{view_signal.set("library");load_catalog(compact_library.clone(),String::new(),None,false);},"Library"} button {class:if view=="albums"{"active"}else{""},onclick:move |_|{load_groups(compact_albums.clone(),"albums",None);},"Albums"} button {class:if view=="artists"{"active"}else{""},onclick:move |_|{load_groups(compact_artists.clone(),"artists",None);},"Artists"} button {class:if view=="favorites"{"active"}else{""},onclick:move |_|{view_signal.set("favorites");load_catalog(compact_favorites.clone(),String::new(),None,true);},"Favorites"} button {class:if view=="playlists"{"active"}else{""},onclick:move |_|{load_playlists(compact_playlists.clone());},"Playlists"} button {class:if view=="public"{"active"}else{""},onclick:move |_|{view_signal.set("public");explore_public(compact_public.clone());},"Public"} button {class:if view=="queue"{"active"}else{""},onclick:move |_|view_signal.set("queue"),"Queue"}}
                     if !notice.is_empty(){div {class:"alert notice",role:"status","{notice}"}}
-                    if view=="queue"{{queue_view(ui.clone())}}else if view=="playlists"{{playlists_view(ui.clone())}}else if view=="albums"||view=="artists"{{browse_view(ui.clone())}}else{{library(ui.clone())}}
+                    if view=="queue"{{queue_view(ui.clone())}}else if view=="playlists"{{playlists_view(ui.clone())}}else if view=="albums"||view=="artists"{{browse_view(ui.clone())}}else if view=="public"{{public_view(ui.clone())}}else{{library(ui.clone())}}
                     p {class:"native-preparation-note","Tracks are prepared before playing. This device keeps no offline library; sign in again after closing Vela."}
                 }
                 {player(ui.clone())}

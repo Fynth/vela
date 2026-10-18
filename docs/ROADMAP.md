@@ -9,7 +9,7 @@ Status meanings: implemented=source exists; verified=checks recorded in PROGRESS
 | 2 URL import | Verified direct-source slice | Preview, durable queue/progress/retry/cancel, streaming, exact dedup, SSRF; browser/public download and recovery tested; source collections/licenses/storage estimates need richer adapters |
 | 3 Complete library | Partial | Search/favorites/stats, paginated album/artist browsing, revisioned editor, read-only snapshot scanning, typed filters/title/newest ordering and private import/scan job center present; next verified editions, batch metadata editing, organization and remaining filter dimensions |
 | 4 Sharing | Partial | Local accounts, explicit collaborator viewer/editor grants, revision-safe edits, owner CAS rename/delete, expiring/revocable metadata links present; collaborator list/revocation/leave UX present; next invitations, permission-specific media access, revision feed, profiles, ownership transfer |
-| 5 Multi-server | Partial: public preview only | Server identity registry, secure credentials, native/OpenSubsonic adapters, bounded concurrent unified search, origin-labelled queues, two-server real integration |
+| 5 Multi-server | Partial: native public playback | Server identity registry, secure credentials, native/OpenSubsonic adapters, bounded concurrent unified search, origin-labelled queues, two-server real integration |
 | 6 Federation | Partial opt-in public profile; social protocol planned | ActivityPub interoperability profile, explicit opt-in visibility, WebFinger/discovery, origin verification/signatures/replay limits, follow/access requests, durable deliveries, remote metadata cache, blocked peers, privacy tests between two instances |
 | 7 Playback quality | Partial browser controls | Queue/seek/volume/repeat/fair shuffle/history/next priorities/keys/media-session integration; 0.7 adds browser context/progress restore and bounded reconnect; 0.8 adds shared-state Now Playing; 0.9 adds consented history and explicit local radio;0.12 adds a verified root sleep timer; next optional controlled FFmpeg, quality selection, validated ReplayGain/gapless/crossfade |
 | 8 Native/offline | Partial: Linux desktop slice | Real0.12 Dioxus Linux client with in-memory native HTTP, Rodio/CPAL output thread, MPRIS2, bounded prepared originals and verified Library/Queue playback. **Outstanding:** packaged installer, secure credential persistence, favorites/playlists/albums native UI, offline manifests/hash/resume/quota, Android Media3 service, iOS AVFoundation background audio, Windows/macOS clients, device transfer/sync; actual device evidence required |
@@ -44,7 +44,8 @@ client also has an owner-only Favorites view with per-row favorite/unfavorite,
 queue-state synchronization and a verified empty/unfavorite/Library-return journey.
 Native Playlists list/detail, owner create/CAS-rename/confirm-delete and playback,
 album/artist group browsing, playlist entry reorder/removal, queue move-down/
-Clear-upcoming and player favorite parity are verified; native add-from-library/folders and album/artist editing remain future work. A real-window
+Clear-upcoming, player favorite and direct second-server public-catalog playback are
+verified (loopback debug transport); native add-from-library/folders and album/artist editing remain future work. A real-window
 automated journey verified playback, seek, navigation continuity, queue duplicates/
 reorder, light theme,640×700 element bounds and zero temporary directory entries;
 MPRIS and null-sink audio tests also ran.

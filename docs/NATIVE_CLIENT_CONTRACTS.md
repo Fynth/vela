@@ -63,6 +63,14 @@ seek/volume where the bus is available.
   current occurrence and earlier rows, removing only the suffix through the shared
   order model. The player bar exposes the current track's favorite state with the same
   owner-only mutation and queue synchronization as library rows.
+- `remote.rs` reads one canonical peer public catalog and its stream endpoint with
+  a credential-free, no-redirect/no-proxy client; it validates advertised
+  origin/server identity, IDs, text/duration bounds and grants, requires bounded
+  size + BLAKE3 ETag, prepares an unnamed private0600 original and loads it into the
+  single native engine. Remote mode does not mutate/open the private queue and MPRIS
+  reports stopped/no metadata while it plays. A debug-only canonical→loopback
+  transport override exists solely for the isolated two-instance QA; release builds
+  ignore it. See ADR0018.
 - `playback.rs` (reused by path from the web crate): bounded occurrence indices,
   fair shuffle deck/history, explicit next priority, repeat semantics. Structural
   queue edits synchronize the order model; metadata does not reset traversal.
@@ -81,7 +89,9 @@ This first adapter downloads the whole authorized original before decoding. It i
 not progressive streaming, gapless, offline, a download entitlement, background
 mobile playback, secure credential persistence, device handoff, packaged install,
 adding library tracks to playlists, folders, album/artist editing or a federated
-source resolver. It sends no
+source resolver. Peer catalogs are limited to the first20 records, direct reachable
+origins and stream-only playback; no saved peers, remote search, cross-server queue,
+download/offline, Internet TLS or two-host network validation is claimed. It sends no
 native listening events. Only Linux x86_64 is built/tested on this host; Windows,
 macOS, Android and iOS remain separate targets. Hardware output, screen readers and
 physical media keys are not certified.
@@ -105,6 +115,12 @@ physical media keys are not certified.
   worker still advertised as playable (explicit reconnect now), QA sink assertions
   and a UTF-8 slice panic; the reported test-count discrepancy was resolved by
   enumerating25 actual tests.
+- Two-instance public playback passes: the harness starts a second isolated Vela
+  server, enables its canonical public origin and publishes the fixture with an
+  explicit stream grant; the native client lists that catalog, plays the public track
+  through the native engine and shows the public origin context. Evidence:
+  `target/checks/native-public-peer5/` (`native-public-dark.png`). Internet TLS and a
+  real remote host remain NOT_RUN; the QA uses a debug-only loopback transport.
 - Queue/favorite checks pass: move-down follows the current occurrence, move-up
   restores it, Clear-upcoming leaves only the current row, and the player heart
   acknowledges the API and updates the shared queue state. Evidence includes

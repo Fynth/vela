@@ -87,15 +87,19 @@ try {
   assert(document.querySelectorAll('[data-native-queue-index]').length === 5, 'Duplicate queue occurrences retained');
   await click('Move queue occurrence 4 up'); await click('Remove queue occurrence 4');
   assert(document.querySelectorAll('[data-native-queue-index]').length === 4, 'Queue reorder and removal');
-  await click('Move queue occurrence 0 down');
-  try { await wait(() => document.querySelector('.native-queue-row:nth-child(2)')?.classList.contains('current'), 'Native queue move-down'); }
+  const queueCurrent = () => [...document.querySelectorAll('.native-queue-row')].findIndex(row => row.classList.contains('current'));
+  const beforeMove = queueCurrent();
+  assert(beforeMove >= 0 && beforeMove + 1 < document.querySelectorAll('.native-queue-row').length, 'Queue has a movable current occurrence');
+  await click(`Move queue occurrence ${beforeMove} down`);
+  await wait(() => (el('.alert.notice')?.textContent || '').includes('Queue order updated.'), 'Queue move-down feedback');
+  try { await wait(() => queueCurrent() === beforeMove + 1, 'Native queue move-down'); }
   catch { throw new Error(`Native queue move-down failed rows=${JSON.stringify([...document.querySelectorAll('.native-queue-row')].map(row => [row.className, row.textContent.trim()]))}`); }
-  assert(document.querySelector('.native-queue-row:nth-child(2)')?.classList.contains('current'), 'Queue move-down follows the current occurrence');
-  await click('Move queue occurrence 1 up');
-  await wait(() => document.querySelector('.native-queue-row:nth-child(1)')?.classList.contains('current'), 'Native queue move-up restore');
+  assert(queueCurrent() === beforeMove + 1, 'Queue move-down follows the current occurrence');
+  await click(`Move queue occurrence ${beforeMove + 1} up`);
+  await wait(() => queueCurrent() === beforeMove, 'Native queue move-up restore');
   await click('Clear upcoming');
-  await wait(() => document.querySelectorAll('[data-native-queue-index]').length === 1, 'Native clear upcoming');
-  assert(document.querySelectorAll('[data-native-queue-index]').length === 1, 'Clear upcoming keeps only the current occurrence');
+  await wait(() => document.querySelectorAll('[data-native-queue-index]').length === beforeMove + 1, 'Native clear upcoming');
+  assert(document.querySelectorAll('[data-native-queue-index]').length === beforeMove + 1, 'Clear upcoming keeps the current occurrence and earlier rows');
   await resizeCompact();
   assert(innerWidth >= 620 && innerWidth <= 660, `Compact native viewport is 640px (actual ${innerWidth}px, dpr ${dpr()}, trace ${JSON.stringify(window.__velaResizeTrace || [])})`);
   const queueBounds = [...document.querySelectorAll('[data-native-queue-index]')].map(node => node.getBoundingClientRect());
@@ -188,6 +192,22 @@ try {
     await click('Remove playlist entry 2');
     await wait(() => document.querySelectorAll('.native-queue-row').length === 1, 'Playlist entry removal applied');
     assert(document.querySelectorAll('.native-queue-row').length === 1, 'Playlist entry removal acknowledged by the API');
+    await click('Public');
+    await wait(() => el('#native-peer-origin'), 'Public catalog view');
+    fill('#native-peer-origin', config.peerOrigin);
+    await click('Explore public catalog');
+    try { await wait(() => document.querySelectorAll('[data-public-track-id]').length >= 1, 'Second-server public catalog'); }
+    catch { throw new Error(`Second-server public catalog failed (error=${el('.alert.error')?.textContent?.trim() || '-'} input=${el('#native-peer-origin')?.value || '-'} rows=${document.querySelectorAll('[data-public-track-id]').length})`); }
+    assert(document.querySelectorAll('[data-public-track-id]').length >= 1, 'Second-server public catalog exposes an explicitly published track');
+    await capture('public-dark');
+    const publicRow = el('[data-public-track-id]');
+    publicRow.querySelector('button').click();
+    try { await wait(() => phase() === 'Playing' && position() > 100 && (el('.native-player-status small')?.textContent || '').includes('Public ·'), 'Public track playback'); }
+    catch { throw new Error(`Public track playback failed (phase=${phase()} position=${position()} status=${el('.native-player-status small')?.textContent || '-'} error=${el('.player-error')?.textContent?.trim() || '-'})`); }
+    assert(phase() === 'Playing', 'Authorized second-server public audio plays through the native engine');
+    assert((el('.native-player-status small')?.textContent || '').includes('Public ·'), 'Player identifies the public origin context');
+    await click('Library');
+    await wait(() => document.querySelectorAll('[data-native-track-id]').length === 3, 'Library after public playback');
     await click('Sign out'); await wait(() => button('Sign in'), 'Native sign-out clears account');
     assert(!el('.native-player') && document.querySelectorAll('[data-native-track-id]').length === 0, 'Sign-out removes private catalog and player');
     dioxus.send({ok:true, checks});

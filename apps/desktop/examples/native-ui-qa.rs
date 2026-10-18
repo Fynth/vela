@@ -17,6 +17,7 @@ fn Harness() -> Element {
             "username": std::env::var("VELA_NATIVE_QA_USERNAME").expect("fixture username"),
             "password": std::env::var("VELA_NATIVE_QA_PASSWORD").expect("fixture password"),
             "closeWhilePlaying": std::env::var("VELA_NATIVE_QA_CLOSE_PLAYING").as_deref() == Ok("1"),
+            "peerOrigin": std::env::var("VELA_NATIVE_QA_PEER_ORIGIN").unwrap_or_default(),
         }))
         .expect("fixture credentials sent to own window");
         let mut captures = Vec::new();
@@ -57,6 +58,7 @@ fn Harness() -> Element {
                             | "favorites-dark"
                             | "playlists-dark"
                             | "albums-dark"
+                            | "public-dark"
                     ) {
                         break json!({"ok":false,"failure":"Unknown capture stage"});
                     }

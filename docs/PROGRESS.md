@@ -1,5 +1,28 @@
 # Verified progress
 
+## Native public peer playback0.12 — verified local two-instance slice (2026-10-18)
+
+The Linux native client can now enter an independently run Vela server's canonical
+origin, fetch only its explicitly published public catalog, and play a track whose
+owner granted public streaming. `apps/desktop/src/remote.rs` uses a credential-free,
+no-redirect/no-proxy client; it validates the advertised origin/server identity, IDs,
+text and duration bounds, and grants; requires bounded content length plus a quoted
+BLAKE3 ETag; prepares an unnamed private0600 original; and loads it through the one
+native engine. Remote mode does not mutate or advance the private queue, is cleared
+when local playback starts, and MPRIS reports stopped/no metadata rather than
+attributing public audio to a private track. Private history and credentials never
+leave the client.
+
+The two-instance QA starts a second isolated Vela server, enables its public catalog
+with a canonical advertised origin, uploads and publishes the stream fixture with an
+explicit CC-BY grant, then the native client fetches the catalog, plays the public
+track and shows the public origin context. Because both instances are loopback HTTP,
+a **debug-only** exact canonical→loopback transport override is used; release builds
+ignore it and the advertised identity is still validated. This is not Internet TLS
+or two-host validation. Evidence:`target/checks/native-public-peer5/`
+(`native-public-dark.png`), with fmt, strict native+WASM Clippy and23/25 desktop
+tests. No schema, server HTTP, web app or original-data/runtime change.
+
 ## Web sleep timer0.12 — verified browser increment (2026-10-18, `49b7d8c`)
 
 A root-owned sleep timer is available from the playback queue: 5/15/30/60 minutes,
@@ -98,7 +121,7 @@ CARGO_BUILD_JOBS=2 cargo clippy --locked --workspace --all-targets -- -D warning
 CARGO_BUILD_JOBS=2 cargo clippy --locked -p vela-web --target wasm32-unknown-unknown -- -D warnings
 CARGO_BUILD_JOBS=2 cargo build --locked -p vela-server
 CARGO_BUILD_JOBS=2 cargo build --locked -p vela-desktop --example native-ui-qa --features native-qa
-python3 scripts/verify_native_client.py --evidence target/checks/native-resume-$(date +%s) --test-audio-engine
+python3 scripts/verify_native_client.py --evidence target/checks/native-resume-$(date +%s) --test-audio-engine --test-peer
 CARGO_BUILD_JOBS=2 VELA_WASM_BINDGEN="$PWD/target/tools/wasm-bindgen-0.2.129-x86_64-unknown-linux-musl/wasm-bindgen" scripts/build-web.sh
 (cd tests/browser && npx playwright test --browser=chromium)   # separate fresh server/data
 ```
