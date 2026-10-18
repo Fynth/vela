@@ -44,6 +44,7 @@ def main():
                 target.parent.mkdir(parents=True, exist_ok=True)
                 with archive.extractfile(entry) as source, target.open('xb') as output:
                     output.write(source.read())
+                os.chmod(target, entry.mode & 0o777)
         build = dict(line.split('=', 1) for line in (root / 'BUILD.txt').read_text().splitlines() if '=' in line)
         if files != expected:
             raise RuntimeError('Desktop package contents do not match the review manifest')
