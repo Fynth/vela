@@ -1,6 +1,12 @@
 //! One explicitly selected Vela origin. Credentials remain in Rust memory;
 //! owned originals become playable only after bounded size/hash verification.
-use crate::{DownloadProgress, PreparedAudio};
+//!
+//! A complete-file cache of the authenticated account on this origin is reused when,
+//! and only when, the origin itself re-authorizes the current session for the same
+//! strong validator and the cached file still hashes to it from the descriptor the
+//! decoder receives. Cached bytes are never a grant: a denial, a changed validator or
+//! a local digest mismatch falls back to the existing authorized full GET.
+use crate::{DownloadProgress, PreparedAudio, media_cache};
 use futures_util::StreamExt;
 use reqwest::{Client, Method, Response, StatusCode, header};
 use serde::de::DeserializeOwned;
@@ -27,6 +33,9 @@ const NETWORK_ERROR: &str = "Unable to reach the Vela server. Check the connecti
 const AUDIO_ERROR: &str =
     "Unable to prepare private temporary audio. Check available disk space and retry.";
 const PREPARE_BUSY: &str = "Busy: another track is preparing. Cancel it first.";
+/// Bounded HEAD revalidation. A short permission/validator check may be re-sent for a
+/// reusable cache hit; it never replaces the origin's own authorization.
+const REVALIDATE_TIMEOUT: Duration = Duration::from_secs(20);
 pub(crate) const MAX_MEDIA_BYTES: u64 = 250 * 1024 * 1024;
 const MAX_JSON_BYTES: usize = 4 * 1024 * 1024;
 const FILE_CHUNK: usize = 64 * 1024;
@@ -40,12 +49,16 @@ pub struct VelaClient {
 struct Inner {
     http: Client,
     origin: Url,
+    /// The authenticated account this client's catalog, queue and cache belong to.
+    user_id: String,
     session: Mutex<Option<Session>>,
     token: String,
     lifetime: CancellationToken,
     preparing: Arc<Semaphore>,
     #[cfg(test)]
     temporary_directory: Option<PathBuf>,
+    #[cfg(test)]
+    cache_directory: Option<PathBuf>,
 }
 #[derive(Clone)]
 struct Session {
@@ -123,12 +136,17 @@ impl VelaClient {
                 inner: Arc::new(Inner {
                     http,
                     origin,
+                    // The cache namespace is the authenticated account, never a
+                    // username or a session token.
+                    user_id: auth.user.id.clone(),
                     session: Mutex::new(Some(session)),
                     token: token.to_owned(),
                     lifetime,
                     preparing: Arc::new(Semaphore::new(1)),
                     #[cfg(test)]
                     temporary_directory: None,
+                    #[cfg(test)]
+                    cache_directory: None,
                 }),
             },
             auth,
@@ -194,12 +212,17 @@ impl VelaClient {
                 inner: Arc::new(Inner {
                     http,
                     origin,
+                    // The cache namespace is the authenticated account, never a
+                    // username or a session token.
+                    user_id: auth.user.id.clone(),
                     session: Mutex::new(Some(session)),
                     token,
                     lifetime,
                     preparing: Arc::new(Semaphore::new(1)),
                     #[cfg(test)]
                     temporary_directory: None,
+                    #[cfg(test)]
+                    cache_directory: None,
                 }),
             },
             auth,
@@ -255,6 +278,15 @@ impl VelaClient {
         .await
     }
 
+    /// Resolve one owner-authorized original for the single native decoder.
+    ///
+    /// Order: (a) the current session re-authorizes the track with a bounded HEAD and
+    /// returns the authoritative validators; (b) a cached complete original of this
+    /// account on this origin is reused only when its strong validator matches *and*
+    /// the cached file still hashes to it from the descriptor handed to the decoder;
+    /// (c) otherwise the existing authorized full GET verifies size plus BLAKE3 and
+    /// warms the cache. A denial (401/403/404) returns the same error and never touches
+    /// the cache, and an origin that cannot answer HEAD still gets the full GET.
     pub async fn prepare(
         &self,
         track: &Track,
@@ -271,6 +303,9 @@ impl VelaClient {
         }
         let session = self.session()?;
         let expected = track.size_bytes as u64;
+        // The reusable cache is optional: without a private cache root the client keeps
+        // the verified full-transfer behavior and sends no revalidation request.
+        let scope = self.cache_scope(&track.id);
         bounded(
             &cancel,
             &self.inner.lifetime,
@@ -289,6 +324,33 @@ impl VelaClient {
                     received_bytes: 0,
                     total_bytes: expected,
                 });
+                // (a) Re-authorize with the current session and request the
+                // authoritative validators. Cached bytes are never consulted before
+                // the origin itself answers for this account at this moment.
+                let mut validator = None;
+                if scope.is_some() {
+                    match self.stream_validators(&track.id, &session).await? {
+                        Some((etag, advertised))
+                            if advertised.is_none_or(|size| size == expected) =>
+                        {
+                            validator = Some(etag);
+                        }
+                        // An origin that cannot answer HEAD, or a HEAD that disagrees
+                        // about the size, is decided by the authorized GET below.
+                        Some(_) | None => {}
+                    }
+                }
+                if let (Some(scope), Some(etag)) = (&scope, &validator) {
+                    // (b) A hit re-hashes its own bytes from the very descriptor the
+                    // decoder receives, so a hit is a verified complete original.
+                    if let Some(cached) = scope.open_verified(expected, etag, &cancel).await? {
+                        progress.send_replace(DownloadProgress {
+                            received_bytes: expected,
+                            total_bytes: expected,
+                        });
+                        return Ok(cached);
+                    }
+                }
                 let response = self
                     .request(
                         Method::GET,
@@ -340,6 +402,8 @@ impl VelaClient {
                         None
                     }
                 };
+                // The verified fingerprint also authorizes the cache warm-up below.
+                let verified_hash = hash.clone();
                 let writer = tokio::task::spawn_blocking(move || {
                     write_original(receiver, expected, hash, stop, permit, directory)
                 });
@@ -368,7 +432,14 @@ impl VelaClient {
                     return Err("The audio transfer ended before the original was complete.".into());
                 }
                 drop(sender);
-                writer.await.map_err(|_| AUDIO_ERROR.to_owned())?
+                let prepared = writer.await.map_err(|_| AUDIO_ERROR.to_owned())??;
+                // Warm the reusable cache from the lease that was just verified. This is
+                // best effort by contract: a full cache, a full disk or a canceled copy
+                // must never fail or invalidate playback that already succeeded.
+                if let Some(scope) = &scope {
+                    scope.store(&prepared, &verified_hash, &cancel).await;
+                }
+                Ok(prepared)
             },
         )
         .await
@@ -1209,6 +1280,163 @@ impl VelaClient {
             request
         }
     }
+
+    /// Bounded HEAD revalidation of the stream endpoint for the current session.
+    ///
+    /// `Ok(Some((etag, declared_length)))` means the origin itself authorized this
+    /// representation now; `Ok(None)` means the origin cannot revalidate a reusable
+    /// hit (HEAD unsupported, unusable headers, transport failure) and the caller must
+    /// use the full authorized GET. A denial is returned as the same error the GET
+    /// produces, so cached bytes are never consulted for it.
+    async fn stream_validators(
+        &self,
+        track_id: &str,
+        session: &Session,
+    ) -> Result<Option<(String, Option<u64>)>, String> {
+        let request = self
+            .request(
+                Method::HEAD,
+                endpoint(
+                    &self.inner.origin,
+                    &format!("/api/tracks/{track_id}/stream"),
+                ),
+                session,
+            )
+            .header(header::ACCEPT_ENCODING, "identity");
+        let response = match tokio::time::timeout(REVALIDATE_TIMEOUT, request.send()).await {
+            Ok(Ok(response)) => response,
+            // Transport failures and deadlines are not a rejection: the full GET below
+            // is the authoritative check and reports the honest error.
+            Ok(Err(_)) | Err(_) => return Ok(None),
+        };
+        let status = response.status();
+        if matches!(
+            status,
+            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN | StatusCode::NOT_FOUND
+        ) {
+            return Err(status_error(status));
+        }
+        if status != StatusCode::OK {
+            // 405/501 and any other answer mean "no reusable hit"; the GET decides.
+            return Ok(None);
+        }
+        if response.headers().contains_key(header::CONTENT_RANGE)
+            || response
+                .headers()
+                .get(header::CONTENT_ENCODING)
+                .is_some_and(|encoding| encoding != "identity")
+        {
+            return Ok(None);
+        }
+        // `Response::content_length` reports the received body size hint, which is empty
+        // for HEAD, so the declared header is the only honest size of a HEAD answer.
+        let declared = response
+            .headers()
+            .get(header::CONTENT_LENGTH)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse::<u64>().ok());
+        let etag = response
+            .headers()
+            .get(header::ETAG)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.strip_prefix('"'))
+            .and_then(|value| value.strip_suffix('"'))
+            .filter(|value| lower_hex64(value))
+            .map(str::to_owned);
+        Ok(etag.map(|etag| (etag, declared)))
+    }
+
+    /// The reusable cache namespace of this client, or `None` when it is unavailable
+    /// (no cache root, or a platform whose lease is not a descriptor). `None` keeps the
+    /// verified full-transfer path and sends no revalidation request.
+    fn cache_scope(&self, track_id: &str) -> Option<CacheScope> {
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = track_id;
+            None
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let key = media_cache::CacheKey::new(
+                self.inner.origin.as_str(),
+                &self.inner.user_id,
+                track_id,
+            )
+            .ok()?;
+            Some(CacheScope {
+                root: self.cache_root().ok()?,
+                key,
+            })
+        }
+    }
+
+    fn cache_root(&self) -> Result<PathBuf, String> {
+        #[cfg(test)]
+        if let Some(directory) = &self.inner.cache_directory {
+            return Ok(directory.clone());
+        }
+        media_cache::default_root()
+    }
+}
+
+/// One account's reusable complete-file cache on one origin.
+struct CacheScope {
+    root: PathBuf,
+    key: media_cache::CacheKey,
+}
+
+impl CacheScope {
+    /// A verified hit, or `Ok(None)` for an honest miss. Any denial, mismatch or
+    /// corruption is a miss; the caller then re-reads the origin.
+    async fn open_verified(
+        &self,
+        expected: u64,
+        etag: &str,
+        cancel: &CancellationToken,
+    ) -> Result<Option<Arc<PreparedAudio>>, String> {
+        let root = self.root.clone();
+        let key = self.key.clone();
+        let etag = etag.to_owned();
+        let probe = cancel.clone();
+        // Blocking worker: hashing up to 250 MiB never runs on the UI thread.
+        let lookup = tokio::task::spawn_blocking(move || {
+            media_cache::open_verified(&root, &key, expected, &etag, &|| probe.is_cancelled())
+        })
+        .await
+        .map_err(|_| AUDIO_ERROR.to_owned())??;
+        let Some(cached) = lookup else {
+            return Ok(None);
+        };
+        #[cfg(target_os = "linux")]
+        {
+            // The lease is the very descriptor that was hashed and rewound.
+            Ok(Some(Arc::new(PreparedAudio::from_file(
+                cached.file,
+                cached.length_bytes,
+            ))))
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            // Outside Linux the lease is a named private temporary file, so a cached
+            // entry cannot become a decoder lease and the verified GET is used.
+            let _ = cached;
+            Ok(None)
+        }
+    }
+
+    /// Warm this namespace from an already verified lease. Never fails playback: the
+    /// caller keeps its own lease and any error here is deliberately dropped.
+    async fn store(&self, prepared: &Arc<PreparedAudio>, etag: &str, cancel: &CancellationToken) {
+        let root = self.root.clone();
+        let key = self.key.clone();
+        let original = prepared.clone();
+        let etag = etag.to_owned();
+        let probe = cancel.clone();
+        let _ = tokio::task::spawn_blocking(move || {
+            media_cache::store(&root, &key, &original, &etag, &|| probe.is_cancelled())
+        })
+        .await;
+    }
 }
 
 async fn bounded<T>(
@@ -1273,10 +1501,12 @@ fn endpoint(origin: &Url, path: &str) -> Url {
     url.set_path(path);
     url
 }
-fn canonical_uuid(value: &str) -> bool {
+/// A lower-case canonical UUID. Cache namespaces never accept anything else.
+pub(crate) fn canonical_uuid(value: &str) -> bool {
     uuid::Uuid::parse_str(value).is_ok_and(|id| id.to_string() == value)
 }
-fn lower_hex64(value: &str) -> bool {
+/// A lower-case 64-hex BLAKE3 value (fingerprint, ETag, digest, session token).
+pub(crate) fn lower_hex64(value: &str) -> bool {
     value.len() == 64
         && value
             .bytes()
@@ -1670,7 +1900,14 @@ mod tests {
                 }),
             )
     }
-    async fn fixture_client(http: &HttpFixture, directory: &tempfile::TempDir) -> VelaClient {
+    /// A fixture client whose private temporary originals and reusable media cache are
+    /// both isolated under caller-owned directories: no test reads or writes a live
+    /// `$XDG_CACHE_HOME`/`$XDG_DATA_HOME` and every test can assert its own leftovers.
+    async fn fixture_client(
+        http: &HttpFixture,
+        directory: &tempfile::TempDir,
+        cache: &tempfile::TempDir,
+    ) -> VelaClient {
         let (mut client, _) = VelaClient::connect(
             &http.origin,
             "fixture".into(),
@@ -1679,9 +1916,30 @@ mod tests {
         )
         .await
         .unwrap_or_else(|error| panic!("fixture login failed: {error}"));
-        Arc::get_mut(&mut client.inner).unwrap().temporary_directory =
-            Some(directory.path().to_owned());
+        {
+            let inner = Arc::get_mut(&mut client.inner).unwrap();
+            inner.temporary_directory = Some(directory.path().to_owned());
+            inner.cache_directory = Some(cache.path().to_owned());
+        }
         client
+    }
+
+    /// The media cache identity the client derives for one fixture origin/account/track.
+    fn cache_key(origin: &str, account: &str, track_id: &str) -> media_cache::CacheKey {
+        media_cache::CacheKey::new(
+            canonical_origin(origin).unwrap().as_str(),
+            account,
+            track_id,
+        )
+        .unwrap()
+    }
+
+    fn sample_track_with(id: &str, length: usize) -> Track {
+        Track {
+            id: id.into(),
+            size_bytes: length as i64,
+            ..sample_track()
+        }
     }
     async fn eventually(mut condition: impl FnMut() -> bool) {
         tokio::time::timeout(Duration::from_secs(3), async {
@@ -1704,8 +1962,13 @@ mod tests {
         let node = Node::new().await;
         let (mut client, auth) = node.connect().await;
         let temporary = tempfile::tempdir().unwrap();
-        Arc::get_mut(&mut client.inner).unwrap().temporary_directory =
-            Some(temporary.path().to_owned());
+        let cache = tempfile::tempdir().unwrap();
+        {
+            let inner = Arc::get_mut(&mut client.inner).unwrap();
+            inner.temporary_directory = Some(temporary.path().to_owned());
+            // A separate private root keeps a live `$XDG_CACHE_HOME` untouched.
+            inner.cache_directory = Some(cache.path().to_owned());
+        }
         assert!(canonical_uuid(&auth.user.id));
         assert!(lower_hex64(&auth.csrf_token));
         let catalog = client
@@ -1900,6 +2163,101 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn real_vela_server_reauthorizes_then_reuses_the_complete_original() {
+        let node = Node::new().await;
+        let (mut client, auth) = node.connect().await;
+        let temporary = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        {
+            let inner = Arc::get_mut(&mut client.inner).unwrap();
+            inner.temporary_directory = Some(temporary.path().to_owned());
+            inner.cache_directory = Some(cache.path().to_owned());
+        }
+        let key = cache_key(&node.http.origin, &auth.user.id, &node.own.id);
+        let cached_audio = media_cache::audio_path(cache.path(), &key);
+        let cached_sidecar = media_cache::sidecar_path(cache.path(), &key);
+
+        // Cold: one authorized full transfer, verified, then published to the cache.
+        let cold = client
+            .prepare(&node.own, CancellationToken::new(), progress().0)
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(cold.path()).unwrap(), AUDIO);
+        assert_eq!(cold.length_bytes, AUDIO.len() as u64);
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::unix::fs::MetadataExt;
+            assert_eq!(
+                cold.path().metadata().unwrap().nlink(),
+                0,
+                "a cold lease stays an unnamed private original"
+            );
+        }
+        drop(cold);
+        assert_eq!(std::fs::read(&cached_audio).unwrap(), AUDIO);
+        let sidecar: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&cached_sidecar).unwrap()).unwrap();
+        assert_eq!(sidecar["version"], 1);
+        assert_eq!(
+            sidecar["origin"],
+            canonical_origin(&node.http.origin).unwrap().as_str(),
+            "the namespace records the canonical origin it belongs to"
+        );
+        assert_eq!(sidecar["account_id"], auth.user.id);
+        assert_eq!(sidecar["track_id"], node.own.id);
+        assert_eq!(sidecar["size_bytes"], AUDIO.len() as u64);
+        // The sidecar digest is the authoritative origin ETag, which the real server
+        // computes as the BLAKE3 of the managed original.
+        assert_eq!(sidecar["etag"], blake3::hash(AUDIO).to_hex().as_str());
+        assert_eq!(sidecar["digest"], sidecar["etag"]);
+        assert!(sidecar["saved_at"].as_u64().unwrap() >= 1);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = |path: &std::path::Path| {
+                std::fs::metadata(path).unwrap().permissions().mode() & 0o777
+            };
+            assert_eq!(mode(&media_cache::account_root(cache.path(), &key)), 0o700);
+            assert_eq!(mode(&cached_audio), 0o600);
+            assert_eq!(mode(&cached_sidecar), 0o600);
+        }
+
+        // The second resolve revalidates with a bounded HEAD and then hands back the
+        // published cache file itself instead of another full transfer.
+        let (sender, receiver) = progress();
+        let warm = client
+            .prepare(&node.own, CancellationToken::new(), sender)
+            .await
+            .unwrap();
+        assert_eq!(receiver.borrow().received_bytes, AUDIO.len() as u64);
+        assert_eq!(std::fs::read(warm.path()).unwrap(), AUDIO);
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::unix::fs::MetadataExt;
+            let lease = warm.path().metadata().unwrap();
+            let published = cached_audio.metadata().unwrap();
+            assert_eq!(lease.nlink(), 1, "a hit leases the published cache file");
+            assert_eq!(
+                (lease.dev(), lease.ino()),
+                (published.dev(), published.ino()),
+                "a hit decodes the very file the cache verified"
+            );
+        }
+        drop(warm);
+        assert_eq!(std::fs::read(&cached_audio).unwrap(), AUDIO);
+
+        // A foreign track is denied by the origin first and never reads this namespace.
+        assert!(
+            client
+                .prepare(&node.foreign, CancellationToken::new(), progress().0)
+                .await
+                .is_err()
+        );
+        assert_eq!(std::fs::read(&cached_audio).unwrap(), AUDIO);
+        assert_eq!(std::fs::read_dir(temporary.path()).unwrap().count(), 0);
+    }
+
     #[test]
     fn server_origins_and_closed_identifiers_reject_credential_and_path_injection() {
         for origin in [
@@ -1956,10 +2314,16 @@ mod tests {
         let handler_dropped = dropped.clone();
         let router = Router::new().route(
             &format!("/api/tracks/{TRACK_ID}/stream"),
-            get(move || {
+            get(move |method: Method| {
                 let bytes = bytes.clone();
                 let fingerprint = fingerprint.clone();
-                let slow = handler_calls.fetch_add(1, Ordering::SeqCst) != 1;
+                // Only the body transfers are numbered: the cache revalidation of the
+                // same route must not change which GET is the deliberately slow one.
+                let slow = if method == Method::HEAD {
+                    false
+                } else {
+                    handler_calls.fetch_add(1, Ordering::SeqCst) != 1
+                };
                 let dropped = handler_dropped.clone();
                 async move {
                     let body = if slow {
@@ -1985,7 +2349,8 @@ mod tests {
             }),
         );
         let http = HttpFixture::start(with_login(router)).await;
-        let client = fixture_client(&http, &directory).await;
+        let cache = tempfile::tempdir().unwrap();
+        let client = fixture_client(&http, &directory, &cache).await;
         let track = sample_track();
         let (sender, mut receiver) = progress();
         let token = CancellationToken::new();
@@ -2042,6 +2407,9 @@ mod tests {
             .unwrap();
         drop(prepared);
         assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
+        // The previous prepare warmed the reusable cache. This phase deliberately needs
+        // an *in-flight* transfer, so the warm entry is dropped instead of being served.
+        std::fs::remove_dir_all(cache.path()).unwrap();
         dropped.store(false, Ordering::SeqCst);
         let (sender, mut receiver) = progress();
         let running_client = client.clone();
@@ -2123,7 +2491,8 @@ mod tests {
         );
         let http = HttpFixture::start(with_login(router)).await;
         let directory = tempfile::tempdir().unwrap();
-        let client = fixture_client(&http, &directory).await;
+        let cache = tempfile::tempdir().unwrap();
+        let client = fixture_client(&http, &directory, &cache).await;
         let error = client
             .prepare(&sample_track(), CancellationToken::new(), progress().0)
             .await
@@ -2172,7 +2541,8 @@ mod tests {
         );
         let http = HttpFixture::start(with_login(router)).await;
         let directory = tempfile::tempdir().unwrap();
-        let client = fixture_client(&http, &directory).await;
+        let cache = tempfile::tempdir().unwrap();
+        let client = fixture_client(&http, &directory, &cache).await;
         let cancel = CancellationToken::new();
         let running_client = client.clone();
         let running_cancel = cancel.clone();
@@ -2211,7 +2581,8 @@ mod tests {
                 }),
             );
             let http = HttpFixture::start(with_login(router)).await;
-            let client = fixture_client(&http, &directory).await;
+            let cache = tempfile::tempdir().unwrap();
+            let client = fixture_client(&http, &directory, &cache).await;
             assert_eq!(
                 client
                     .tracks(None, None, false, CancellationToken::new())
@@ -2273,7 +2644,8 @@ mod tests {
             );
             let http = HttpFixture::start(with_login(router)).await;
             let directory = tempfile::tempdir().unwrap();
-            let client = fixture_client(&http, &directory).await;
+            let cache = tempfile::tempdir().unwrap();
+            let client = fixture_client(&http, &directory, &cache).await;
             assert!(
                 client
                     .prepare(&sample_track(), CancellationToken::new(), progress().0)
@@ -2309,7 +2681,8 @@ mod tests {
             );
             let http = HttpFixture::start(with_login(router)).await;
             let directory = tempfile::tempdir().unwrap();
-            let client = fixture_client(&http, &directory).await;
+            let cache = tempfile::tempdir().unwrap();
+            let client = fixture_client(&http, &directory, &cache).await;
             assert_eq!(
                 client
                     .tracks(None, None, false, CancellationToken::new())
@@ -2318,5 +2691,356 @@ mod tests {
                 INVALID_RESPONSE
             );
         }
+    }
+
+    /// Byte-level evidence of what one stream route actually transferred.
+    #[derive(Default)]
+    struct StreamCounters {
+        gets: AtomicUsize,
+        heads: AtomicUsize,
+        body_bytes: AtomicUsize,
+    }
+
+    /// Two independently counted stream routes, so a cached replay is measured by
+    /// transferred body bytes instead of by a shorter spinner.
+    fn tracked_streams(tracks: &[(String, Vec<u8>, Arc<StreamCounters>)]) -> Router {
+        let mut router = Router::new();
+        for (id, bytes, counters) in tracks {
+            let bytes = bytes.clone();
+            let fingerprint = blake3::hash(&bytes).to_hex().to_string();
+            let counters = counters.clone();
+            router = router.route(
+                &format!("/api/tracks/{id}/stream"),
+                get(move |method: Method, headers: HeaderMap| {
+                    let bytes = bytes.clone();
+                    let fingerprint = fingerprint.clone();
+                    let counters = counters.clone();
+                    async move {
+                        // A revalidation is an authenticated request, exactly like the GET.
+                        assert_eq!(
+                            headers[header::COOKIE],
+                            format!("vela_session={}", "a".repeat(64)),
+                            "revalidation must carry the current session"
+                        );
+                        if method == Method::HEAD {
+                            counters.heads.fetch_add(1, Ordering::SeqCst);
+                        } else {
+                            counters.gets.fetch_add(1, Ordering::SeqCst);
+                            counters.body_bytes.fetch_add(bytes.len(), Ordering::SeqCst);
+                        }
+                        HttpResponse::builder()
+                            .header(header::ETAG, format!("\"{fingerprint}\""))
+                            .header(header::CONTENT_LENGTH, bytes.len())
+                            .body(Body::from(bytes))
+                            .unwrap()
+                    }
+                }),
+            );
+        }
+        router
+    }
+
+    #[tokio::test]
+    async fn a_b_a_reuses_the_complete_original_without_a_second_body_transfer() {
+        let first_bytes = vec![11_u8; 16 * 1024];
+        let second_bytes = vec![22_u8; 12 * 1024];
+        let first_counters = Arc::new(StreamCounters::default());
+        let second_counters = Arc::new(StreamCounters::default());
+        let router = tracked_streams(&[
+            (
+                "20000000-0000-4000-8000-0000000000a1".to_owned(),
+                first_bytes.clone(),
+                first_counters.clone(),
+            ),
+            (
+                "20000000-0000-4000-8000-0000000000b2".to_owned(),
+                second_bytes.clone(),
+                second_counters.clone(),
+            ),
+        ]);
+        let http = HttpFixture::start(with_login(router)).await;
+        let temporary = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let client = fixture_client(&http, &temporary, &cache).await;
+        let first = sample_track_with("20000000-0000-4000-8000-0000000000a1", first_bytes.len());
+        let second = sample_track_with("20000000-0000-4000-8000-0000000000b2", second_bytes.len());
+
+        // A: cold, one authorized full transfer.
+        let prepared = client
+            .prepare(&first, CancellationToken::new(), progress().0)
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(prepared.path()).unwrap(), first_bytes);
+        drop(prepared);
+        // B: cold, one authorized full transfer.
+        let prepared = client
+            .prepare(&second, CancellationToken::new(), progress().0)
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(prepared.path()).unwrap(), second_bytes);
+        drop(prepared);
+        assert_eq!(first_counters.gets.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            first_counters.body_bytes.load(Ordering::SeqCst),
+            first_bytes.len()
+        );
+        assert_eq!(second_counters.gets.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            second_counters.body_bytes.load(Ordering::SeqCst),
+            second_bytes.len()
+        );
+
+        // A again: the origin re-authorizes, and the verified local bytes are reused.
+        let (sender, receiver) = progress();
+        let warm = client
+            .prepare(&first, CancellationToken::new(), sender)
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(warm.path()).unwrap(), first_bytes);
+        assert_eq!(
+            receiver.borrow().received_bytes,
+            first_bytes.len() as u64,
+            "a warm hit reports the complete original, not a partial transfer"
+        );
+        drop(warm);
+        assert_eq!(
+            first_counters.gets.load(Ordering::SeqCst),
+            1,
+            "A→B→A must not re-download A's body"
+        );
+        assert_eq!(
+            first_counters.body_bytes.load(Ordering::SeqCst),
+            first_bytes.len()
+        );
+        assert_eq!(
+            first_counters.heads.load(Ordering::SeqCst),
+            2,
+            "a hit is still re-authorized by the origin"
+        );
+        assert_eq!(second_counters.gets.load(Ordering::SeqCst), 1);
+
+        // Both complete originals are cached for this account+origin namespace only.
+        for (id, expected) in [
+            ("20000000-0000-4000-8000-0000000000a1", &first_bytes),
+            ("20000000-0000-4000-8000-0000000000b2", &second_bytes),
+        ] {
+            let key = cache_key(&http.origin, USER_ID, id);
+            assert_eq!(
+                std::fs::read(media_cache::audio_path(cache.path(), &key)).unwrap(),
+                *expected
+            );
+            assert!(media_cache::sidecar_path(cache.path(), &key).is_file());
+        }
+        // The decoder leases stayed unnamed private originals; nothing is left behind.
+        assert_eq!(std::fs::read_dir(temporary.path()).unwrap().count(), 0);
+    }
+
+    #[tokio::test]
+    async fn cached_bytes_never_answer_a_denied_or_changed_origin() {
+        let original = vec![5_u8; 8 * 1024];
+        let counters = Arc::new(StreamCounters::default());
+        // 200 means the origin currently authorizes this representation.
+        let head_status = Arc::new(AtomicUsize::new(200));
+        let representation = Arc::new(Mutex::new(original.clone()));
+        let router = {
+            let counters = counters.clone();
+            let head_status = head_status.clone();
+            let representation = representation.clone();
+            Router::new().route(
+                &format!("/api/tracks/{TRACK_ID}/stream"),
+                get(move |method: Method| {
+                    let counters = counters.clone();
+                    let head_status = head_status.clone();
+                    let representation = representation.clone();
+                    async move {
+                        let bytes = representation.lock().unwrap().clone();
+                        let fingerprint = blake3::hash(&bytes).to_hex().to_string();
+                        if method == Method::HEAD {
+                            counters.heads.fetch_add(1, Ordering::SeqCst);
+                            let status =
+                                StatusCode::from_u16(head_status.load(Ordering::SeqCst) as u16)
+                                    .unwrap();
+                            if status != StatusCode::OK {
+                                return HttpResponse::builder()
+                                    .status(status)
+                                    .body(Body::empty())
+                                    .unwrap();
+                            }
+                            return HttpResponse::builder()
+                                .header(header::ETAG, format!("\"{fingerprint}\""))
+                                .header(header::CONTENT_LENGTH, bytes.len())
+                                .body(Body::empty())
+                                .unwrap();
+                        }
+                        counters.gets.fetch_add(1, Ordering::SeqCst);
+                        counters.body_bytes.fetch_add(bytes.len(), Ordering::SeqCst);
+                        HttpResponse::builder()
+                            .header(header::ETAG, format!("\"{fingerprint}\""))
+                            .header(header::CONTENT_LENGTH, bytes.len())
+                            .body(Body::from(bytes))
+                            .unwrap()
+                    }
+                }),
+            )
+        };
+        let http = HttpFixture::start(with_login(router)).await;
+        let temporary = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let client = fixture_client(&http, &temporary, &cache).await;
+        let track = sample_track_with(TRACK_ID, original.len());
+        let key = cache_key(&http.origin, USER_ID, TRACK_ID);
+
+        // Cold: the origin authorizes the representation once and the cache warms.
+        let prepared = client
+            .prepare(&track, CancellationToken::new(), progress().0)
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(prepared.path()).unwrap(), original);
+        drop(prepared);
+        assert_eq!(counters.gets.load(Ordering::SeqCst), 1);
+        let cached = std::fs::read(media_cache::audio_path(cache.path(), &key)).unwrap();
+        assert_eq!(cached, original);
+
+        // A denial is the same error the GET would give, never a cached success.
+        for (denied, status) in [401_u16, 403, 404].into_iter().enumerate() {
+            let denied = denied + 1;
+            head_status.store(status as usize, Ordering::SeqCst);
+            assert_eq!(
+                client
+                    .prepare(&track, CancellationToken::new(), progress().0)
+                    .await
+                    .unwrap_err(),
+                status_error(StatusCode::from_u16(status).unwrap())
+            );
+            assert_eq!(
+                counters.gets.load(Ordering::SeqCst),
+                1,
+                "a denied request must not transfer or reuse cached bytes"
+            );
+            assert_eq!(
+                counters.heads.load(Ordering::SeqCst),
+                denied + 1,
+                "every candidate hit is revalidated by the origin"
+            );
+            assert_eq!(
+                std::fs::read(media_cache::audio_path(cache.path(), &key)).unwrap(),
+                cached,
+                "a denial must not delete or serve the local entry"
+            );
+        }
+        // An expired local digest cannot hide a revocation either: the cache is only
+        // consulted after the origin answered 200 for the current session.
+
+        // An origin without HEAD support still gets the full authorized GET.
+        head_status.store(405, Ordering::SeqCst);
+        let prepared = client
+            .prepare(&track, CancellationToken::new(), progress().0)
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(prepared.path()).unwrap(), original);
+        drop(prepared);
+        assert_eq!(
+            counters.gets.load(Ordering::SeqCst),
+            2,
+            "HEAD 405 falls back to the authorized GET"
+        );
+
+        // A changed validator is a different representation: never the old bytes.
+        head_status.store(200, Ordering::SeqCst);
+        let replacement = vec![6_u8; 8 * 1024 + 4];
+        *representation.lock().unwrap() = replacement.clone();
+        let changed = sample_track_with(TRACK_ID, replacement.len());
+        let prepared = client
+            .prepare(&changed, CancellationToken::new(), progress().0)
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(prepared.path()).unwrap(), replacement);
+        drop(prepared);
+        assert_eq!(
+            counters.gets.load(Ordering::SeqCst),
+            3,
+            "a changed validator must re-read the origin"
+        );
+        assert_eq!(
+            std::fs::read(media_cache::audio_path(cache.path(), &key)).unwrap(),
+            replacement,
+            "the replacement is published as the new cached representation"
+        );
+        let superseded = blake3::hash(&original).to_hex();
+        assert!(
+            media_cache::open_verified(
+                cache.path(),
+                &key,
+                original.len() as u64,
+                superseded.as_str(),
+                &|| false,
+            )
+            .unwrap()
+            .is_none(),
+            "the superseded representation must not be reusable"
+        );
+    }
+
+    #[tokio::test]
+    async fn tampered_cached_bytes_are_downloaded_again_instead_of_served() {
+        let original = vec![7_u8; 4 * 1024];
+        let counters = Arc::new(StreamCounters::default());
+        let router = tracked_streams(&[(TRACK_ID.to_owned(), original.clone(), counters.clone())]);
+        let http = HttpFixture::start(with_login(router)).await;
+        let temporary = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let client = fixture_client(&http, &temporary, &cache).await;
+        let track = sample_track_with(TRACK_ID, original.len());
+        let key = cache_key(&http.origin, USER_ID, TRACK_ID);
+        let audio = media_cache::audio_path(cache.path(), &key);
+        let sidecar = media_cache::sidecar_path(cache.path(), &key);
+
+        let prepared = client
+            .prepare(&track, CancellationToken::new(), progress().0)
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(prepared.path()).unwrap(), original);
+        drop(prepared);
+
+        // Same-size tampering is rejected by the local BLAKE3 and re-downloaded.
+        let mut tampered = original.clone();
+        tampered[10] ^= 0xff;
+        std::fs::write(&audio, &tampered).unwrap();
+        let prepared = client
+            .prepare(&track, CancellationToken::new(), progress().0)
+            .await
+            .unwrap();
+        assert_eq!(
+            std::fs::read(prepared.path()).unwrap(),
+            original,
+            "a tampered cache entry must never reach the decoder"
+        );
+        drop(prepared);
+        assert_eq!(counters.gets.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            std::fs::read(&audio).unwrap(),
+            original,
+            "the republished entry is healthy again"
+        );
+
+        // Rewriting the sidecar as well cannot forge a hit: the origin's ETag is the
+        // authoritative validator, so local bytes never outvote it.
+        let tampered_digest = blake3::hash(&tampered).to_hex().to_string();
+        std::fs::write(&audio, &tampered).unwrap();
+        let mut record: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&sidecar).unwrap()).unwrap();
+        record["digest"] = serde_json::Value::String(tampered_digest);
+        std::fs::write(&sidecar, serde_json::to_vec(&record).unwrap()).unwrap();
+        let prepared = client
+            .prepare(&track, CancellationToken::new(), progress().0)
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(prepared.path()).unwrap(), original);
+        drop(prepared);
+        assert_eq!(
+            counters.gets.load(Ordering::SeqCst),
+            3,
+            "a self-consistent tampered pair must still be re-downloaded"
+        );
     }
 }

@@ -1,6 +1,9 @@
 //! Native client services. Server/database policy stays in the existing server.
 pub mod audio;
 pub mod client;
+/// Crate-internal: the account/origin-scoped complete-file playback cache used by
+/// `client::prepare`. It owns no public DTO, grant or audio output authority.
+mod media_cache;
 pub mod mpris;
 pub mod offline;
 pub mod peers;
