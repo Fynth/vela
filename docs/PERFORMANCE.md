@@ -261,3 +261,60 @@ has an8-transfer sub-budget within16 total and uses the existing64KiB file buffe
 Cancellation/permit and bounded parser tests establish policy, not p50/p95/p99,
 concurrent listener capacity or Internet latency. No new performance-superiority,
 audio-quality, native/background or large public-network measurement is claimed.
+
+## Phase 0 baseline: 100k metadata/FTS and isolated HTTP reads (2026-10-18)
+
+New reproducible slices for the resilience/scale plan, executed on the same host
+(AMD Ryzen7 8845HS, 16 logical CPUs, ~14.9GiB, Linux x86_64/CachyOS7.2.10-1,
+glibc2.44, Rust1.99.0, SQLite3.54.0). All databases are private temporary
+directories created and removed by the scripts; the live database is never opened.
+
+Commands:
+
+```bash
+python3 scripts/benchmark_catalog.py --sizes 100000 --samples 5 \
+  --output target/checks/phase0/catalog-100k.json
+python3 scripts/benchmark_search.py --tracks 100000 \
+  --output target/checks/phase0/search-100k.json
+python3 scripts/benchmark_http.py --threads 8 --duration 5 --tracks 20 \
+  --output target/checks/phase0/http-bench.json
+```
+
+### 100k metadata/FTS (warm, 5 samples; search 100 samples)
+
+| Query | p50 | p95 |
+|---|---|---|
+| first page (keyset owner) | 0.100 ms | 0.101 ms |
+| keyset midpoint | 0.102 ms | — |
+| favorites page | 1.53 ms | 1.71 ms |
+| FTS rare (baseline) | 7.75 ms | 8.50 ms |
+| FTS rare (adaptive) | 0.100 ms | 0.108 ms |
+| FTS broad (baseline) | 1.32 ms | 1.39 ms |
+| FTS broad (adaptive) | 1.69 ms | 1.75 ms |
+| FTS absent (baseline) | 7.97 ms | 8.45 ms |
+| FTS absent (adaptive) | 0.015 ms | 0.016 ms |
+
+Database: 180,101,120 bytes for 100k tracks, seed 34.1s. Raw reports:
+`target/checks/phase0/catalog-100k.json`, `search-100k.json` (source hashes and
+plans included).
+
+### Isolated HTTP read path (`scripts/benchmark_http.py`)
+
+Fresh server, temporary data dir, throwaway setup account, 20 synthetic 0.5s WAV
+uploads, 8 Python client threads, 5s per endpoint. **Python is the bottleneck**, so
+these are client-bound lower bounds, not server capacity claims; no audio is
+streamed.
+
+| Endpoint | RPS | p50 | p95 | p99 | Errors |
+|---|---|---|---|---|---|
+| /health | 5,978 | 1.26 ms | 2.18 ms | 2.87 ms | 0 |
+| /api/me | 6,056 | 1.26 ms | 2.11 ms | 2.64 ms | 0 |
+| /api/tracks?limit=50 | 4,691 | 1.61 ms | 2.66 ms | 3.42 ms | 0 |
+| /api/search?q=Bench | 1,976 | 2.14 ms | 18.49 ms | 30.09 ms | 0 |
+| /api/albums | 855 | 7.94 ms | 20.88 ms | 31.41 ms | 0 |
+
+Findings to attack next: album/artist grouping is the slowest read group even at
+20 tracks (p95 20.9ms), and search p95 is 8.6x its p50 under Python contention.
+Both need a server-side profile before changing indexes/queries. The HTTP harness
+must be replaced by a native load generator (wrk/k6 or a Rust client) before any
+10k RPS claim; Python client CPU saturates first.

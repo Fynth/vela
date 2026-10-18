@@ -80,6 +80,17 @@ full Chromium41 passed+1 live-import skip in2.0m. Source postdates the live0.12.
 runtime; the next patch will deploy it. Firefox rerun pending. No schema or
 original-data change.
 
+## Phase 0 measurement baseline — verified (2026-10-18)
+
+Executed the first plan phase with reproducible, isolated numbers: 100k metadata
+(first page p50 0.100ms, favorites p50 1.53ms), FTS rare/absent with the adaptive
+bounded plan (0.100/0.015ms p50 vs 7.75/7.97ms baseline), and a new stdlib HTTP read
+harness (`scripts/benchmark_http.py`) that starts a fresh server, creates a throwaway
+account, uploads 20 synthetic WAVs and measures five read endpoints with 8 client
+threads. Raw JSON/logs under `target/checks/phase0/`; full scope and caveats appended
+to PERFORMANCE.md. The HTTP figures are Python-client-bound and explicitly not a
+server capacity claim. No live data/runtime access; no schema change.
+
 ## 0.12.6 session/offline integrity handover — verified (2026-10-18, `4a4351e`)
 
 `target/releases/vela-0.12.6-{x86_64-unknown-linux-gnu,source}.tar.gz` and
