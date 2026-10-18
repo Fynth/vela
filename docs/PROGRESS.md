@@ -67,7 +67,7 @@ downloads two tracks, checks v2 digest manifests and plays/Next/Previous/removes
 server down. Evidence:`target/checks/native-offline-hash2/`;28/30 desktop tests with both
 opt-ins, strict Clippy/fmt. Source postdates0.12.5; no schema/server/web/runtime change.
 
-## 0.12.6 session/offline integrity handover — verified (2026-10-18)
+## 0.12.6 session/offline integrity handover — verified (2026-10-18, `4a4351e`)
 
 `target/releases/vela-0.12.6-{x86_64-unknown-linux-gnu,source}.tar.gz` and
 `vela-0.12.6-SHA256SUMS` were built from commit `7fe1ca0` (native
