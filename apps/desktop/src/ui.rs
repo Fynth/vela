@@ -2028,14 +2028,7 @@ fn start_offline_at(mut ui: Ui, index: usize) {
     let Some(audio) = ui.audio.peek().clone() else {
         return;
     };
-    let path = match crate::offline::audio_path(&account.user.id, &saved.track.id) {
-        Ok(path) => path,
-        Err(error) => {
-            ui.offline_error.set(error);
-            return;
-        }
-    };
-    let prepared = match crate::offline::prepare(&path) {
+    let prepared = match crate::offline::prepare(&account.user.id, &saved.track.id) {
         Ok(prepared) => prepared,
         Err(error) => {
             ui.offline_error.set(error);

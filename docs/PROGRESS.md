@@ -21,6 +21,19 @@ correctly shows "Not established"). No schema, server HTTP, native or original-d
 runtime change. The live runtime was subsequently upgraded to0.12.1; existing
 analysis rows remain spectral-1 until explicitly reanalyzed.
 
+## Native offline BLAKE3 manifests — source verified (2026-10-18)
+
+Offline copies now write v2 manifests carrying the BLAKE3 digest of the copied device
+bytes. Play offline re-hashes the file and refuses a same-size tampered copy before
+creating a decoder; legacy v1 length-only manifests remain readable and gain a digest on
+the next save. Quota/account scoping/0600 modes are unchanged.
+
+Evidence: a unit save/load test asserts a64-hex digest, flips one byte without changing
+length, and verifies prepare refuses the copy; the real server-stopped WebKitGTK journey
+downloads two tracks, checks v2 digest manifests and plays/Next/Previous/removes with the
+server down. Evidence:`target/checks/native-offline-hash2/`;28/30 desktop tests with both
+opt-ins, strict Clippy/fmt. Source postdates0.12.5; no schema/server/web/runtime change.
+
 ## Native opt-in Secret Service session — source verified (2026-10-18, `2e12554`)
 
 Native sign-in now offers an explicit Remember-this-session checkbox (default off). When

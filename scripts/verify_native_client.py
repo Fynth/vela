@@ -336,10 +336,14 @@ def main():
                     raise RuntimeError('Offline fixture did not persist exactly one audio+manifest pair')
                 if any(path.stat().st_mode & 0o077 for path in offline_audio + offline_json):
                     raise RuntimeError('Offline fixture files are not private0600')
+                offline_manifest = json.loads(offline_json[0].read_text())
+                if offline_manifest.get('version') != 2 or len(offline_manifest.get('digest', '')) != 64:
+                    raise RuntimeError('Offline manifest does not carry a v2 BLAKE3 digest')
                 result['offline_copies'] = {
                     'audio': str(offline_audio[0]),
                     'manifest': str(offline_json[0]),
                     'bytes': offline_audio[0].stat().st_size,
+                    'digest': offline_manifest['digest'],
                 }
                 report.write_text(json.dumps(result, indent=2) + '\n')
                 if args.test_peer:

@@ -156,7 +156,10 @@ authorized original path (exact size, BLAKE3 ETag,250MiB cap) and then copies th
 completed unnamed original into an account-scoped private cache. Layout:
 `$XDG_DATA_HOME/vela/offline/<account-id>/<track-id>.audio` plus a versioned JSON
 manifest; directories are0700 and files0600, written via private temp+rename. Limits
-are100 tracks/2GiB; malformed, mismatched-size or orphaned entries are ignored. No
+are100 tracks/2GiB; malformed, mismatched-size or orphaned entries are ignored. New
+manifests are v2 and carry the BLAKE3 digest of the copied device bytes; Play offline
+re-hashes the file and refuses a same-size tampered copy with a visible integrity error.
+Legacy v1 manifests (length-only) remain readable and will verify on the next save. No
 credentials, session tokens, audio URLs or listening events are stored.
 
 The Library shows saved copies and **Play offline** decodes the local file through the
@@ -169,7 +172,7 @@ sync, automatic download/refresh, bulk storage manager, Android/iOS offline or
 server-side entitlement refresh. Sign-out clears in-memory state but retains the account-scoped files; another
 account cannot see them. The real-window QA stops the fixture server, verifies the HTTP
 health probe fails, plays the saved original to advancing media time, and checks the
-audio/manifest exist at0600.
+audio/manifest exist at0600 and the v2 manifest carries a64-hex BLAKE3 digest.
 
 ## Verification
 

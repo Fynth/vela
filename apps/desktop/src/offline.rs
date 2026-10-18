@@ -22,6 +22,8 @@ pub struct OfflineTrack {
     pub track: Track,
     pub saved_at: u64,
     pub length_bytes: u64,
+    /// BLAKE3 of the copied device bytes; None only for legacy v1 manifests.
+    pub digest: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -32,6 +34,8 @@ struct Record {
     saved_at: u64,
     length_bytes: u64,
     track: Track,
+    #[serde(default)]
+    digest: String,
 }
 
 fn data_root(account_id: &str) -> Result<PathBuf, String> {
@@ -105,7 +109,15 @@ fn load_from(root: &Path, account_id: &str) -> Result<Vec<OfflineTrack>, String>
         let Ok(record) = serde_json::from_slice::<Record>(&bytes) else {
             continue;
         };
-        if record.version != 1
+        let digest_valid = match record.version {
+            1 => true,
+            2 => {
+                record.digest.len() == 64
+                    && record.digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+            }
+            _ => false,
+        };
+        if !digest_valid
             || record.account_id != account_id
             || record.track.id != stem
             || record.length_bytes == 0
@@ -121,6 +133,7 @@ fn load_from(root: &Path, account_id: &str) -> Result<Vec<OfflineTrack>, String>
             track: record.track,
             saved_at: record.saved_at,
             length_bytes: record.length_bytes,
+            digest: (record.version == 2).then_some(record.digest),
         });
     }
     tracks.sort_by(|left, right| {
@@ -189,22 +202,39 @@ fn save_to(
         .create(true)
         .truncate(true)
         .open(&temporary_audio);
-    let copy = (|| -> std::io::Result<()> {
+    let copy = (|| -> std::io::Result<String> {
         let mut output = output?;
-        let copied = std::io::copy(&mut source, &mut output)?;
+        let mut hasher = blake3::Hasher::new();
+        let mut buffer = [0_u8; 64 * 1024];
+        let mut copied = 0_u64;
+        loop {
+            let read = std::io::Read::read(&mut source, &mut buffer)?;
+            if read == 0 {
+                break;
+            }
+            copied = copied.saturating_add(read as u64);
+            if copied > prepared.length_bytes {
+                return Err(std::io::Error::other("offline copy size mismatch"));
+            }
+            hasher.update(&buffer[..read]);
+            std::io::Write::write_all(&mut output, &buffer[..read])?;
+        }
         if copied != prepared.length_bytes {
             return Err(std::io::Error::other("offline copy size mismatch"));
         }
         output.sync_all()?;
         fs::rename(&temporary_audio, &audio)?;
-        Ok(())
+        Ok(hasher.finalize().to_hex().to_string())
     })();
-    if copy.is_err() {
-        let _ = fs::remove_file(&temporary_audio);
-        return Err("The offline copy could not be written.".into());
-    }
+    let digest = match copy {
+        Ok(digest) => digest,
+        Err(_) => {
+            let _ = fs::remove_file(&temporary_audio);
+            return Err("The offline copy could not be written.".into());
+        }
+    };
     let record = Record {
-        version: 1,
+        version: 2,
         account_id: account_id.to_owned(),
         saved_at: SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -212,6 +242,7 @@ fn save_to(
             .unwrap_or(1),
         length_bytes: prepared.length_bytes,
         track: track.clone(),
+        digest,
     };
     let payload = serde_json::to_vec(&record)
         .map_err(|_| "The offline manifest could not be written.".to_owned())?;
@@ -246,10 +277,26 @@ fn save_to(
     Ok(())
 }
 
-pub fn prepare(path: &Path) -> Result<std::sync::Arc<PreparedAudio>, String> {
+pub fn prepare(account_id: &str, track_id: &str) -> Result<std::sync::Arc<PreparedAudio>, String> {
+    prepare_from(&data_root(account_id)?, account_id, track_id)
+}
+
+fn prepare_from(
+    root: &Path,
+    account_id: &str,
+    track_id: &str,
+) -> Result<std::sync::Arc<PreparedAudio>, String> {
+    let entry = load_from(root, account_id)?
+        .into_iter()
+        .find(|entry| entry.track.id == track_id)
+        .ok_or_else(|| "The offline copy is missing. Save it again from the library.".to_owned())?;
+    let path = audio_path_from(root, track_id)?;
+    if let Some(expected) = entry.digest.as_deref() {
+        verify_digest(&path, expected)?;
+    }
     #[cfg(target_os = "linux")]
     {
-        let (file, length) = read_audio(path)?;
+        let (file, length) = read_audio(&path)?;
         Ok(std::sync::Arc::new(PreparedAudio::from_file(file, length)))
     }
     #[cfg(not(target_os = "linux"))]
@@ -257,6 +304,25 @@ pub fn prepare(path: &Path) -> Result<std::sync::Arc<PreparedAudio>, String> {
         let _ = path;
         Err("Offline playback is currently available on Linux only.".into())
     }
+}
+
+fn verify_digest(path: &Path, expected: &str) -> Result<(), String> {
+    let mut file = fs::File::open(path)
+        .map_err(|_| "The offline copy is missing. Save it again.".to_owned())?;
+    let mut hasher = blake3::Hasher::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = std::io::Read::read(&mut file, &mut buffer)
+            .map_err(|_| "The offline copy could not be read.".to_owned())?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    if hasher.finalize().to_hex().as_str() != expected {
+        return Err("The offline copy failed its integrity check. Save it again.".into());
+    }
+    Ok(())
 }
 
 pub fn read_audio(path: &Path) -> Result<(fs::File, u64), String> {
@@ -321,6 +387,12 @@ mod tests {
         let loaded = load_from(&root, &account).unwrap();
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].track.id, id.to_string());
+        assert!(
+            loaded[0]
+                .digest
+                .as_deref()
+                .is_some_and(|digest| digest.len() == 64)
+        );
         assert_eq!(fs::read(root.join(format!("{id}.audio"))).unwrap(), bytes);
         #[cfg(unix)]
         {
