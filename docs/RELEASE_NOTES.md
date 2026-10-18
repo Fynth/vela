@@ -3,7 +3,8 @@
 Patch release: DSP spectral-4 adds a heuristic Krumhansl key with profile margin; web
 Radio shows Estimated key. The portable native client adds playlist-folder create/
 filter/move/rename/delete. No schema migration, HTTP contract change or original-data
-rewrite.
+rewrite. Exact-package Chromium and Firefox each passed41 scenarios with1 live-import
+skip (1.9m/2.2m); the0600 backup was restore-verified and counts stayed unchanged.
 
 # 0.12.4 — playlist folders (schema12)
 

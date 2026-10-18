@@ -21,6 +21,31 @@ correctly shows "Not established"). No schema, server HTTP, native or original-d
 runtime change. The live runtime was subsequently upgraded to0.12.1; existing
 analysis rows remain spectral-1 until explicitly reanalyzed.
 
+## 0.12.5 spectral-4/native folders handover — verified (2026-10-18)
+
+`target/releases/vela-0.12.5-{x86_64-unknown-linux-gnu,source}.tar.gz` and
+`vela-0.12.5-SHA256SUMS` were built from commit `3eedf1b` (native
+`12eb12cf2e577a7da32b0efec307140bf3b67b035e77d50c728bf61f59da93d6`, source
+`42cd778037f136735de6f6d59d474e90494b922f0ded52180e61bedf2f1fad26`) and extracted to
+`target/runtime/vela-0.12.5/` (schema12). Exact-package Chromium passed41+1 skip in1.9m
+and Firefox41+1 skip in2.2m, covering spectral-4 key and the web folder lifecycle.
+
+A portable native0.12.5 archive
+(`target/desktop-releases/vela-desktop-0.12.5-linux-x86_64-unknown-linux-gnu.tar.gz`,
+SHA256 `c6bd29810be2da28faecfa02bc90a0b56b10b52a89add77905385aaa5349d3e7`, BUILD
+commit `3eedf1b`) passed exact manifest/modes, `vela-desktop 0.12.5`, ldd, styled
+sign-in launch, normal close exit0 and zero temporary originals. It includes native
+folder create/filter/move/rename/delete plus offline/cache/pagination features.
+
+`before-0.12.5-20261018T194334Z.tar.gz` (440464629 bytes,0600) was restore-verified in
+an isolated empty directory (integrity/FK ok, schema12,20 tracks). Since schema was
+already12, no separate migration was needed. The0.12.4 unit file was preserved at0600;
+the service was stopped gracefully and the installer validated/installed0.12.5.
+
+Post-handover: health0.12.5; MainPID498859 active/enabled,0 restarts; integrity/FK ok;
+schema12; counts unchanged (1user/20tracks/20assets/20analysis/1artwork/0playlists/
+0folders). Rollback remains the preserved0.12.4 runtime/unit and backup.
+
 ## DSP heuristic key spectral-4 — source verified (2026-10-18, `3f97662`)
 
 `vela-pcm-spectral-4` adds a bounded Krumhansl–Kessler key estimate from normalized
@@ -32,8 +57,7 @@ Spectral-3 caches are retained unchanged.
 Unit evidence: synthetic C-major→`C major` and A-minor→`A minor` triads, A440 single
 tone→None, finite/bounded descriptors;22 analysis tests and full media tests. Web Radio
 shows Estimated key with the heuristic margin and disclaimer. Full Chromium41 passed+1
-live-import skip in2.2m. Source postdates the live0.12.4/spectral-3 runtime; next patch
-will deploy. No schema, HTTP, native or original-data change.
+live-import skip in2.2m. Shipped in the verified0.12.5 runtime. No schema, HTTP, native or original-data change.
 
 ## Native playlist folders — source verified (2026-10-18, `9bfdb39`)
 
@@ -47,8 +71,7 @@ The isolated WebKitGTK journey creates a folder and an unfiled playlist, moves t
 fixture playlist into the folder, checks exclusion under the filter, renames and
 deletes the folder, and verifies both playlists return unfiled. Evidence:
 `target/checks/native-folders2/`;27/29 desktop tests plus both opt-ins, strict
-Clippy/fmt. Source is newer than the preserved0.12.4 desktop archive; the next native
-package will include folder UI. No schema/server/web/original-data change.
+Clippy/fmt. Shipped in the verified0.12.5 portable desktop archive. No schema/server/web/original-data change.
 
 ## 0.12.4 playlist folders schema12 handover — verified (2026-10-18, `e5ef26a`)
 
