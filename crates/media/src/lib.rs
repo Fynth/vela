@@ -275,7 +275,7 @@ impl MediaService {
     }
 
     pub async fn stats(&self, owner_id: &str) -> Result<LibraryStats> {
-        let row = sqlx::query("SELECT COUNT(*) AS tracks,COALESCE(SUM(a.size_bytes),0) AS size_bytes,COALESCE(SUM(t.duration_ms),0) AS duration_ms,(SELECT COUNT(*) FROM albums b WHERE b.owner_id=? AND EXISTS(SELECT 1 FROM tracks bt WHERE bt.owner_id=b.owner_id AND bt.album_id=b.id)) AS albums,(SELECT COUNT(*) FROM artists ar WHERE ar.owner_id=? AND (EXISTS(SELECT 1 FROM tracks at WHERE at.owner_id=ar.owner_id AND at.artist_id=ar.id) OR EXISTS(SELECT 1 FROM albums ab JOIN tracks at ON at.album_id=ab.id AND at.owner_id=ab.owner_id WHERE ab.owner_id=ar.owner_id AND ab.artist_id=ar.id))) AS artists FROM tracks t JOIN media_assets a ON a.id=t.media_asset_id WHERE t.owner_id=?")
+        let row = sqlx::query("SELECT COUNT(*) AS tracks,COALESCE(SUM(a.size_bytes),0) AS size_bytes,COALESCE(SUM(t.duration_ms),0) AS duration_ms,(SELECT COUNT(*) FROM albums b WHERE b.owner_id=? AND EXISTS(SELECT 1 FROM tracks bt INDEXED BY tracks_catalog_album WHERE bt.owner_id=b.owner_id AND bt.album_id=b.id)) AS albums,(SELECT COUNT(*) FROM artists ar WHERE ar.owner_id=? AND (EXISTS(SELECT 1 FROM tracks at INDEXED BY tracks_catalog_artist WHERE at.owner_id=ar.owner_id AND at.artist_id=ar.id) OR EXISTS(SELECT 1 FROM albums ab CROSS JOIN tracks at ON at.album_id=ab.id AND at.owner_id=ab.owner_id WHERE ab.owner_id=ar.owner_id AND ab.artist_id=ar.id))) AS artists FROM tracks t JOIN media_assets a ON a.id=t.media_asset_id WHERE t.owner_id=?")
             .bind(owner_id).bind(owner_id).bind(owner_id).fetch_one(&self.pool).await?;
         Ok(LibraryStats {
             tracks: row.try_get("tracks")?,

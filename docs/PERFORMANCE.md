@@ -380,5 +380,8 @@ so SQLite starts from `albums_catalog_artist` instead of scanning the owner's 10
 tracks per artist. On the same 100k temp DB the page query went from ~53,000ms to
 ~22ms (SQL) and the release HTTP endpoint from 44-58s to **29.8ms**
 (`target/checks/phase0/http-bench-100k-fixed3.json`). `cargo test -p vela-media`
-passes (63+6+8). `/api/stats` (665ms) still runs catalog-wide counts and visibility
-EXISTS; that is the next measurable slice.
+passes (63+6+8). `/api/stats` dropped from **665ms to 490ms** after pinning the album/artist
+visibility EXISTS to `tracks_catalog_album`/`tracks_catalog_artist` and the
+album-credit arm to albums-first (`http-bench-100k-stats.json`). Its remaining
+~300ms is the owner-wide `COUNT/SUM` join to `media_assets`; fixing that needs a
+covering index migration or incremental counters, not a query hint.

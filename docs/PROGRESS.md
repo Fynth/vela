@@ -103,8 +103,10 @@ Measured release 100k (8 Python threads, client-bound; 0 errors): `/api/tracks` 
 two-arm `ARTIST_TRACKS` union; forcing `tracks_catalog_artist` plus
 `albums CROSS JOIN tracks` (albums-first) reduced the release endpoint to **29.8ms**
 on the same 100k catalog. Evidence: `target/checks/phase0/http-bench-100k{,-fixed3}.json`,
-PERFORMANCE.md. Remaining measured targets: broad search and `/api/stats`; no schema,
-live-runtime or original-data change.
+PERFORMANCE.md. `/api/stats` was then reduced from 665ms to **490ms** by the same index/join
+pinning (`http-bench-100k-stats.json`); its ~300ms owner-wide COUNT/SUM join remains
+and needs a covering index or incremental counters. Broad search (~156ms) is the
+next read target. No schema, live-runtime or original-data change.
 
 ## Phase 0 measurement baseline — verified (2026-10-18, `72d9860`)
 
