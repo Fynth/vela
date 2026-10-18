@@ -149,6 +149,36 @@ test('first-run setup, real FLAC upload, artwork, decode, favorites and safe sha
   adminCookies = await page.context().cookies();
 });
 
+test('playlist folders group, move, rename and delete without changing tracks', async ({page})=>{
+  const errors=[];page.on('pageerror',error=>errors.push(error.message));
+  await openAdminFixture(page);await navigate(page,'Playlists');
+  await page.locator('#folder-name').fill('Folder QA');await page.getByRole('button',{name:'+ Folder',exact:true}).click();
+  const folder=page.locator('[data-playlist-folder]').filter({hasText:'Folder QA (0)'});
+  await expect(folder).toBeVisible();
+  const folderId=await folder.getAttribute('data-playlist-folder');
+  await page.locator('#playlist-name').fill('Folder list');await page.getByRole('button',{name:'+ Create',exact:true}).click();
+  const card=page.locator('.playlist-card').filter({hasText:'Folder list'});await expect(card).toBeVisible();
+  await card.click();
+  await page.locator('#playlist-folder-target').selectOption(folderId);
+  await page.getByRole('button',{name:'Move to folder',exact:true}).click();
+  await expect(page.getByText('Playlist folder updated.',{exact:true})).toBeVisible();
+  await page.getByRole('button',{name:/Folder QA \(1\)/}).click();
+  await expect(page.locator('.playlist-card').filter({hasText:'Folder list'})).toBeVisible();
+  await expect(page.locator('.playlist-card').filter({hasText:'Evening signals'})).toHaveCount(0);
+  await page.locator('#folder-rename').fill('Folder QA renamed');
+  await page.getByRole('button',{name:'Save folder name',exact:true}).click();
+  await expect(page.locator('[data-playlist-folder]').filter({hasText:'Folder QA renamed'})).toBeVisible();
+  await page.getByRole('button',{name:/Delete folder Folder QA renamed/}).click();
+  await page.getByRole('button',{name:/Confirm delete folder Folder QA renamed/}).click();
+  await expect(page.locator('[data-playlist-folder]')).toHaveCount(0);
+  await expect(page.locator('.playlist-card').filter({hasText:'Folder list'})).toBeVisible();
+  await page.setViewportSize({width:320,height:760});
+  await expect(page.locator('.playlist-card').filter({hasText:'Folder list'})).toBeVisible();
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+3)).toBeTruthy();
+  await page.screenshot({path:'test-results/playlist-folders-phone.png',fullPage:true});
+  expect(errors).toEqual([]);
+});
+
 test('owner renames and deletes a playlist without changing owned tracks', async ({ page }) => {
   await openAdminFixture(page);
   const before = await (await page.request.get('/api/tracks?limit=100')).json();

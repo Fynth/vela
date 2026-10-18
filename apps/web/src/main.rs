@@ -1090,6 +1090,13 @@ fn App() -> Element {
     let mut radio_seed = use_signal(|| None::<Track>);
     let playlist_generation = use_signal(|| 0_u64);
     let mut playlist_name = use_signal(String::new);
+    let mut folders = use_signal(Vec::<PlaylistFolder>::new);
+    let mut folder_name = use_signal(String::new);
+    let mut folder_filter = use_signal(|| None::<String>);
+    let mut folder_rename = use_signal(String::new);
+    let mut folder_busy = use_signal(|| false);
+    let mut folder_confirm = use_signal(String::new);
+    let mut playlist_folder_target = use_signal(String::new);
     let mut playlist_rename = use_signal(String::new);
     let mut playlist_rename_busy = use_signal(|| false);
     let mut playlist_delete_confirm = use_signal(|| false);
@@ -1098,6 +1105,16 @@ fn App() -> Element {
     let mut collaborator_revision = use_signal(|| 0_u64);
     let mut share_url = use_signal(String::new);
     let mut public_share = use_signal(|| None::<PlaylistDetail>);
+    use_effect(move || {
+        let folder = selected_playlist
+            .read()
+            .as_ref()
+            .and_then(|detail| detail.playlist.folder_id.clone())
+            .unwrap_or_default();
+        if playlist_folder_target.peek().as_str() != folder.as_str() {
+            playlist_folder_target.set(folder);
+        }
+    });
     let mut share_days = use_signal(|| "7".to_string());
     let mut collaborator_edit = use_signal(|| false);
     let mut selected_add_playlist = use_signal(String::new);
@@ -1296,6 +1313,8 @@ fn App() -> Element {
                 {
                     Ok(value) => {
                         public_share.set(Some(value.clone()));
+                        playlist_folder_target
+                            .set(value.playlist.folder_id.clone().unwrap_or_default());
                         selected_playlist.set(Some(value));
                         page.set("playlists".into());
                     }
@@ -1475,6 +1494,14 @@ fn App() -> Element {
                     return;
                 }
                 playlists.set(value);
+            }
+            if let Ok(value) =
+                api::<Vec<PlaylistFolder>>("GET", "/api/playlist-folders", None, "").await
+            {
+                if auth.peek().as_ref().map(|a| &a.user.id) != Some(&session.user.id) {
+                    return;
+                }
+                folders.set(value);
             }
         });
     });
@@ -1853,9 +1880,65 @@ fn App() -> Element {
                         div { class: "section-toolbar", div { h2 { "Your playlists" } p { "A soundtrack for whatever comes next." } }
                             form { class: "inline-form", onsubmit: move |e| { e.prevent_default(); let name = playlist_name().trim().to_string(); if name.is_empty() { return; } spawn_authorized(auth, async move { match api::<PlaylistSummary>("POST", "/api/playlists", Some(json!({"name": name})), &token(auth)).await { Ok(value) => { playlists.write().insert(0, value); playlist_name.set(String::new()); } Err(message) => error.set(message) } }); }, label { class: "sr-only", r#for: "playlist-name", "New playlist name" } input { id: "playlist-name", required: true, maxlength: 150, placeholder: "New playlist name", value: "{playlist_name}", oninput: move |e| playlist_name.set(e.value()) } button { class: "button primary small", r#type: "submit", "+ Create" } }
                         }
+                        div { class: "section-toolbar", div { h2 { "Playlist folders" } p { "Group private playlists without changing their tracks or sharing grants." } }
+                            form { class: "inline-form", onsubmit: move |e| { e.prevent_default(); let name = folder_name().trim().to_string(); if name.is_empty() || folder_busy() { return; } folder_busy.set(true); spawn_authorized(auth, async move { match mutate("POST", "/api/playlist-folders", Some(json!({"name": name})), &token(auth)).await { Ok(()) => { if let Ok(value) = api::<Vec<PlaylistFolder>>("GET", "/api/playlist-folders", None, "").await { folders.set(value); } folder_name.set(String::new()); notice.set("Playlist folder created.".into()); } Err(message) => error.set(message) } folder_busy.set(false); }); },
+                                label { class: "sr-only", r#for: "folder-name", "New folder name" }
+                                input { id: "folder-name", maxlength: 120, placeholder: "New folder name", value: "{folder_name}", oninput: move |e| folder_name.set(e.value()) }
+                                button { class: "button primary small", r#type: "submit", disabled: folder_busy(), if folder_busy() { "Creating…" } else { "+ Folder" } }
+                            }
+                        }
+                        div { class: "inline-form", role: "group", "aria-label": "Playlist folder filters",
+                            button { class: if folder_filter().is_none() { "button secondary small" } else { "button small" }, "aria-pressed": folder_filter().is_none(), onclick: move |_| { folder_filter.set(None); folder_rename.set(String::new()); }, "All playlists" }
+                            for folder in folders.read().iter().cloned() {
+                                {
+                                    let id = folder.id.clone();
+                                    let filter_id = folder.id.clone();
+                                    let delete_id = folder.id.clone();
+                                    let confirm_id = folder.id.clone();
+                                    let name = folder.name.clone();
+                                    let delete_name = folder.name.clone();
+                                    let revision = folder.revision;
+                                    let selected = folder_filter().as_deref() == Some(id.as_str());
+                                    let confirming = folder_confirm() == id;
+                                    rsx! { div { class: "inline-form", "data-playlist-folder": "{folder.id}",
+                                        button { class: if selected { "button secondary small" } else { "button small" }, "aria-pressed": selected, onclick: move |_| { folder_filter.set(Some(filter_id.clone())); folder_rename.set(name.clone()); }, "{name} ({folder.playlist_count})" }
+                                        if confirming {
+                                            button { class: "button danger small", "aria-label": "Confirm delete folder {folder.name}", onclick: move |_| {
+                                                if folder_busy() { return; }
+                                                folder_busy.set(true);
+                                                let delete_id = delete_id.clone();
+                                                spawn_authorized(auth, async move {
+                                                    match mutate("DELETE", &format!("/api/playlist-folders/{delete_id}?revision={revision}"), None, &token(auth)).await {
+                                                        Ok(()) => {
+                                                            if folder_filter.peek().as_deref() == Some(delete_id.as_str()) { folder_filter.set(None); folder_rename.set(String::new()); }
+                                                            folder_confirm.set(String::new());
+                                                            if let Ok(value) = api::<Vec<PlaylistFolder>>("GET", "/api/playlist-folders", None, "").await { folders.set(value); }
+                                                            if let Ok(value) = api::<Vec<PlaylistSummary>>("GET", "/api/playlists", None, "").await { playlists.set(value); }
+                                                            notice.set("Folder deleted. Its playlists are now unfiled.".into());
+                                                        }
+                                                        Err(message) => error.set(message)
+                                                    }
+                                                    folder_busy.set(false);
+                                                });
+                                            }, "Confirm" }
+                                            button { class: "button secondary small", onclick: move |_| folder_confirm.set(String::new()), "Keep" }
+                                        } else {
+                                            button { class: "icon-button", "aria-label": "Delete folder {delete_name}", onclick: move |_| folder_confirm.set(confirm_id.clone()), Icon { name: "close" } }
+                                        }
+                                    } }
+                                }
+                            }
+                        }
+                        if let Some(folder) = folders.read().iter().find(|folder| folder_filter().as_deref() == Some(folder.id.as_str())).cloned() {
+                            form { class: "inline-form", onsubmit: move |e| { e.prevent_default(); let name = folder_rename().trim().to_string(); if name.is_empty() || folder_busy() { return; } folder_busy.set(true); let id = folder.id.clone(); let revision = folder.revision; spawn_authorized(auth, async move { match mutate("PATCH", &format!("/api/playlist-folders/{id}"), Some(json!({"revision": revision, "name": name})), &token(auth)).await { Ok(()) => { if let Ok(value) = api::<Vec<PlaylistFolder>>("GET", "/api/playlist-folders", None, "").await { folders.set(value); } notice.set("Folder renamed.".into()); } Err(message) => error.set(message) } folder_busy.set(false); }); },
+                                label { class: "sr-only", r#for: "folder-rename", "Folder name" }
+                                input { id: "folder-rename", maxlength: 120, value: "{folder_rename}", oninput: move |e| folder_rename.set(e.value()) }
+                                button { class: "button secondary small", r#type: "submit", disabled: folder_busy() || folder_rename().trim().is_empty(), "Save folder name" }
+                            }
+                        }
                         if playlists.read().is_empty() { div { class: "empty-state", span { class: "empty-icon", Icon { name: "queue" } } h3 { "Make room for a mood" } p { "Create a playlist, then add tracks from your library." } } }
                         div { class: "playlist-grid",
-                            for list in playlists.read().iter().cloned() {
+                            for list in playlists.read().iter().filter(|list| folder_filter().as_deref().is_none_or(|id| list.folder_id.as_deref() == Some(id))).cloned() {
                                 {
                                     let card_name = list.name.clone();
                                     rsx! { button { class: "playlist-card", key: "{list.id}", onclick: move |_| { share_url.set(String::new()); playlist_rename.set(card_name.clone()); playlist_rename_busy.set(false); playlist_delete_confirm.set(false); open_playlist(list.id.clone(),playlist_view,error); },
@@ -1895,6 +1978,34 @@ fn App() -> Element {
                                                 }
                                             });
                                         }, if playlist_rename_busy() { "Saving…" } else { "Save name" } }
+                                        div { class: "inline-form",
+                                            label { class: "sr-only", r#for: "playlist-folder-target", "Move playlist to folder" }
+                                            select { id: "playlist-folder-target", value: "{playlist_folder_target}", onchange: move |e| playlist_folder_target.set(e.value()),
+                                                option { value: "", "Unfiled" }
+                                                for folder in folders.read().iter() { option { value: "{folder.id}", "{folder.name}" } }
+                                            }
+                                            button { class: "button secondary small", disabled: folder_busy(), onclick: move |_| {
+                                                let Some(current) = selected_playlist.peek().clone() else { return; };
+                                                let id = current.playlist.id.clone();
+                                                let revision = current.playlist.revision;
+                                                let target = playlist_folder_target.peek().clone();
+                                                let folder_id = if target.is_empty() { None } else { Some(target) };
+                                                if folder_busy() { return; }
+                                                folder_busy.set(true);
+                                                spawn_authorized(auth, async move {
+                                                    match mutate("PATCH", &format!("/api/playlists/{id}/folder"), Some(json!({"revision": revision, "folder_id": folder_id})), &token(auth)).await {
+                                                        Ok(()) => {
+                                                            if let Ok(value) = api::<PlaylistDetail>("GET", &format!("/api/playlists/{id}"), None, "").await && selected_playlist.peek().as_ref().is_some_and(|detail| detail.playlist.id == id) { selected_playlist.set(Some(value)); }
+                                                            if let Ok(value) = api::<Vec<PlaylistSummary>>("GET", "/api/playlists", None, "").await { playlists.set(value); }
+                                                            if let Ok(value) = api::<Vec<PlaylistFolder>>("GET", "/api/playlist-folders", None, "").await { folders.set(value); }
+                                                            notice.set("Playlist folder updated.".into());
+                                                        }
+                                                        Err(message) => error.set(message)
+                                                    }
+                                                    folder_busy.set(false);
+                                                });
+                                            }, "Move to folder" }
+                                        }
                                         if playlist_delete_confirm() {
                                             button { class: "button danger small", onclick: move |_| {
                                                 let Some(current) = selected_playlist.peek().clone() else { return; };

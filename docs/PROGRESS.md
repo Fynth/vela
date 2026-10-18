@@ -21,6 +21,24 @@ correctly shows "Not established"). No schema, server HTTP, native or original-d
 runtime change. The live runtime was subsequently upgraded to0.12.1; existing
 analysis rows remain spectral-1 until explicitly reanalyzed.
 
+## Playlist folders — source verified (2026-10-18)
+
+Playlist folders add owner-scoped grouping metadata without changing playlist tracks,
+shares or media rights. Migration0012 creates `playlist_folders` plus
+`playlists.folder_id` (`ON DELETE SET NULL`) and an owner/folder index. Core/HTTP support
+list/create, CAS rename/delete and CAS move of an owned playlist; deleting a folder
+unfiles contained playlists and bumps their revisions, while stale revisions conflict
+and foreign/missing IDs are404. Folders cap100/owner with case-insensitive unique names.
+
+Web Playlists exposes folder creation, filter chips, selected-folder rename, confirmed
+delete and a per-playlist Move-to-folder control. The API test covers duplicate names,
+owner isolation, move/CAS conflicts, folder rename/delete, unfiling and revision bumps.
+Chromium42 scenarios (41 pass1 live-import skip in2.2m) and Firefox42 (41 pass1
+skip in2.6m) include a real folder lifecycle at320px. Source schema12 is newer than the live0.12.3/schema11 runtime and has not been
+deployed; native folder UI is not implemented (the additive summary field is ignored).
+Evidence:`target/checks/browser-folders-chromium.log`,
+`tests/browser/test-results/playlist-folders-phone.png`.
+
 ## 0.12.3 privacy/offline runtime handover — verified (2026-10-18, `e462f87`)
 
 `target/releases/vela-0.12.3-{x86_64-unknown-linux-gnu,source}.tar.gz` and

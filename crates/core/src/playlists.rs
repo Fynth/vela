@@ -16,6 +16,165 @@ impl PlaylistService {
     pub fn new(pool: SqlitePool) -> Self {
         Self { pool }
     }
+    pub async fn folders(&self, user: &User) -> Result<Vec<PlaylistFolder>> {
+        let rows = sqlx::query(
+            "SELECT f.id,f.name,f.owner_id,f.revision,(SELECT COUNT(*) FROM playlists p WHERE p.folder_id=f.id) playlist_count FROM playlist_folders f WHERE f.owner_id=? ORDER BY lower(f.name),f.id LIMIT 100",
+        )
+        .bind(&user.id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.iter().map(folder_row).collect())
+    }
+
+    pub async fn create_folder(
+        &self,
+        user: &User,
+        input: CreatePlaylistFolder,
+    ) -> Result<PlaylistFolder> {
+        let name = valid_name(&input.name)?;
+        let id = uuid::Uuid::new_v4().to_string();
+        let inserted = sqlx::query("INSERT INTO playlist_folders(id,owner_id,name) SELECT ?,?,? WHERE (SELECT COUNT(*) FROM playlist_folders WHERE owner_id=?) < 100")
+            .bind(&id)
+            .bind(&user.id)
+            .bind(name)
+            .bind(&user.id)
+            .execute(&self.pool)
+            .await
+            .map_err(folder_write_error)?;
+        if inserted.rows_affected() == 0 {
+            return Err(Error::Invalid("Playlist folder limit reached".into()));
+        }
+        self.folder(user, &id).await
+    }
+
+    pub async fn rename_folder(
+        &self,
+        user: &User,
+        id: &str,
+        input: UpdatePlaylistFolder,
+    ) -> Result<PlaylistFolder> {
+        if id.parse::<uuid::Uuid>().is_err() || input.revision < 0 {
+            return Err(Error::Invalid("Invalid playlist folder".into()));
+        }
+        let name = valid_name(&input.name)?;
+        let updated = sqlx::query("UPDATE playlist_folders SET name=?,revision=revision+1 WHERE id=? AND owner_id=? AND revision=?")
+            .bind(name)
+            .bind(id)
+            .bind(&user.id)
+            .bind(input.revision)
+            .execute(&self.pool)
+            .await
+            .map_err(folder_write_error)?;
+        if updated.rows_affected() == 0 {
+            return self.folder_change_error(user, id).await;
+        }
+        self.folder(user, id).await
+    }
+
+    pub async fn delete_folder(&self, user: &User, id: &str, revision: i64) -> Result<()> {
+        if id.parse::<uuid::Uuid>().is_err() || revision < 0 {
+            return Err(Error::Invalid("Invalid playlist folder".into()));
+        }
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM playlist_folders WHERE id=? AND owner_id=?)",
+        )
+        .bind(id)
+        .bind(&user.id)
+        .fetch_one(&mut *tx)
+        .await?;
+        if !exists {
+            return Err(Error::NotFound);
+        }
+        // Deleting a folder sets contained playlists back to unfiled; bump their
+        // revisions before the FK action so clients refresh grouping.
+        sqlx::query("UPDATE playlists SET revision=revision+1 WHERE owner_id=? AND folder_id=?")
+            .bind(&user.id)
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+        let deleted =
+            sqlx::query("DELETE FROM playlist_folders WHERE id=? AND owner_id=? AND revision=?")
+                .bind(id)
+                .bind(&user.id)
+                .bind(revision)
+                .execute(&mut *tx)
+                .await?;
+        if deleted.rows_affected() == 0 {
+            return Err(Error::Conflict(
+                "Playlist folder changed; reload before deleting".into(),
+            ));
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn move_playlist(
+        &self,
+        user: &User,
+        id: &str,
+        input: MovePlaylist,
+    ) -> Result<PlaylistSummary> {
+        if id.parse::<uuid::Uuid>().is_err() || input.revision < 0 {
+            return Err(Error::Invalid("Invalid playlist".into()));
+        }
+        if let Some(folder_id) = input.folder_id.as_deref() {
+            if folder_id.parse::<uuid::Uuid>().is_err() {
+                return Err(Error::Invalid("Invalid playlist folder".into()));
+            }
+            let owned: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM playlist_folders WHERE id=? AND owner_id=?)",
+            )
+            .bind(folder_id)
+            .bind(&user.id)
+            .fetch_one(&self.pool)
+            .await?;
+            if !owned {
+                return Err(Error::NotFound);
+            }
+        }
+        let updated = sqlx::query("UPDATE playlists SET folder_id=?,revision=revision+1 WHERE id=? AND owner_id=? AND revision=?")
+            .bind(input.folder_id.as_deref())
+            .bind(id)
+            .bind(&user.id)
+            .bind(input.revision)
+            .execute(&self.pool)
+            .await?;
+        if updated.rows_affected() == 0 {
+            return self.folder_change_error(user, id).await;
+        }
+        self.owned_summary(user, id).await
+    }
+
+    async fn folder(&self, user: &User, id: &str) -> Result<PlaylistFolder> {
+        let row = sqlx::query("SELECT f.id,f.name,f.owner_id,f.revision,(SELECT COUNT(*) FROM playlists p WHERE p.folder_id=f.id) playlist_count FROM playlist_folders f WHERE f.id=? AND f.owner_id=?")
+            .bind(id)
+            .bind(&user.id)
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or(Error::NotFound)?;
+        Ok(folder_row(&row))
+    }
+
+    async fn folder_change_error<T>(&self, user: &User, id: &str) -> Result<T> {
+        let exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM playlist_folders WHERE id=? AND owner_id=?) OR EXISTS(SELECT 1 FROM playlists WHERE id=? AND owner_id=?)",
+        )
+        .bind(id)
+        .bind(&user.id)
+        .bind(id)
+        .bind(&user.id)
+        .fetch_one(&self.pool)
+        .await?;
+        if exists {
+            Err(Error::Conflict(
+                "Changed elsewhere; reload before saving".into(),
+            ))
+        } else {
+            Err(Error::NotFound)
+        }
+    }
+
     pub async fn create(&self, user: &User, input: CreatePlaylist) -> Result<PlaylistSummary> {
         let name = valid_name(&input.name)?;
         let id = uuid::Uuid::new_v4().to_string();
@@ -30,6 +189,7 @@ impl PlaylistService {
             revision: 0,
             item_count: 0,
             can_edit: true,
+            folder_id: None,
         })
     }
     /// Owner-only rename. Editors may change entries but not ownership metadata.
@@ -378,6 +538,24 @@ impl PlaylistService {
         self.detail_for(summary(&row), None).await
     }
 }
+fn folder_row(r: &sqlx::sqlite::SqliteRow) -> PlaylistFolder {
+    PlaylistFolder {
+        id: r.get("id"),
+        name: r.get("name"),
+        owner_id: r.get("owner_id"),
+        revision: r.get("revision"),
+        playlist_count: r.get("playlist_count"),
+    }
+}
+
+fn folder_write_error(error: sqlx::Error) -> Error {
+    if matches!(&error, sqlx::Error::Database(database) if database.is_unique_violation()) {
+        Error::Conflict("A folder with this name already exists".into())
+    } else {
+        error.into()
+    }
+}
+
 fn summary(r: &sqlx::sqlite::SqliteRow) -> PlaylistSummary {
     PlaylistSummary {
         id: r.get("id"),
@@ -386,6 +564,7 @@ fn summary(r: &sqlx::sqlite::SqliteRow) -> PlaylistSummary {
         revision: r.get("revision"),
         item_count: r.get("item_count"),
         can_edit: r.get("can_edit"),
+        folder_id: r.try_get("folder_id").unwrap_or(None),
     }
 }
 fn track(r: &sqlx::sqlite::SqliteRow) -> Track {

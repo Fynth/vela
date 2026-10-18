@@ -1,3 +1,9 @@
+# 0.12.4 (unreleased source) — playlist folders
+
+Source includes owner-scoped playlist folders (schema12): create/list, CAS rename/delete,
+CAS move of owned playlists and unfiling on folder deletion. Chromium/Firefox each pass42
+source scenarios (41+1 skip). This is not yet deployed to the frozen0.12.3 runtime.
+
 # 0.12.3 — privacy device revocation + native offline checkpoint
 
 Patch release for the frozen local runtime: Settings can list consented listening

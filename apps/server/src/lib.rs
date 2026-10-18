@@ -11,7 +11,7 @@ use axum::{
     http::{HeaderMap, HeaderValue, Method, StatusCode, header, request::Parts},
     middleware::{self, Next},
     response::{IntoResponse, Response},
-    routing::{delete, get, post, put},
+    routing::{delete, get, patch, post, put},
 };
 use futures_util::StreamExt;
 use serde::Deserialize;
@@ -405,6 +405,15 @@ pub fn router(state: AppState) -> Router {
         .route("/api/scans", get(scan_jobs))
         .route("/api/scans/{id}/cancel", post(scan_cancel))
         .route("/api/playlists", get(playlists).post(playlist_create))
+        .route(
+            "/api/playlist-folders",
+            get(playlist_folders).post(playlist_folder_create),
+        )
+        .route(
+            "/api/playlist-folders/{id}",
+            patch(playlist_folder_rename).delete(playlist_folder_delete),
+        )
+        .route("/api/playlists/{id}/folder", patch(playlist_move))
         .route(
             "/api/playlists/{id}",
             get(playlist).patch(playlist_rename).delete(playlist_delete),
@@ -1148,6 +1157,66 @@ async fn playlists(
     Auth(auth): Auth,
 ) -> Result<Json<Vec<PlaylistSummary>>> {
     Ok(Json(s.playlists.list(&auth.response.user).await?))
+}
+async fn playlist_folders(
+    State(s): State<AppState>,
+    Auth(auth): Auth,
+) -> Result<Json<Vec<PlaylistFolder>>> {
+    Ok(Json(s.playlists.folders(&auth.response.user).await?))
+}
+async fn playlist_folder_create(
+    State(s): State<AppState>,
+    WriteAuth(auth): WriteAuth,
+    Json(input): Json<CreatePlaylistFolder>,
+) -> Result<Json<PlaylistFolder>> {
+    Ok(Json(
+        s.playlists
+            .create_folder(&auth.response.user, input)
+            .await?,
+    ))
+}
+async fn playlist_folder_rename(
+    State(s): State<AppState>,
+    WriteAuth(auth): WriteAuth,
+    Path(id): Path<String>,
+    input: std::result::Result<Json<UpdatePlaylistFolder>, axum::extract::rejection::JsonRejection>,
+) -> Result<Json<PlaylistFolder>> {
+    let Json(input) = input.map_err(|_| invalid("Invalid playlist folder rename"))?;
+    Ok(Json(
+        s.playlists
+            .rename_folder(&auth.response.user, &id, input)
+            .await?,
+    ))
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FolderDeleteQuery {
+    revision: i64,
+}
+async fn playlist_folder_delete(
+    State(s): State<AppState>,
+    WriteAuth(auth): WriteAuth,
+    Path(id): Path<String>,
+    input: std::result::Result<Query<FolderDeleteQuery>, axum::extract::rejection::QueryRejection>,
+) -> Result<StatusCode> {
+    let Query(input) = input.map_err(|_| invalid("Invalid playlist folder delete"))?;
+    s.playlists
+        .delete_folder(&auth.response.user, &id, input.revision)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+async fn playlist_move(
+    State(s): State<AppState>,
+    WriteAuth(auth): WriteAuth,
+    Path(id): Path<String>,
+    input: std::result::Result<Json<MovePlaylist>, axum::extract::rejection::JsonRejection>,
+) -> Result<Json<PlaylistSummary>> {
+    let Json(input) = input.map_err(|_| invalid("Invalid playlist folder move"))?;
+    Ok(Json(
+        s.playlists
+            .move_playlist(&auth.response.user, &id, input)
+            .await?,
+    ))
 }
 async fn playlist_create(
     State(s): State<AppState>,

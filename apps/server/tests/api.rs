@@ -3944,3 +3944,165 @@ async fn listening_device_grants_are_listed_and_revoked_with_revision_cas() {
         StatusCode::NOT_FOUND
     );
 }
+
+#[tokio::test]
+async fn playlist_folders_are_owner_scoped_and_move_playlists_with_cas() {
+    let app = TestApp::new().await;
+    let folder_a: PlaylistFolder = app
+        .request(Method::POST, "/api/playlist-folders", &app.admin)
+        .json(&CreatePlaylistFolder {
+            name: "Evening".into(),
+        })
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(folder_a.playlist_count, 0);
+    assert_eq!(folder_a.revision, 0);
+    assert_eq!(
+        app.request(Method::POST, "/api/playlist-folders", &app.admin)
+            .json(&CreatePlaylistFolder {
+                name: "evening".into(),
+            })
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::CONFLICT
+    );
+    let folder_b: PlaylistFolder = app
+        .request(Method::POST, "/api/playlist-folders", &app.admin)
+        .json(&CreatePlaylistFolder {
+            name: "Morning".into(),
+        })
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let playlist: PlaylistSummary = app
+        .request(Method::POST, "/api/playlists", &app.admin)
+        .json(&CreatePlaylist {
+            name: "Folder trip".into(),
+        })
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let moved: PlaylistSummary = app
+        .request(
+            Method::PATCH,
+            &format!("/api/playlists/{}/folder", playlist.id),
+            &app.admin,
+        )
+        .json(&MovePlaylist {
+            revision: 0,
+            folder_id: Some(folder_a.id.clone()),
+        })
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(moved.folder_id.as_deref(), Some(folder_a.id.as_str()));
+    assert_eq!(moved.revision, 1);
+    assert_eq!(
+        app.request(
+            Method::PATCH,
+            &format!("/api/playlists/{}/folder", playlist.id),
+            &app.admin
+        )
+        .json(&MovePlaylist {
+            revision: 0,
+            folder_id: Some(folder_b.id.clone()),
+        })
+        .send()
+        .await
+        .unwrap()
+        .status(),
+        StatusCode::CONFLICT
+    );
+    let renamed: PlaylistFolder = app
+        .request(
+            Method::PATCH,
+            &format!("/api/playlist-folders/{}", folder_b.id),
+            &app.admin,
+        )
+        .json(&UpdatePlaylistFolder {
+            revision: 0,
+            name: "Early".into(),
+        })
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(renamed.name, "Early");
+    assert_eq!(renamed.revision, 1);
+    let before_delete = format!("/api/playlists/{}", playlist.id);
+    let _: PlaylistSummary = app
+        .request(
+            Method::PATCH,
+            &format!("/api/playlists/{}/folder", playlist.id),
+            &app.admin,
+        )
+        .json(&MovePlaylist {
+            revision: 1,
+            folder_id: Some(folder_b.id.clone()),
+        })
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        app.request(
+            Method::DELETE,
+            &format!("/api/playlist-folders/{}?revision=1", folder_b.id),
+            &app.admin
+        )
+        .send()
+        .await
+        .unwrap()
+        .status(),
+        StatusCode::NO_CONTENT
+    );
+    let detail: PlaylistDetail = app
+        .request(Method::GET, &before_delete, &app.admin)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(detail.playlist.folder_id, None);
+    assert!(detail.playlist.revision >= 3);
+    let folders: Vec<PlaylistFolder> = app
+        .request(Method::GET, "/api/playlist-folders", &app.admin)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(folders.len(), 1);
+    assert_eq!(folders[0].id, folder_a.id);
+    let other = app.user("folder_other").await;
+    let foreign: Vec<PlaylistFolder> = app
+        .request(Method::GET, "/api/playlist-folders", &other)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(foreign.is_empty());
+}

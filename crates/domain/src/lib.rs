@@ -310,6 +310,32 @@ pub struct PlaylistSummary {
     pub revision: i64,
     pub item_count: i64,
     pub can_edit: bool,
+    #[serde(default)]
+    pub folder_id: Option<String>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PlaylistFolder {
+    pub id: String,
+    pub name: String,
+    pub owner_id: String,
+    pub revision: i64,
+    pub playlist_count: i64,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreatePlaylistFolder {
+    pub name: String,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UpdatePlaylistFolder {
+    pub revision: i64,
+    pub name: String,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MovePlaylist {
+    pub revision: i64,
+    pub folder_id: Option<String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlaylistDetail {
