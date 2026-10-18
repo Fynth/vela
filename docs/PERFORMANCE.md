@@ -1,5 +1,33 @@
 # Reproducible performance measurements
 
+## Personal recommendation query/ranking0.10 (2026-10-18)
+
+Actual release example `target/release/examples/benchmark_recommendations --tracks N --iterations 5`, N=10000/100000/1000000. Same AMD Ryzen7 8845HS/16logicalCPU, Linux x86_64/CachyOS7.2.10-1/glibc2.44, approximately14.9GiB RAM, Rust1.99.0. Each workload creates its own temporary real migrated SQLite/WAL store with synthetic metadata only:64artists/eight genre tags/10tracks per album,12favorites, at most50 qualified sessions over20tracks,20exclusions. No audio or user library is accessed. Seeding, JSON serialization, HTTP/auth/UI, network and physical playback are excluded from per-call latency. One warmup+five sequential measurements; filesystem caches warm, normal browser/build activity may overlap. Different-date before/after runs are not dedicated isolated-host experiments.
+
+| Synthetic tracks | Case | Baseline p50 ms | Final p50 ms | Final p95 ms | Final p99 ms |
+| ---: | --- | ---: | ---: | ---: | ---: |
+| 10,000 | cold-library-exploration | 14.563 | 4.840 | 5.982 | 5.982 |
+| 10,000 | explicit-favorite-affinity | 16.267 | 6.343 | 7.114 | 7.114 |
+| 10,000 | qualified-private-history-and-exclusions | 44.756 | 6.844 | 8.105 | 8.105 |
+| 100,000 | cold-library-exploration | 104.441 | 5.934 | 8.562 | 8.562 |
+| 100,000 | explicit-favorite-affinity | 109.345 | 7.409 | 9.196 | 9.196 |
+| 100,000 | qualified-private-history-and-exclusions | 1200.184 | 8.149 | 8.951 | 8.951 |
+| 1,000,000 | cold-library-exploration | 987.225 | 5.169 | 6.099 | 6.099 |
+| 1,000,000 | explicit-favorite-affinity | 1048.412 | 7.123 | 7.783 | 7.783 |
+| 1,000,000 | qualified-private-history-and-exclusions | 10995.440 | 7.282 | 7.882 | 7.882 |
+
+Five samples cannot establish tail confidence; nearest-rank p95/p99 equal the maximum sample. Every case passed candidate<=500/anchors<=12, owner/hidden/qualified eligibility, actual fixture rotation, stable fixed-input IDs and diversity checks. Output30/500 is6% examined-window selection coverage; this is structural coverage, not whole-library/user satisfaction/play-through quality. Cold output covers30artists; favorite/history output18artists in30 suggestions. Fixed unchanged inputs deliberately repeat stable mixes; Refresh is not random regeneration.
+
+Source-derived EXPLAIN identified baseline catalog scans while favorites/history were sparse. The final source selects eligible bounded IDs from favorites/qualified history first, hydrates only those IDs with the existing Track/descriptor projection, restores exact source order and reuses rotation evidence. All four selector IDs and full projections match the preserved baseline in the isolated10k equality fixture. Additional Rust guards verify keyed seeks and hydration order/authorization. No schema/index/weights/algorithm-version or rights-policy change was made for this optimization. Large equal-added_at groups (mixed index tie direction) and10000 retained sessions remain unmeasured.
+
+Whole example process resource measurements include seeding and JSON output, not just ranking:
+
+- 10,000: 0.705s wall, 0.499s user, 0.229s system, peak 17308KiB RSS.
+- 100,000: 10.633s wall, 5.155s user, 5.384s system, peak 21164KiB RSS.
+- 1,000,000: 148.208s wall, 74.551s user, 72.568s system, peak 21164KiB RSS.
+
+Captured per child with os.wait4; not server RSS or streaming capacity. Raw before/after JSON, stderr and resources: target/checks/personal-{final-,}benchmark-*.json. Baseline exact source copies + SHA256 are personal-baseline-{recommendations,discovery}.rs and personal-benchmark-baseline-hashes.json. Final source/example/lock/binary SHA256: personal-final-benchmark-resources.json. Plans/equivalence: personal-explain.py/.json; it uses Python SQLite3.54, while actual performance runs the compiled SQLx service. Final binary hash: `9df06bc2f626d0f9ecf5dca482220ddd74ba7f6f015836819278fdc5fc8ffc7b`. No claim of superiority over another music application, recommendation relevance, native audio or real-time federation follows from these figures.
+
 ## Local PCM extractor measurement0.9 (2026-10-17)
 
 Actual release example, Rust1.99.0, Symphonia0.6.1/RustFFT6.4.1, Linux x86_64/CachyOS7.2.10-1/glibc2.44, AMD Ryzen7 8845HS (16logical CPUs), approximately14.9GiB RAM. One serial extractor, five measured samples plus one untimed warmup per original generated WAV. Fixture creation, BLAKE3 verification and output serialization are excluded from per-extraction latency. Filesystem caches are warm, other development/browser/compiler activity may be present. No global cache drop or dedicated benchmark isolation was performed.

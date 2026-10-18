@@ -8,6 +8,7 @@ mod jobs;
 mod listening;
 mod metadata;
 mod now_playing;
+mod personal_mixes;
 mod playback;
 mod radio;
 mod scanner;
@@ -1557,7 +1558,7 @@ fn App() -> Element {
                     if !error().is_empty() { div { class: "alert error", role: "alert", span { "{error}" } button { "aria-label": "Dismiss error", onclick: move |_| error.set(String::new()), Icon { name: "close" } } } }
                     if !notice().is_empty() { div { class: "alert success", role: "status", span { "{notice}" } button { "aria-label": "Dismiss notification", onclick: move |_| notice.set(String::new()), Icon { name: "close" } } } }
                     if page() != "home" {div { class: "page-heading", span { class: "eyebrow", "LISTEN A LITTLE LONGER" } h1 { "{heading}" } }}
-                    if page() == "home" {experience::Home {auth,revision:facets_revision,actions} listening::History {auth,view:listening_view,actions,compact:true}}
+                    if page() == "home" {experience::Home {auth,revision:facets_revision,actions, personal_mixes::PersonalMixes {auth,revision:facets_revision,view:listening_view,actions} listening::History {auth,view:listening_view,actions,compact:true}}}
                     if page() == "search" {experience::Search {auth,revision:facets_revision,actions}}
                     if page() == "history" {listening::History {auth,view:listening_view,actions,compact:false}}
                     if page() == "radio" {radio::Radio {auth,seed:radio_seed,actions}}

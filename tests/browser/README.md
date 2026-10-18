@@ -37,3 +37,13 @@ The Firefox trace showed buffered-resource reuse after reload with no new GET. N
 
 
 The latest mandate uses24 golden IDs; older numbered G examples retain their historical meanings. New G07-private-history observes actual8s PCM playback after explicit account/device consent, excludes muted time, checks RepeatOne new logical sessions, real Home/History and related-radio navigation, JSON download, erasure and a held export suppressed after privacy change. G08/G09 run the real durable PCM analysis worker, expose measured fields/counts, exercise explained own-library radio and real queue playback while preserving the existing audio element. Radio screenshots cover320/768/1440/1920px in both themes and assert square generated-art fallbacks. No actual speaker/native/background/federation acceptance is inferred. Source fixture/worker ownership and full commands/results are recorded in PROGRESS/QA_EVIDENCE.
+
+Personal mixes0.10 adds PC01/PC02 to the same stateful real-server suite. PC01
+uses real favorites/history and owned candidates, plays the exploration queue
+through the existing audio node, holds an actual committed feedback response
+while ordinary catalog edits complete, then checks successful Hide/Undo,
+confirmed restore and private exclusion export. Responsive shots cover
+320/768/1440/1920 in both themes. PC02 holds real mix snapshots through navigation
+and logout, using its own disposable login session; no catalog replies are
+fabricated. G07 additionally verifies two actual qualified listens in Home's
+rotation. Existing fixture sessions and the production login limiter remain.

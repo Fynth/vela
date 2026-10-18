@@ -76,6 +76,7 @@ pub fn Home(
     auth: Signal<Option<AuthResponse>>,
     revision: Signal<u64>,
     actions: Actions,
+    children: Element,
 ) -> Element {
     let alive = use_hook(|| Rc::new(Cell::new(true)));
     let dropped = alive.clone();
@@ -160,6 +161,7 @@ pub fn Home(
         div { class: "section-toolbar home-toolbar", p { "Your music. A fresh place to start." } button { class: "button secondary small", disabled: loading(), onclick: move |_| { let next = refresh.peek().wrapping_add(1); refresh.set(next); }, "Refresh Home" } }
         if !error().is_empty() { div { class: "alert error", role: "alert", "{error}" } }
         if loading() && snapshot.recent.is_empty() { div { class: "loading-skeletons", role: "status", "aria-label": "Loading Home", for _ in 0..4 { div { class: "skeleton-card", "aria-hidden": "true" } } } }
+        {children}
         if !snapshot.recent.is_empty() {
             section { class: "home-section", "aria-labelledby": "home-additions", div { class: "section-toolbar", h2 { id: "home-additions", "New in your library" } button { class: "text-button", onclick: move |_| actions.navigate.call("library".into()), "Open library" } } TrackCards { tracks: snapshot.recent, origin:PlaybackContext::new(ContextKind::Home,"New in your library"), actions } }
         } else if !loading() && error().is_empty() { div { class: "empty-state", Icon { name: "music" } h2 { "Make room for your first listen" } p { "Upload music you own or import an authorized audio download. Your library stays private." } button { class: "button primary", onclick: move |_| actions.add.call(()), "Add music" } button { class: "text-button", onclick: move |_| actions.navigate.call("imports".into()), "Import from a URL" } } }

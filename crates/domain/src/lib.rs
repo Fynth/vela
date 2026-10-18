@@ -4,6 +4,8 @@ mod audio_analysis;
 pub use audio_analysis::*;
 mod listening;
 pub use listening::*;
+mod recommendations;
+pub use recommendations::*;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]

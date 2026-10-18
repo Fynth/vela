@@ -127,3 +127,17 @@ browser_player.rs is the single audio adapter, not another UI player or server s
 ADR0012 adds presentation-only now_playing.rs beside the existing browser_player/session/order modules. Root owns its visibility, per-open feedback generation and actions; it neither owns another audio element nor performs HTTP. The bottom bar, native modal and Media Session bridge all control the same source. Native dialog focus/inertness is separate from legacy overlay trapping. Favorite commits update library/catalog/queue consistently while local error/busy feedback matches session, generation and occurrence. now-playing.css is an explicitly allowed static asset included in build/package checks. Schema7, HTTP contracts, storage and upstream pins remain unchanged.
 
 Browser0.8.1 projects the current queued metadata duration during owner-bound sync only while the source is unloaded. After metadata arrives the browser remains authoritative. Both bar/modal consume that single root duration, including pre-load seeking; sync does not start audio, modify generations or reset traversal.
+
+## Private on-demand recommendation read model0.10
+
+MediaService owns candidate eligibility, favorite/qualified-history anchors,
+validated descriptor affinity and artist/album re-ranking in recommendations.rs.
+It reuses discovery.rs rather than adding a framework/service/ML dependency.
+One read snapshot captures current core-owned privacy preferences, retained
+qualified sessions, owned assets and explicit exclusion preferences. No derived
+history cache requires erasure coordination. A default-off request executes no
+history SQL. Server transport authenticates and bounds typed GET/PUT/DELETE;
+web PersonalMixes inside existing Home owns only presentation and guarded
+requests. Playback remains the single root HTMLMediaElement. ADR0015 and
+CONTRACTS define bounds and ownership; daily/weekly refresh and remote/native
+recommendations remain independent milestones.

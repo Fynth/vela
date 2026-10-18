@@ -77,7 +77,7 @@ impl MediaService {
     }
 }
 
-fn query(owner: &str) -> QueryBuilder<'_, Sqlite> {
+pub(super) fn query(owner: &str) -> QueryBuilder<'_, Sqlite> {
     let mut builder = QueryBuilder::new("SELECT aa.features_json, ");
     // Preserve the shared authorized Track projection instead of maintaining a
     // second DTO query. TRACK_SELECT ends at the favorite owner's parameter.
@@ -90,7 +90,7 @@ fn query(owner: &str) -> QueryBuilder<'_, Sqlite> {
     builder
 }
 
-fn features(row: &SqliteRow) -> Option<AudioFeatures> {
+pub(super) fn features(row: &SqliteRow) -> Option<AudioFeatures> {
     let json: Option<String> = row.try_get("features_json").ok()?;
     let json = json.filter(|json| json.len() <= 16_384)?;
     let features: AudioFeatures = serde_json::from_str(&json).ok()?;
@@ -171,18 +171,18 @@ fn audio_distance(left: &AudioFeatures, right: &AudioFeatures) -> Option<f64> {
     Some((0.25 * centroid + 0.20 * rolloff + 0.40 * bands + 0.15 * rms).clamp(0.0, 1.0))
 }
 
-struct Candidate {
-    track: Track,
-    score: f64,
-    reason: &'static str,
-    audio: bool,
+pub(super) struct Candidate {
+    pub(super) track: Track,
+    pub(super) score: f64,
+    pub(super) reason: String,
+    pub(super) audio: bool,
     artist: String,
     album: String,
 }
 fn same_tag(left: &str, right: &str) -> bool {
     !left.trim().is_empty() && left.trim().to_lowercase() == right.trim().to_lowercase()
 }
-fn rank(
+pub(super) fn rank(
     seed: &Track,
     seed_features: Option<&AudioFeatures>,
     track: Track,
@@ -234,14 +234,14 @@ fn rank(
     Candidate {
         track,
         score,
-        reason,
+        reason: reason.into(),
         audio: distance.is_some(),
         artist,
         album,
     }
 }
 
-fn diversify(mut candidates: Vec<Candidate>, limit: usize) -> (Vec<RadioTrack>, bool) {
+pub(super) fn diversify(mut candidates: Vec<Candidate>, limit: usize) -> (Vec<RadioTrack>, bool) {
     let mut artists = HashMap::<String, u32>::new();
     let mut albums = HashMap::<String, u32>::new();
     let mut items = Vec::with_capacity(limit.min(candidates.len()));
@@ -272,7 +272,7 @@ fn diversify(mut candidates: Vec<Candidate>, limit: usize) -> (Vec<RadioTrack>, 
         uses_audio |= candidate.audio;
         items.push(RadioTrack {
             track: candidate.track,
-            reason: candidate.reason.into(),
+            reason: candidate.reason,
         });
     }
     (items, uses_audio)

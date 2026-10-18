@@ -1,3 +1,22 @@
+# 0.10.0 — private listening suggestions (local review candidate)
+
+Home now offers exploration from owned favorites/real audio descriptors and,
+while account collection remains enabled, qualified private history. Rotation
+brings back actual retained listens. Explanations, play/queue/radio actions,
+reversible Hide, confirmed restore and private exclusion export use real APIs.
+Current consent and retention apply in one snapshot; retained disabled history
+has no influence. Additive migration0010 preserves catalog, playlists, events and
+analysis results and does not enable collection or analysis.
+
+Source-driven bounded SQL fixes measured sparse-signal full-catalog scans without
+changing rank outputs or permission policy. Final measurements and platform QA
+are recorded in PROGRESS/PERFORMANCE. This is on-demand personal listening, not a
+scheduled daily/weekly service, public catalog or native client release.
+
+Backup and test restore before upgrading;0.9 source/binary does not know schema10.
+Rollback uses a verified backup in a separate restored directory, retaining the
+original data and immutable media. No external release/publication is performed.
+
 # Local checkpoint0.8.1
 
 Adding a track to an empty queue now gives both the persistent bar and Now Playing its known duration before media is loaded. Seek while paused, then press Play to start at that saved position. The browser's measured duration remains authoritative once loaded; queue/favorite edits preserve active audio and order. Fixes the0.8.0 bar showing0s/max1 while the full player showed the real duration. No schema/API/storage/upstream pin changes. PROGRESS records the reproduced failure and executed checks; packages remain local review artifacts.

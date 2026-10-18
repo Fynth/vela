@@ -1,5 +1,6 @@
 mod analysis;
 mod listening;
+mod recommendations;
 mod upload_guard;
 use axum::{
     Json, Router,
@@ -351,6 +352,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/me", get(me))
         .merge(listening::routes())
         .merge(analysis::routes())
+        .merge(recommendations::routes())
         .route("/api/users", post(create_user))
         .route("/api/tracks", get(tracks))
         .route("/api/albums", get(albums))

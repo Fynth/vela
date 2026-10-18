@@ -99,3 +99,18 @@ Deferred media/retry/probe work checks the exact active session, source generati
 The full player reveals only metadata already in the authenticated root queue. No new media grant, endpoint, credential or path is introduced; favorite writes retain session/CSRF authorization. Root feedback also matches open generation and current occurrence so a held reply cannot overwrite a new track, reopened view or account. A genuine401 still expires the session and clears private player details. Native dialog background inertness is a UI property, never an authorization mechanism. The server permits exactly /now-playing.css; neighboring CSS, SQLite files and traversal remain denied by the static-asset regression.
 
 The0.8 cross-browser follow-up uses fresh isolated Firefox/Chromium profiles and separate temporary server databases. It retains real CSRF/session/revocation/favorite-race checks and never imports a signed-in user profile. Cold-network setup releases only the test element's buffered resource before reload; no production cache/authorization policy, credentials or storage is changed.
+
+## Personal mixes and feedback0.10
+
+Recommendations capture current owner consent/revision/retention and actual media
+in one read snapshot. Disabled history is not queried, including for suppression;
+expired and unqualified sessions supply no signal. No private events leave the
+process or become public popularity. Returned metadata grants no stream right.
+Migration0010 stores owner/track exclusions under a composite FK; desired-state
+mutations use serialized ownership+quota checks and CSRF/Origin protection.
+Export is capped at1000 own UUIDs without paths/secrets. Clear exclusions and erase
+history are separate explicit operations. No implicit collection or automatic
+analysis is introduced. Dioxus cancels obsolete requests and checks privacy
+epoch/revision/busy, session and lifetime before rendering or acting on a mix.
+Ordinary history/catalog freshness cannot discard an unsettled feedback receipt.
+Tests and exact executed evidence are in PROGRESS/QA_EVIDENCE.

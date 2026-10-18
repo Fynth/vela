@@ -1579,10 +1579,23 @@ test('G07 private history measures actual playback only after account and device
   await page.screenshot({path:'test-results/history-desktop.png',fullPage:true});
   await navigate(page,'Home');
   await expect(page.getByRole('heading',{name:'Recently played',exact:true})).toBeVisible();
+  const rotation=page.getByRole('region',{name:'Your rotation',exact:true});
+  await expect(rotation.getByRole('button',{name:'Play History Tide from rotation',exact:true})).toBeVisible();
+  await expect(rotation).toContainText('2 qualified listens');
   await expect(page.locator('#vela-audio')).toHaveJSProperty('paused',true);
   await page.getByRole('button',{name:'Explore radio from History Tide',exact:true}).first().click();
   await expect(page.getByRole('heading',{name:'History Tide radio',exact:true})).toBeVisible();
   await expect(page.locator('#vela-audio')).toHaveJSProperty('paused',true);
+  await navigate(page,'Home');
+  await expect(page.getByRole('button',{name:'Refresh personal mixes',exact:true})).toBeEnabled();
+  let releaseMix;const mixGate=new Promise(resolve=>releaseMix=resolve);let mixHeld=false;
+  await page.route('**/api/recommendations?*',async route=>{
+    const response=await route.fetch({timeout:3000});expect(response.ok()).toBeTruthy();
+    expect((await response.json()).rotation.some(item=>item.track.id===uploaded.track.id)).toBeTruthy();
+    mixHeld=true;await mixGate;try{await route.fulfill({response});}catch{/* Erasure workflow invalidates the abandoned read. */}
+  });
+  await page.getByRole('button',{name:'Refresh personal mixes',exact:true}).click();
+  await expect.poll(()=>mixHeld,{timeout:3000}).toBeTruthy();
   await navigate(page,'Settings');
   const downloadPromise=page.waitForEvent('download');
   await page.getByRole('button',{name:'Export private history',exact:true}).click();
@@ -1606,10 +1619,148 @@ test('G07 private history measures actual playback only after account and device
   await page.unroute('**/api/listening/export');
   await expect.poll(async()=>(await exportHistory()).events.length).toBe(0);
   expect(staleDownloads).toEqual([]);
+  releaseMix();await page.unroute('**/api/recommendations?*');
+  await navigate(page,'Home');
+  await expect(page.getByRole('region',{name:'Your rotation',exact:true})).toContainText('Your listening history is off');
+  await expect(page.getByRole('button',{name:'Play History Tide from rotation',exact:true})).toHaveCount(0);
   await findTrack(page,'History Tide');await page.getByRole('button',{name:'Play History Tide',exact:true}).click();
   await expect.poll(()=>page.locator('#vela-audio').evaluate(a=>a.currentTime)).toBeGreaterThan(1);
   await page.getByRole('button',{name:'Pause',exact:true}).click();
   expect((await exportHistory()).events).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
+test('PC01 personal mixes play real owned music and hidden choices support undo restore and export',async({page})=>{
+  const errors=[];page.on('pageerror',error=>errors.push(error.message));
+  await openAdminFixture(page);
+  const me=await(await page.request.get('/api/me')).json();
+  const tracks=(await(await page.request.get('/api/tracks?limit=100')).json()).items;
+  const seed=tracks.find(track=>track.duration_ms>=20000)||tracks[0];
+  expect(tracks.length).toBeGreaterThan(2);
+  const favorite=await page.request.post(`/api/tracks/${seed.id}/favorite`,{headers:{'X-CSRF-Token':me.csrf_token},data:{favorite:true}});
+  expect(favorite.ok()).toBeTruthy();
+  await page.locator('#vela-audio').evaluate(a=>{window.personalAudioNode=a;});
+  await navigate(page,'Home');
+  const region=page.getByRole('region',{name:'Personal recommendations',exact:true});
+  const explore=region.getByRole('region',{name:'Explore your library',exact:true});
+  await expect(explore.locator('.personal-mix-card').first()).toBeVisible();
+  const mix=await(await page.request.get('/api/recommendations?limit=8')).json();
+  expect(mix.history_enabled).toBe(false);expect(mix.rotation).toEqual([]);expect(mix.anchor_count).toBeGreaterThan(0);
+  expect(mix.discovery.length).toBeGreaterThan(0);
+  const first=mix.discovery[0];
+  expect(tracks.some(track=>track.id===first.track.id)).toBeTruthy();
+  await expect(explore.locator(`[data-track-id="${first.track.id}"] .personal-mix-reason`)).toHaveText(first.reason);
+  await region.getByRole('button',{name:'Play exploration mix',exact:true}).click();
+  await expect.poll(()=>page.locator('#vela-audio').evaluate(a=>!a.paused&&a.currentTime>0)).toBeTruthy();
+  expect(await page.locator('#vela-audio').evaluate(a=>a===window.personalAudioNode)).toBeTruthy();
+  await expect(page.locator('#vela-audio')).toHaveAttribute('src',new RegExp(`/api/tracks/${first.track.id}/stream`));
+  await page.getByRole('button',{name:'Pause',exact:true}).click();
+  const source=await page.locator('#vela-audio').getAttribute('src');
+  let releaseHide;const hideGate=new Promise(resolve=>releaseHide=resolve);
+  let hideHeld=false,hideResponded=false;
+  const hideHandler=async route=>{
+    if(route.request().method()!=='PUT'){await route.continue();return;}
+    const response=await route.fetch({timeout:3000});expect(response.ok()).toBeTruthy();hideHeld=true;
+    await hideGate;await route.fulfill({response});hideResponded=true;
+  };
+  await page.route('**/api/recommendations/feedback',hideHandler);
+  // Finish well inside the product's 10s mutation deadline, even when a locator fails.
+  const raceDeadline=Date.now()+7000;const raceTimeout=()=>Math.max(1,raceDeadline-Date.now());
+  try{
+    await explore.getByRole('button',{name:`Hide ${first.track.title} from personal mixes`,exact:true}).click({timeout:raceTimeout()});
+    await expect.poll(()=>hideHeld,{timeout:raceTimeout()}).toBeTruthy();
+    // The root current-track favorite lives in Now Playing, including while Home refreshes.
+    await page.getByRole('button',{name:'Open now playing',exact:true}).click({timeout:raceTimeout()});
+    const dialog=page.getByRole('dialog',{name:'Now playing',exact:true});
+    const currentFavorite=dialog.getByRole('button',{name:/current track.*favorites|Favorite current track/});
+    await expect(currentFavorite).toBeEnabled({timeout:raceTimeout()});
+    const original=await currentFavorite.getAttribute('aria-pressed');expect(['true','false']).toContain(original);
+    await currentFavorite.click({timeout:raceTimeout()});
+    await expect(currentFavorite).toHaveAttribute('aria-pressed',String(original!=='true'),{timeout:raceTimeout()});
+    await expect(currentFavorite).toBeEnabled({timeout:raceTimeout()});
+    await currentFavorite.click({timeout:raceTimeout()});
+    await expect(currentFavorite).toHaveAttribute('aria-pressed',original,{timeout:raceTimeout()});
+    await expect(currentFavorite).toBeEnabled({timeout:raceTimeout()});
+    await dialog.getByRole('button',{name:'Close now playing',exact:true}).click({timeout:raceTimeout()});
+    expect(Date.now()).toBeLessThan(raceDeadline);
+  }finally{
+    releaseHide();
+    await expect.poll(()=>hideResponded,{timeout:3000}).toBeTruthy();
+    await page.unroute('**/api/recommendations/feedback',hideHandler);
+  }
+  await expect(region.getByRole('button',{name:'Undo last recommendation hide',exact:true})).toBeEnabled();
+  await expect(explore.locator(`[data-track-id="${first.track.id}"]`)).toHaveCount(0);
+  let exclusions=await(await page.request.get('/api/recommendations/feedback')).json();
+  expect(exclusions.track_ids).toContain(first.track.id);
+  expect(await page.locator('#vela-audio').getAttribute('src')).toBe(source);
+  await region.getByRole('button',{name:'Undo last recommendation hide',exact:true}).click();
+  await expect(explore.locator(`[data-track-id="${first.track.id}"]`)).toBeVisible();
+  await explore.getByRole('button',{name:`Hide ${first.track.title} from personal mixes`,exact:true}).click();
+  await expect(region.getByRole('button',{name:'Restore hidden recommendations…',exact:true})).toBeEnabled();
+  const downloadPromise=page.waitForEvent('download');
+  await region.getByRole('button',{name:'Export hidden recommendations',exact:true}).click();
+  const download=await downloadPromise;const stream=await download.createReadStream();const chunks=[];for await(const chunk of stream)chunks.push(chunk);
+  expect(JSON.parse(Buffer.concat(chunks).toString()).track_ids).toContain(first.track.id);
+  await region.getByRole('button',{name:'Restore hidden recommendations…',exact:true}).click();
+  await region.getByRole('button',{name:'Keep hidden tracks',exact:true}).click();
+  expect((await(await page.request.get('/api/recommendations/feedback')).json()).track_ids).toContain(first.track.id);
+  await region.getByRole('button',{name:'Restore hidden recommendations…',exact:true}).click();
+  await region.getByRole('button',{name:'Restore all hidden recommendations',exact:true}).click();
+  await expect(explore.locator(`[data-track-id="${first.track.id}"]`)).toBeVisible();
+  expect((await(await page.request.get('/api/recommendations/feedback')).json()).track_ids).toEqual([]);
+  for(const [width,theme] of [320,768,1440,1920].flatMap(width=>['dark','light'].map(theme=>[width,theme]))) {
+    await page.setViewportSize({width,height:900});
+    await page.locator('html').evaluate((el,value)=>el.setAttribute('data-theme',value),theme);
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBeTruthy();
+    const art=await explore.locator('.artwork').first().boundingBox();
+    expect(Math.abs(art.width-art.height)).toBeLessThan(1);
+    await explore.scrollIntoViewIfNeeded();
+    await page.screenshot({path:`test-results/personal-${width}-${theme}.png`,animations:'disabled'});
+  }
+  expect(errors).toEqual([]);
+});
+
+test('PC02 held genuine personal recommendations cannot return after navigation or logout',async({page})=>{
+  const errors=[];page.on('pageerror',error=>errors.push(error.message));
+  // Signing out must revoke only this scenario's session, not the shared fixture cookie.
+  const session=await page.request.post('/api/login',{data:{username:'admin',password}});
+  expect(session.ok()).toBeTruthy();
+  await page.goto('/');
+  await expect(page.getByRole('button',{name:'Library',exact:true}).first()).toBeVisible();
+  await navigate(page,'Library');
+  const leaveWithHeldRecommendations=async leave=>{
+    let release;const gate=new Promise(resolve=>release=resolve);
+    let held=false,active=0;
+    const handler=async route=>{
+      active++;
+      try{
+        const response=await route.fetch({timeout:3000});expect(response.ok()).toBeTruthy();held=true;
+        await gate;
+        try{await route.fulfill({response});}catch{/* Navigation/session teardown physically aborts obsolete reads. */}
+      }finally{active--;}
+    };
+    await page.route('**/api/recommendations?*',handler);
+    try{
+      await navigate(page,'Home');
+      await expect.poll(()=>held,{timeout:3000}).toBeTruthy();
+      await leave();
+      release();
+      // Observe every held callback finish before checking the destination for stale content.
+      await expect.poll(()=>active,{timeout:3000}).toBe(0);
+    }finally{
+      release();await page.unroute('**/api/recommendations?*',handler);
+    }
+  };
+  await leaveWithHeldRecommendations(()=>navigate(page,'Search'));
+  await expect(page.getByRole('region',{name:'Personal recommendations',exact:true})).toHaveCount(0);
+  await expect(page.locator('#global-search')).toBeVisible();
+  await leaveWithHeldRecommendations(async()=>{
+    await navigate(page,'Settings');
+    await page.getByRole('button',{name:'Sign out',exact:true}).click();
+    await expect(page.locator('#username')).toBeVisible();
+  });
+  await expect(page.locator('#username')).toBeVisible();
+  await expect(page.getByRole('region',{name:'Personal recommendations',exact:true})).toHaveCount(0);
   expect(errors).toEqual([]);
 });
 

@@ -17,6 +17,18 @@ Status meanings: implemented=source exists; verified=checks recorded in PROGRESS
 | 10 Shared experiences | Planned | Authorized WebSocket rooms, clock/latency/reconnect semantics, shared queues, opt-in activity feeds, collection exploration, interoperability |
 | 11 Hardening | Partial | Regression/security/benchmark/backup/deploy work underway; ongoing audits, real container/ARM64 builds, stress/seek/upload/restart tests, accessibility review, release notes |
 
+## Current0.10 increment
+
+Personal Home exploration, qualified rotation, reversible exclusions and owner-only
+export are implemented; final browser/package evidence remains in PROGRESS. Current
+Rust gates176 and source-derived SQL-equivalence checks pass. Preserve real audio,
+permissions, private defaults and original20-track data plus20 completed analysis
+rows observed on resume. Next complete product work: lawful opt-in origin/license/
+publication policy and two-node discovery/stream revocation; native Linux/Android
+playback contracts/actual engines remain parallel platform work, Apple validation
+requires its toolchain. Scheduled personal mixes and calibrated relevance need
+separate durable refresh/evaluation, not relabeling current on-demand shelves.
+
 ## Next ordered slices
 
 The full VELA_ULTIMATE_AUTONOMOUS_FEDERATED_MUSIC_MASTER_PROMPT.md supplied2026-10-17 supersedes prior priority ordering. It was read in full; the existing0.8.1 repository/runtime were inspected and backed up. New golden IDs G01–G24 are distinguished in QA_EVIDENCE from older UX IDs.

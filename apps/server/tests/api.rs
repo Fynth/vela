@@ -9,6 +9,308 @@ const AUDIO: &[u8] = include_bytes!("../../../crates/media/tests/fixtures/signal
 const OTHER_AUDIO: &[u8] = include_bytes!("../../../crates/media/tests/fixtures/beacon.mp3");
 
 #[tokio::test]
+async fn personal_mixes_use_only_current_consented_history_and_owned_feedback() {
+    let app = TestApp::new().await;
+    let other = app.user("mix_listener").await;
+    let own = app.upload(&app.admin).await.track;
+    // Same physical audio does not give the other account our track identity.
+    let foreign = app.upload(&other).await.track;
+    let form = reqwest::multipart::Form::new().part(
+        "file",
+        reqwest::multipart::Part::bytes(OTHER_AUDIO.to_vec()).file_name("beacon.mp3"),
+    );
+    let second: UploadResult = app
+        .request(Method::POST, "/api/upload", &app.admin)
+        .multipart(form)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let endpoint = "/api/recommendations?limit=10";
+    let response = app
+        .request(Method::GET, endpoint, &app.admin)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.headers()["cache-control"], "no-store");
+    let cold: Recommendations = response.json().await.unwrap();
+    assert!(!cold.history_enabled);
+    assert_eq!(cold.anchor_count, 0);
+    assert_eq!(cold.candidate_count, 2);
+    assert_eq!(cold.discovery.len(), 2);
+    assert!(cold.rotation.is_empty());
+    assert!(cold.discovery.iter().all(|x| x.track.id != foreign.id));
+    for suffix in ["?limit=0", "?limit=31", "?limit=-1", "?unknown=1"] {
+        assert_eq!(
+            app.request(
+                Method::GET,
+                &format!("/api/recommendations{suffix}"),
+                &app.admin
+            )
+            .send()
+            .await
+            .unwrap()
+            .status(),
+            StatusCode::BAD_REQUEST
+        );
+    }
+    assert_eq!(
+        app.client
+            .get(format!("{}{endpoint}", app.base))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+    let feedback = RecommendationFeedback {
+        track_id: second.track.id.clone(),
+        hidden: true,
+    };
+    assert_eq!(
+        app.client
+            .put(format!("{}/api/recommendations/feedback", app.base))
+            .header("Cookie", &app.admin.cookie)
+            .json(&feedback)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        app.request(Method::PUT, "/api/recommendations/feedback", &app.admin)
+            .json(&json!({"track_id":own.id,"hidden":true,"owner_id":other.user.id}))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        app.request(Method::PUT, "/api/recommendations/feedback", &app.admin)
+            .json(&RecommendationFeedback {
+                track_id: foreign.id.clone(),
+                hidden: true
+            })
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+    for _ in 0..2 {
+        let receipt: RecommendationFeedbackReceipt = app
+            .request(Method::PUT, "/api/recommendations/feedback", &app.admin)
+            .json(&feedback)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(
+            receipt.hidden_count, 1,
+            "desired-state feedback must be idempotent"
+        );
+    }
+    let hidden: Recommendations = app
+        .request(Method::GET, endpoint, &app.admin)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(hidden.hidden_count, 1);
+    assert!(
+        hidden
+            .discovery
+            .iter()
+            .all(|x| x.track.id != second.track.id)
+    );
+    let exported: RecommendationExclusions = app
+        .request(Method::GET, "/api/recommendations/feedback", &app.admin)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(exported.track_ids, vec![second.track.id.clone()]);
+    let foreign_export: RecommendationExclusions = app
+        .request(Method::GET, "/api/recommendations/feedback", &other)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(foreign_export.track_ids.is_empty());
+    app.request(Method::PUT, "/api/recommendations/feedback", &app.admin)
+        .json(&RecommendationFeedback {
+            track_id: second.track.id.clone(),
+            hidden: false,
+        })
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+    let device = uuid::Uuid::new_v4().to_string();
+    let enabled: ListeningPreferences = app
+        .request(Method::PUT, "/api/listening/preferences", &app.admin)
+        .json(&UpdateListeningPreferences {
+            enabled: true,
+            device_enabled: true,
+            device_id: device.clone(),
+            retention_days: 90,
+            revision: 0,
+        })
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let batch = ListeningBatch {
+        device_id: device.clone(),
+        revision: enabled.revision,
+        events: vec![ListeningProgress {
+            session_id: uuid::Uuid::new_v4().to_string(),
+            sequence: 1,
+            track_id: own.id.clone(),
+            listened_ms: own.duration_ms.min(30000),
+            position_ms: own.duration_ms.min(30000),
+            started_at: vela_core::now() - 60,
+            ended: true,
+        }],
+    };
+    for _ in 0..2 {
+        app.request(Method::POST, "/api/listening/events", &app.admin)
+            .json(&batch)
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap();
+    }
+    let personal: Recommendations = app
+        .request(Method::GET, endpoint, &app.admin)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(personal.history_enabled);
+    assert_eq!(personal.privacy_revision, enabled.revision);
+    assert_eq!(personal.rotation.len(), 1);
+    assert_eq!(personal.rotation[0].track.id, own.id);
+    assert!(personal.discovery.iter().all(|x| x.track.id != own.id));
+    let disabled: ListeningPreferences = app
+        .request(Method::PUT, "/api/listening/preferences", &app.admin)
+        .json(&UpdateListeningPreferences {
+            enabled: false,
+            device_enabled: true,
+            device_id: device.clone(),
+            retention_days: 90,
+            revision: enabled.revision,
+        })
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let retained: ListeningExport = app
+        .request(Method::GET, "/api/listening/export", &app.admin)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        retained.events.len(),
+        1,
+        "opting out preserves history until explicit erase"
+    );
+    let private: Recommendations = app
+        .request(Method::GET, endpoint, &app.admin)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(!private.history_enabled);
+    assert_eq!(private.privacy_revision, disabled.revision);
+    assert_eq!(
+        private.anchor_count, 0,
+        "retained history must not influence opted-out recommendations"
+    );
+    assert!(private.rotation.is_empty());
+    assert_eq!(private.discovery.len(), 2);
+    // Hiding affects recommendations only, never the catalog or stream ACL.
+    app.request(Method::PUT, "/api/recommendations/feedback", &app.admin)
+        .json(&feedback)
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+    let stream = app
+        .request(
+            Method::GET,
+            &format!("/api/tracks/{}/stream", second.track.id),
+            &app.admin,
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(stream.status(), StatusCode::OK);
+    assert_eq!(stream.bytes().await.unwrap().as_ref(), OTHER_AUDIO);
+    assert_eq!(
+        app.request(
+            Method::GET,
+            &format!("/api/tracks/{}/stream", foreign.id),
+            &app.admin
+        )
+        .send()
+        .await
+        .unwrap()
+        .status(),
+        StatusCode::NOT_FOUND
+    );
+    let cleared: RecommendationFeedbackReceipt = app
+        .request(Method::DELETE, "/api/recommendations/feedback", &app.admin)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(cleared.hidden_count, 0);
+    let response = app
+        .request(Method::GET, endpoint, &other)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(!response.contains(&own.id) && !response.contains(&second.track.id));
+    assert!(
+        !response.contains("storage_path")
+            && !response.contains("password_hash")
+            && !response.contains("listening_sessions")
+    );
+}
+
+#[tokio::test]
 async fn actual_analysis_worker_and_radio_remain_private_and_preserve_original_streams() {
     let app = TestApp::new().await;
     let other = app.user("analysis_other").await;

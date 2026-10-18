@@ -31,3 +31,14 @@ Connection interruption shows bounded reconnect progress and a manual Retry play
 Select the current track in the persistent player to open Now Playing. Desktop presents the cover, title/artist/album, seek, transport and volume beside actual original-file details and a bounded saved-order queue preview. Phones use a full-height scrollable view with the same real controls. Inspection of a queued/paused track does not fetch or start its audio. Closing restores the trigger; Escape and keyboard focus follow native dialog semantics. No decorative lyrics/device/effect controls are exposed.
 
 Play/pause, previous/next, shuffle/repeat, volume, seeking and Retry use the root player. Favorite changes agree across Library, collection rows and queued duplicates. View full queue closes this view and opens the existing queue controls; preview selection selects the exact occurrence. Track changes retain the same dialog/audio element, while navigation/sign-out/expiry close private details. Recovery messages describe the real engine; source properties are shown only when known. Shuffle preview explicitly says saved order rather than predicting the random traversal.
+
+## Personal Home0.10
+
+After the welcome hero, Exploration plays real eligible owned suggestions with
+favorite/listening/tag/measured explanations; Rotation plays actual qualified
+private listens. Unavailable evidence produces honest cold/empty states. Hidden
+choices offer successful-operation Undo, confirmed restore-all and private export.
+Turning account history off removes its ranking/suppression influence while
+retaining the journal until explicit erase. All playback and queue commands use
+root actions; navigation preserves the active audio occurrence. Coverage details
+are optional disclosure. These are on-demand sets; no daily/weekly promise.

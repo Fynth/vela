@@ -1,5 +1,18 @@
 # Music experience parity
 
+## Personal discovery checkpoint0.10 (final verification in progress)
+
+| Feature / priority | Status | Exact implementation | Acceptance / evidence | Platform / caveat |
+| --- | --- | --- | --- | --- |
+| Private Home exploration / rotation P0 | PARTIAL pending final browser gate | crates/media/src/recommendations.rs; apps/web/src/personal_mixes.rs; domain/src/recommendations.rs; server/src/recommendations.rs |176 Rust tests and strict native/WASM Clippy; source-driven SQL/retention/privacy/owner/quota; PC01/PC02 and G07 | Native server + web only; on-demand owned catalog, max500 candidates/12anchors, no scheduled/network model |
+| Reversible recommendation exclusions P0 | PARTIAL pending final browser gate | migrations/0010_recommendation_exclusions.sql; same media/server/web modules | Owner FK, serialized1000 limit, desired-state hide/undo/clear, UUID-only export; real TCP and concurrency tests | Separate from history erase, no change to media rights/favorites/playlists |
+| Query scaling P0 | PARTIAL until final1m measurement | crates/media/examples/benchmark_recommendations.rs | Preserved baseline + actual release10k/100k/1m; output projection equivalence | Synthetic metadata, unique timestamps and small history; no human relevance/stream capacity claim |
+
+The earlier ten-gap inventory is historical. Personal on-demand shelves and feedback
+are implemented in this slice; durable daily/weekly refresh, calibrated quality,
+large-history/tied-time profiling, lawful two-server publication/rights and native
+clients remain ordered work. PROGRESS records exact verified source/package/runtime.
+
 ## Current mandate audit2026-10-17
 
 Baseline was re-established at main f6cc845/application ac31d74:110 Rust tests,33 Chromium scenarios; actual loopback0.8.1 supervised runtime and20-track original library, fresh private backup/restore. New0.9 working tree evolves the same seven crates. New G01–G24 IDs are the latest mandate; older G numbers below remain historical. No native/federated completion is implied.

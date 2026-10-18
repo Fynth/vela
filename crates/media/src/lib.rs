@@ -415,3 +415,5 @@ pub mod analysis;
 pub mod analysis_service;
 mod discovery;
 pub use discovery::DiscoveryError;
+mod recommendations;
+pub use recommendations::RecommendationError;

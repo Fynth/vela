@@ -1,3 +1,19 @@
+# Personal discovery0.10 source evidence
+
+Source checkpoint is the local application commit identified by the packaged BUILD.txt;
+final exact archive/runtime evidence is recorded in PROGRESS after packaging.
+
+| Feature | Exact paths | Verified source | Executed evidence | Status | Next / owner |
+| --- | --- | --- | --- | --- | --- |
+| Private mix/service/feedback | crates/media/src/recommendations.rs; apps/server/src/recommendations.rs; migrations/0010_recommendation_exclusions.sql |0.10 source pending package |176 Rust tests, strict native/all-target+WASM Clippy, real TCP, legacy9upgrade, owner/consent/retention/concurrency | PASS | Preserve gates / main |
+| Home/root playback/exclusions | apps/web/src/personal_mixes.rs; tests/browser/music.spec.mjs |0.10 source pending package |Chromium37; G07 rendered actual rotation/erase; PC01 real playback/hide/undo/restore/export/catalog race; PC02 held read cancellation | PASS for source run | Exact package two-engine/screenshots / main |
+| SQL performance | media/src/recommendations.rs; examples/benchmark_recommendations.rs | SHA256 in final resource JSON |10k/100k/1m actual release + baseline projection/plan equality; raw samples/hardware/scope in PERFORMANCE | PASS within recorded scope | Tied timestamps/dense history and calibrated quality / main |
+| Visual/platform scope | tests/browser screenshots; PLATFORM_MATRIX | Final screenshots pending | Source shots inspected; corrected capture for CSS transition settling; Docker daemon and in-app browser absent | PARTIAL | Exact package screenshots + Firefox / main |
+
+Preserved failed runs remain FAILED, not passing evidence. Original20tracks and20analysis
+rows were backed up/restored; frozen0.9 runtime restored separately from0.10 candidate.
+Private defaults were unchanged. Full native clients and public federation remain NOT_RUN.
+
 # Current mandate evidence
 
 The latest master mandate has24 golden scenarios. Historical G01–G14 numbers in older docs/tests belong to the earlier UX brief and do not automatically satisfy the new meanings. Preserve named regression IDs EXP/PLAY/PLNAV/RES/NET/AUTH/NP. New history uses G07-private-history, DSP G08-audio-analysis and radio G09-track-radio.

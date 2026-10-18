@@ -36,3 +36,25 @@ This is an early functional slice. The complete master roadmap is not delivered.
 - Reconnect uses three delays,10s HEAD deadlines and an8s progress watchdog; final failure needs explicit retry. Unsupported files can exhaust recovery without a precise codec diagnosis. Session revocation is detected on denied requests, not by erasing already buffered bytes. Autoplay restrictions can require another Play gesture after asynchronous metadata/recovery. Physical audio output, Safari, background suspension and native lock-screen services remain unverified.
 
 - Now Playing0.8 is a native browser modal, full-height/scrollable on phones, with a five-entry saved-order preview. It is not an always-visible right sidebar, randomized shuffle prediction, lyrics view, file download grant or native engine. Source properties reflect metadata, not measured decoder output; no new latency/gapless/audio-quality certification follows. Dialog/native-focus behavior and Media Session callbacks are tested in isolated Chromium and Playwright Firefox157/Linux, not Safari, screen readers or physical headset/lock-screen hardware. Playwright used its Ubuntu24.04 fallback Firefox on this CachyOS host; this does not certify all stock Firefox builds/OS combinations. Very long text, enlarged fonts and short viewports can require vertical scrolling; controls remain reachable.
+
+## On-demand personal mixes0.10 scope
+
+Exploration caps at500 newest eligible nonhidden owned tracks and12 combined
+favorite/recent-qualified anchors. It may return empty after anchor/played
+suppression; it does not backfill with mislabeled repeats. Rotation shortlists
+at most500 retained qualified tracks before diversity. Neither is a whole-
+library similarity index, scheduled snapshot or calibrated preference model.
+Explicit hidden-track choices cap at1000/account and are distinct from history:
+history erasure does not reset them; Home has restore-all and UUID-only export.
+Data-only updates may wait for one bounded10s feedback/export request; true
+privacy/session changes invalidate immediately. Remote preference revisions
+require refreshing privacy settings before another mismatched mix can display.
+No public catalog, collaborative model, native client or offline entitlement is
+implied by these server/browser features.
+
+Personal candidate ordering uses added_at DESC/id ASC; the existing newest index
+uses id DESC. Very large equal-timestamp batches may need extra sorting. The
+current scale benchmark uses unique added timestamps and at most50 qualified
+fixture sessions, so tied-time and10000-session latency remain unmeasured. Stable
+repeated inputs return stable mixes; Refresh reloads current data rather than
+pretending to regenerate an independently scheduled or random taste model.

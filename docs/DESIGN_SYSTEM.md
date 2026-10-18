@@ -22,3 +22,14 @@ The0.8 QA follow-up exercises the same dialog/focus/transport/theme/viewport ass
 
 
 Radio0.9 uses the same forest/ivory tokens, original neutral artwork, a bounded seed hero, dense track rows with explicit reasons, and a secondary optional analysis panel. No invented cover art or genre/mood confidence is shown. Private history rows link actual playback to related track radio; Settings separates account/device consent and explicit erasure. Source/status/measurement details use existing surfaces and accessible controls. The first actual radio screenshots exposed a div-based placeholder inheriting the flexible description rule; the selector now names the description explicitly, and screenshot checks assert square artwork at all eight size/theme combinations. Component screenshots keep the privacy panel reviewable without capturing long unrelated administrator scan histories. Final artifact paths and engine results are in PROGRESS.
+
+## Personal Home shelves0.10
+
+PersonalMixes renders inside Home after its hero/toolbar and before additions,
+with the existing compact listening history alongside it. Reuse cover/spacing/
+button tokens; do not create another player or navigation shell. Exploration and
+rotation have actual playable cards with short reasons and scoped next/last/radio/
+hide actions. Coverage, algorithm and refresh details live in a disclosure rather
+than dominate the listening flow. Pending privacy or preference writes clear
+stale actionable cards; successful Undo and explicit confirmation remain visible.
+Responsive assertions/screenshots are executed separately from source presence.
