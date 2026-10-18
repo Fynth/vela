@@ -48,6 +48,8 @@ struct LibraryConditions {
 struct LibraryUi {
     tracks: Signal<Vec<Track>>,
     cursor: Signal<Option<String>>,
+    // Cursor that produced the visible page; None means the first page.
+    page_after: Signal<Option<String>>,
     loading: Signal<bool>,
     error: Signal<String>,
     filter_error: Signal<String>,
@@ -83,6 +85,7 @@ async fn request_library(conditions: LibraryConditions, after: Option<String>, m
     let mut url = format!("/api/tracks?limit=50&favorites={favorite}");
     filters::append_query(&mut url, "q", &conditions.query);
     filters::append_filters(&mut url, &conditions.filters);
+    let page_after = after.clone();
     if let Some(value) = after {
         filters::append_query(&mut url, "cursor", &value);
     }
@@ -100,6 +103,7 @@ async fn request_library(conditions: LibraryConditions, after: Option<String>, m
             ui.conditions.set(conditions);
             ui.tracks.set(page.items);
             ui.cursor.set(page.next_cursor);
+            ui.page_after.set(page_after);
             ui.error.set(String::new());
             ui.filter_error.set(String::new());
         }
@@ -278,6 +282,19 @@ fn move_queue_up(at: usize, mut ui: PlaybackUi) {
     }
     persist_queue(&ui.queue.peek(), ui.auth);
 }
+fn move_queue_down(at: usize, mut ui: PlaybackUi) {
+    synchronize_order(ui);
+    let next = at.saturating_add(1);
+    let length = ui.queue.peek().len();
+    if next >= length || !ui.order.write().swap(at, next) {
+        return;
+    }
+    ui.queue.write().swap(at, next);
+    if let Some(current) = ui.order.peek().current() {
+        ui.index.set(current);
+    }
+    persist_queue(&ui.queue.peek(), ui.auth);
+}
 fn remove_queued(at: usize, mut ui: PlaybackUi) {
     synchronize_order(ui);
     if !ui.order.write().remove(at) {
@@ -289,11 +306,39 @@ fn remove_queued(at: usize, mut ui: PlaybackUi) {
     }
     persist_queue(&ui.queue.peek(), ui.auth);
 }
+fn has_upcoming(queue_length: usize, cursor: usize) -> bool {
+    queue_length > cursor.saturating_add(1)
+}
 fn clear_upcoming(mut ui: PlaybackUi) {
-    let retained = ui.queue.peek().get(*ui.index.peek()).cloned();
-    ui.queue.set(retained.into_iter().collect());
-    ui.index.set(0);
-    ui.order.write().reset(ui.queue.peek().len(), 0);
+    synchronize_order(ui);
+    let cursor = *ui.index.peek();
+    if !has_upcoming(ui.queue.peek().len(), cursor) {
+        return;
+    }
+    // Remove only the occurrences strictly after the cursor, walking backwards
+    // so the kept prefix (played rows and the current occurrence) never shifts.
+    // PlaybackOrder::remove is the supported structural edit: it rejects the
+    // current occurrence and remaps every history/deck/next reference. The
+    // queue is bounded to 1,000 occurrences, so this stays bounded too.
+    let keep = cursor.saturating_add(1);
+    let mut removed = 0_usize;
+    while ui.queue.peek().len() > keep {
+        let last = ui.queue.peek().len() - 1;
+        if !ui.order.write().remove(last) {
+            break;
+        }
+        ui.queue.write().remove(last);
+        removed += 1;
+    }
+    if removed == 0 {
+        return;
+    }
+    if let Some(current) = ui.order.peek().current() {
+        ui.index.set(current);
+    }
+    // The order model was edited alongside every removal; this no-op check
+    // proves it still describes the final queue. No audio call happens here.
+    synchronize_order(ui);
     persist_queue(&ui.queue.peek(), ui.auth);
 }
 fn select_queued(at: usize, mut ui: PlaybackUi) {
@@ -735,10 +780,14 @@ struct CatalogUi {
     albums: Signal<Vec<AlbumSummary>>,
     artists: Signal<Vec<ArtistSummary>>,
     cursor: Signal<Option<String>>,
+    // Cursor that produced the visible collection page; None means page one.
+    page_after: Signal<Option<String>>,
     loading: Signal<bool>,
     selected: Signal<Option<CatalogSelection>>,
     tracks: Signal<Vec<Track>>,
     track_cursor: Signal<Option<String>>,
+    // Cursor that produced the visible group track page; None means page one.
+    track_page_after: Signal<Option<String>>,
     detail_loading: Signal<bool>,
     generation: Signal<u64>,
     auth: Signal<Option<AuthResponse>>,
@@ -799,6 +848,7 @@ fn catalog_page(cursor: Option<String>, mut ui: CatalogUi) {
     ui.track_cursor.set(None);
     ui.detail_loading.set(false);
     ui.loading.set(true);
+    let page_after = cursor.clone();
     let url = catalog_url(&view, None, cursor);
     spawn_authorized(ui.auth, async move {
         if view == "albums" {
@@ -810,6 +860,7 @@ fn catalog_page(cursor: Option<String>, mut ui: CatalogUi) {
                 Ok(result) => {
                     ui.albums.set(result.items);
                     ui.cursor.set(result.next_cursor);
+                    ui.page_after.set(page_after);
                 }
                 Err(message) => ui.error.set(message),
             }
@@ -822,6 +873,7 @@ fn catalog_page(cursor: Option<String>, mut ui: CatalogUi) {
                 Ok(result) => {
                     ui.artists.set(result.items);
                     ui.cursor.set(result.next_cursor);
+                    ui.page_after.set(page_after);
                 }
                 Err(message) => ui.error.set(message),
             }
@@ -846,6 +898,7 @@ fn catalog_tracks(cursor: Option<String>, mut ui: CatalogUi) {
     ui.tracks.set(Vec::new());
     ui.track_cursor.set(None);
     ui.detail_loading.set(true);
+    let page_after = cursor.clone();
     let url = catalog_url(&view, Some(selection.id()), cursor);
     spawn_authorized(ui.auth, async move {
         let response = api::<TrackPage>("GET", &url, None, "").await;
@@ -856,6 +909,7 @@ fn catalog_tracks(cursor: Option<String>, mut ui: CatalogUi) {
             Ok(result) => {
                 ui.tracks.set(result.items);
                 ui.track_cursor.set(result.next_cursor);
+                ui.track_page_after.set(page_after);
             }
             Err(message) => ui.error.set(message),
         }
@@ -874,11 +928,20 @@ fn clear_catalog(mut ui: CatalogUi) {
     ui.albums.set(Vec::new());
     ui.artists.set(Vec::new());
     ui.cursor.set(None);
+    ui.page_after.set(None);
     ui.selected.set(None);
     ui.tracks.set(Vec::new());
     ui.track_cursor.set(None);
+    ui.track_page_after.set(None);
     ui.loading.set(false);
     ui.detail_loading.set(false);
+}
+
+#[component]
+fn MoveDownIcon() -> Element {
+    // Move-down counterpart of the original "up" arrow in icons.rs. Inline SVG
+    // keeps the existing icon language without touching that file.
+    rsx! { svg { class: "vela-icon", view_box: "0 0 24 24", width: "24", height: "24", fill: "none", stroke: "currentColor", stroke_width: "1.7", stroke_linecap: "round", stroke_linejoin: "round", "aria-hidden": "true", "focusable": "false", path { d: "m5 12 7 7 7-7M12 3v16" } } }
 }
 
 #[component]
@@ -935,6 +998,7 @@ fn App() -> Element {
     let library = LibraryUi {
         tracks,
         cursor,
+        page_after: use_signal(|| None::<String>),
         loading,
         error,
         generation: request_generation,
@@ -947,10 +1011,12 @@ fn App() -> Element {
         albums: use_signal(Vec::<AlbumSummary>::new),
         artists: use_signal(Vec::<ArtistSummary>::new),
         cursor: use_signal(|| None::<String>),
+        page_after: use_signal(|| None::<String>),
         loading: use_signal(|| false),
         selected: use_signal(|| None::<CatalogSelection>),
         tracks: use_signal(Vec::<Track>::new),
         track_cursor: use_signal(|| None::<String>),
+        track_page_after: use_signal(|| None::<String>),
         detail_loading: use_signal(|| false),
         generation: use_signal(|| 0_u64),
         auth,
@@ -972,6 +1038,9 @@ fn App() -> Element {
     let mut radio_seed = use_signal(|| None::<Track>);
     let playlist_generation = use_signal(|| 0_u64);
     let mut playlist_name = use_signal(String::new);
+    let mut playlist_rename = use_signal(String::new);
+    let mut playlist_rename_busy = use_signal(|| false);
+    let mut playlist_delete_confirm = use_signal(|| false);
     let mut collaborator = use_signal(String::new);
     let mut collaborator_list = use_signal(Vec::<PlaylistCollaborator>::new);
     let mut collaborator_revision = use_signal(|| 0_u64);
@@ -1632,7 +1701,7 @@ fn App() -> Element {
                                         } } }
                                     }
                                 } }
-                            if !tracks.read().is_empty() { div { class: "pagination", button { class: "button secondary small", disabled: loading(), onclick: move |_| { spawn_authorized(auth, load_library(None, library)); }, "Back to first page" } span { "Up to 50 tracks per page" } if cursor.read().is_some() { button { class: "button secondary small", disabled: loading(), onclick: move |_| { spawn_authorized(auth, load_library(cursor(), library)); }, if loading() { "Loading…" } else { "Next page →" } } } } }
+                            if !tracks.read().is_empty() { div { class: "pagination", button { class: "button secondary small", disabled: loading() || library.page_after.read().is_none(), title: if library.page_after.read().is_none() { "You are already on the first page." } else { "Return to the first page of this list." }, onclick: move |_| { spawn_authorized(auth, load_library(None, library)); }, "Back to first page" } span { "Up to 50 tracks per page" } if cursor.read().is_some() { button { class: "button secondary small", disabled: loading(), onclick: move |_| { spawn_authorized(auth, load_library(cursor(), library)); }, if loading() { "Loading…" } else { "Next page →" } } } } }
                         }
                     }
 
@@ -1669,7 +1738,7 @@ fn App() -> Element {
                                         onqueue: move |track: Track| { enqueue_track(track,false,playback,notice); },
                                         onedit: move |track: Track| editing_track.set(Some(track)),
                                     }
-                                    div { class: "pagination", button { class: "button secondary small", onclick: move |_| catalog_tracks(None, catalog), "Back to first page" } span { "Up to 50 tracks per page" } if catalog.track_cursor.read().is_some() { button { class: "button secondary small", onclick: move |_| catalog_tracks(catalog.track_cursor.peek().clone(), catalog), "Next track page →" } } }
+                                    div { class: "pagination", button { class: "button secondary small", disabled: *catalog.detail_loading.read() || catalog.track_page_after.read().is_none(), title: if catalog.track_page_after.read().is_none() { "You are already on the first track page." } else { "Return to the first track page." }, onclick: move |_| catalog_tracks(None, catalog), "Back to first page" } span { "Up to 50 tracks per page" } if catalog.track_cursor.read().is_some() { button { class: "button secondary small", onclick: move |_| catalog_tracks(catalog.track_cursor.peek().clone(), catalog), "Next track page →" } } }
                                 }
                             }
                         } else {
@@ -1694,7 +1763,7 @@ fn App() -> Element {
                                             }
                                         }
                                     }
-                                    div { class: "pagination", button { class: "button secondary small", onclick: move |_| catalog_page(None, catalog), "Back to first page" } span { if page() == "albums" { "Up to 50 albums per page" } else { "Up to 50 artists per page" } } if catalog.cursor.read().is_some() { button { class: "button secondary small", onclick: move |_| catalog_page(catalog.cursor.peek().clone(), catalog), "Next page →" } } }
+                                    div { class: "pagination", button { class: "button secondary small", disabled: *catalog.loading.read() || catalog.page_after.read().is_none(), title: if catalog.page_after.read().is_none() { "You are already on the first page." } else { "Return to the first page of this collection." }, onclick: move |_| catalog_page(None, catalog), "Back to first page" } span { if page() == "albums" { "Up to 50 albums per page" } else { "Up to 50 artists per page" } } if catalog.cursor.read().is_some() { button { class: "button secondary small", onclick: move |_| catalog_page(catalog.cursor.peek().clone(), catalog), "Next page →" } } }
                                 }
                             }
                         }
@@ -1730,8 +1799,76 @@ fn App() -> Element {
                             form { class: "inline-form", onsubmit: move |e| { e.prevent_default(); let name = playlist_name().trim().to_string(); if name.is_empty() { return; } spawn_authorized(auth, async move { match api::<PlaylistSummary>("POST", "/api/playlists", Some(json!({"name": name})), &token(auth)).await { Ok(value) => { playlists.write().insert(0, value); playlist_name.set(String::new()); } Err(message) => error.set(message) } }); }, label { class: "sr-only", r#for: "playlist-name", "New playlist name" } input { id: "playlist-name", required: true, maxlength: 150, placeholder: "New playlist name", value: "{playlist_name}", oninput: move |e| playlist_name.set(e.value()) } button { class: "button primary small", r#type: "submit", "+ Create" } }
                         }
                         if playlists.read().is_empty() { div { class: "empty-state", span { class: "empty-icon", Icon { name: "queue" } } h3 { "Make room for a mood" } p { "Create a playlist, then add tracks from your library." } } }
-                        div { class: "playlist-grid", for list in playlists.read().iter().cloned() { button { class: "playlist-card", key: "{list.id}", onclick: move |_| { share_url.set(String::new()); open_playlist(list.id.clone(),playlist_view,error); }, div { class: "playlist-art", Icon { name: "queue" } } h3 { "{list.name}" } p { "{list.item_count} tracks" if !list.can_edit { " · Shared with you" } } } } }
+                        div { class: "playlist-grid",
+                            for list in playlists.read().iter().cloned() {
+                                {
+                                    let card_name = list.name.clone();
+                                    rsx! { button { class: "playlist-card", key: "{list.id}", onclick: move |_| { share_url.set(String::new()); playlist_rename.set(card_name.clone()); playlist_rename_busy.set(false); playlist_delete_confirm.set(false); open_playlist(list.id.clone(),playlist_view,error); },
+                                        div { class: "playlist-art", Icon { name: "queue" } }
+                                        h3 { "{list.name}" }
+                                        p { "{list.item_count} tracks" if !list.can_edit { " · Shared with you" } }
+                                    } }
+                                }
+                            }
+                        }
                         if let Some(detail) = selected_playlist.read().clone() { section { class: "panel playlist-detail", div { class: "section-toolbar", div { span { class: "eyebrow", "PLAYLIST" } h2 { "{detail.playlist.name}" } p { "{detail.items.len()} tracks · Revision {detail.playlist.revision}" } } if detail.items.iter().any(|i| i.can_stream) { button { class: "button primary", onclick: move |_| { if let Some(value) = selected_playlist.peek().as_ref() { play_queue(value.items.iter().filter(|i| i.can_stream).map(|i| i.track.clone()).collect(), 0, view_context(page,catalog,selected_playlist), playback); } }, Icon {name:"play"} "Play playlist" } } }
+                                if detail.playlist.owner_id == auth.read().as_ref().map(|a|a.user.id.clone()).unwrap_or_default() {
+                                    div { class: "inline-form playlist-admin",
+                                        label { class: "sr-only", r#for: "playlist-rename", "Playlist name" }
+                                        input { id: "playlist-rename", maxlength: 120, value: "{playlist_rename}", disabled: playlist_rename_busy(), oninput: move |e| playlist_rename.set(e.value()) }
+                                        button { class: "button secondary small", disabled: playlist_rename_busy() || playlist_rename().trim().is_empty(), onclick: move |_| {
+                                            let name = playlist_rename.peek().trim().to_string();
+                                            let Some(current) = selected_playlist.peek().clone() else { return; };
+                                            if name.is_empty() || *playlist_rename_busy.peek() { return; }
+                                            let id = current.playlist.id;
+                                            let revision = current.playlist.revision;
+                                            let request = playlist_view.request(&id);
+                                            playlist_rename_busy.set(true);
+                                            spawn_authorized(auth, async move {
+                                                match mutate("PATCH", &format!("/api/playlists/{id}"), Some(json!({"revision": revision, "mutation_id": uuid::Uuid::new_v4().to_string(), "name": name})), &token(auth)).await {
+                                                    Ok(()) => {
+                                                        if !playlist_view.matches(&request) { return; }
+                                                        playlist_rename_busy.set(false);
+                                                        playlist_view.refresh(&request).await;
+                                                        if let Ok(value) = api::<Vec<PlaylistSummary>>("GET", "/api/playlists", None, "").await { playlists.set(value); }
+                                                        notice.set("Playlist renamed.".into());
+                                                    }
+                                                    Err(message) => {
+                                                        playlist_rename_busy.set(false);
+                                                        if playlist_view.matches(&request) { error.set(message); }
+                                                    }
+                                                }
+                                            });
+                                        }, if playlist_rename_busy() { "Saving…" } else { "Save name" } }
+                                        if playlist_delete_confirm() {
+                                            button { class: "button danger small", onclick: move |_| {
+                                                let Some(current) = selected_playlist.peek().clone() else { return; };
+                                                let id = current.playlist.id;
+                                                let revision = current.playlist.revision;
+                                                let request = playlist_view.request(&id);
+                                                playlist_delete_confirm.set(false);
+                                                spawn_authorized(auth, async move {
+                                                    let path = format!("/api/playlists/{id}?revision={revision}&mutation_id={}", uuid::Uuid::new_v4());
+                                                    match mutate("DELETE", &path, None, &token(auth)).await {
+                                                        Ok(()) => {
+                                                            if !playlist_view.matches(&request) { return; }
+                                                            playlist_view.invalidate();
+                                                            playlist_rename.set(String::new());
+                                                            playlist_rename_busy.set(false);
+                                                            if let Ok(value) = api::<Vec<PlaylistSummary>>("GET", "/api/playlists", None, "").await { playlists.set(value); }
+                                                            notice.set("Playlist deleted. Your tracks and audio are unchanged.".into());
+                                                        }
+                                                        Err(message) => { if playlist_view.matches(&request) { error.set(message); } }
+                                                    }
+                                                });
+                                            }, "Confirm delete" }
+                                            button { class: "button secondary small", onclick: move |_| playlist_delete_confirm.set(false), "Cancel" }
+                                        } else {
+                                            button { class: "button danger small", onclick: move |_| playlist_delete_confirm.set(true), "Delete playlist" }
+                                        }
+                                    }
+                                    if playlist_delete_confirm() { p { class: "muted", role: "status", "Deleting removes this playlist, its entries and its share links. Your original tracks and audio stay." } }
+                                }
                                 if detail.playlist.owner_id != auth.read().as_ref().map(|a|a.user.id.clone()).unwrap_or_default()
                                     && playlists.read().iter().any(|p|p.id==detail.playlist.id) {
                                     button { class: "button secondary small", onclick: move |_| {
@@ -1768,6 +1905,21 @@ fn App() -> Element {
                                                     playlist_view.refresh(&request).await;
                                                 });
                                             }, Icon { name: "up" } } }
+                                            if detail.playlist.can_edit { button { class: "icon-button", "aria-label": "Move track down in playlist", disabled: at + 1 >= detail.items.len(), title: if at + 1 >= detail.items.len() { "Already the last playlist entry." } else { "Move this entry one place later." }, onclick: move |_| {
+                                                let Some(current) = selected_playlist.peek().clone() else { return; };
+                                                if at + 1 >= current.items.len() { return; }
+                                                let mut ids = current.items.iter().map(|entry| entry.id.clone()).collect::<Vec<_>>();
+                                                ids.swap(at, at + 1);
+                                                let request = playlist_view.request(&current.playlist.id);
+                                                spawn_authorized(auth, async move {
+                                                    let id = current.playlist.id;
+                                                    match mutate("PUT", &format!("/api/playlists/{id}/order"), Some(json!({"revision": current.playlist.revision, "mutation_id": uuid::Uuid::new_v4().to_string(), "item_ids": ids})), &token(auth)).await {
+                                                        Ok(()) => { if playlist_view.matches(&request) { notice.set("Playlist order updated.".into()); } }
+                                                        Err(message) => { if playlist_view.matches(&request) { error.set(message); } }
+                                                    }
+                                                    playlist_view.refresh(&request).await;
+                                                });
+                                            }, MoveDownIcon {} } }
                                             if detail.playlist.can_edit { button { class: "icon-button", "aria-label": "Remove from playlist", onclick: move |_| { let id = list_id.clone(); let item = item_id.clone(); let request = playlist_view.request(&id); spawn_authorized(auth, async move { let path = format!("/api/playlists/{id}/items/{item}?revision={revision}&mutation_id={}", uuid::Uuid::new_v4()); match mutate("DELETE", &path, None, &token(auth)).await { Ok(()) => playlist_view.refresh(&request).await, Err(message) => { if playlist_view.matches(&request) { error.set(message); } } } }); }, Icon { name: "close" } } }
                                         } } } }
                                 if detail.playlist.owner_id == auth.read().as_ref().map(|a| a.user.id.clone()).unwrap_or_default() {
@@ -1877,11 +2029,17 @@ fn App() -> Element {
                         }
                         if shuffle() { p { class: "muted", "Shuffle is on. The list keeps your saved order; Play next requests take priority." } }
                         if queue.read().is_empty() { p { class: "muted", "Choose a track to start your queue." } }
-                        for (at, track) in queue.read().iter().cloned().enumerate() { div { class: if at == index() { "queue-row current" } else { "queue-row" }, key: "{at}-{track.id}", button { class: "queue-track", onclick: move |_| select_queued(at, playback), Art { track: track.clone() } div { strong { "{track.title}" } small { "{track.artist}" } } }
-                                button { class: "icon-button", "aria-label": "Move track up", disabled: at == 0, onclick: move |_| move_queue_up(at, playback), Icon { name: "up" } }
-                                button { class: "icon-button", "aria-label": "Remove queued track", disabled: at == index(), onclick: move |_| remove_queued(at, playback), Icon { name: "close" } }
+                        for (at, track) in queue.read().iter().cloned().enumerate() { {
+                            let last = at + 1 >= queue.read().len();
+                            let is_current = at == index();
+                            rsx! { div { class: if is_current { "queue-row current" } else { "queue-row" }, key: "{at}-{track.id}", button { class: "queue-track", onclick: move |_| select_queued(at, playback), Art { track: track.clone() } div { strong { "{track.title}" } small { "{track.artist}" } } }
+                                button { class: "icon-button", "aria-label": "Move track up", title: if at == 0 { "Already the first queued track." } else { "Move this occurrence one place earlier in the saved queue." }, disabled: at == 0, onclick: move |_| move_queue_up(at, playback), Icon { name: "up" } }
+                                button { class: "icon-button", "aria-label": "Move queue occurrence {at + 1} down", title: if last { "Already the last queued track." } else { "Move this occurrence one place later in the saved queue." }, disabled: last, onclick: move |_| move_queue_down(at, playback), MoveDownIcon {} }
+                                button { class: "icon-button", "aria-label": "Remove queued track", title: if is_current { "The playing occurrence cannot be removed because that would stop the audio; remove later rows with Clear upcoming tracks instead." } else { "Remove this occurrence from the queue." }, "aria-describedby": if is_current { "queue-current-remove-note" } else { "" }, disabled: is_current, onclick: move |_| remove_queued(at, playback), Icon { name: "close" } }
+                                if is_current { span { id: "queue-current-remove-note", class: "sr-only", "The playing occurrence cannot be removed because that would stop the audio; remove later rows with Clear upcoming tracks instead." } }
                             } }
-                        if !queue.read().is_empty() { button { class: "button secondary", onclick: move |_| clear_upcoming(playback), "Clear upcoming tracks" } }
+                        } }
+                        if !queue.read().is_empty() { button { class: "button secondary", disabled: !has_upcoming(queue.read().len(), index()), title: if !has_upcoming(queue.read().len(), index()) { "No upcoming tracks: everything queued is at or before the current occurrence." } else { "Remove only the queued occurrences after the current one. The playing track and earlier rows stay." }, onclick: move |_| clear_upcoming(playback), "Clear upcoming tracks" } }
                     } }
                 if *now.open.read() {
                     if let Some(track)=current.clone(){now_playing::NowPlaying {

@@ -1685,6 +1685,266 @@ async fn favorites_search_and_shared_media_identity_remain_owner_isolated() {
     }
 }
 #[tokio::test]
+async fn playlist_rename_and_delete_are_owner_cas_idempotent_and_revoke_metadata() {
+    let app = TestApp::new().await;
+    let track = app.upload(&app.admin).await.track;
+    let editor = app.user("playlist_editor").await;
+    let outsider = app.user("playlist_outsider").await;
+    let playlist: PlaylistSummary = app
+        .request(Method::POST, "/api/playlists", &app.admin)
+        .json(&CreatePlaylist {
+            name: "Unnamed session".into(),
+        })
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let path = format!("/api/playlists/{}", playlist.id);
+    let added: PlaylistDetail = app
+        .request(Method::POST, &format!("{path}/items"), &app.admin)
+        .json(&json!({"revision":0,"mutation_id":uuid::Uuid::new_v4().to_string(),"track_id":track.id}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(added.playlist.revision, 1);
+    app.request(Method::POST, &format!("{path}/collaborators"), &app.admin)
+        .json(&CollaboratorRequest {
+            username: editor.user.username.clone(),
+            can_edit: true,
+        })
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+    let share: ShareResponse = app
+        .request(Method::POST, &format!("{path}/shares"), &app.admin)
+        .json(&ShareRequest {
+            expires_in_seconds: 3600,
+        })
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        app.client
+            .get(format!("{}/api/shares/{}", app.base, share.token))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK
+    );
+
+    let rename = UpdatePlaylist {
+        revision: 1,
+        mutation_id: uuid::Uuid::new_v4().to_string(),
+        name: "  Renamed session  ".into(),
+    };
+    assert_eq!(
+        app.client
+            .patch(format!("{}{path}", app.base))
+            .header("Cookie", &app.admin.cookie)
+            .json(&rename)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::FORBIDDEN,
+        "cookie-authenticated rename requires the per-session CSRF header"
+    );
+    for actor in [&editor, &outsider] {
+        assert_eq!(
+            app.request(Method::PATCH, &path, actor)
+                .json(&rename)
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::NOT_FOUND,
+            "rename is owner-only even for an editor grant"
+        );
+    }
+    assert_eq!(
+        app.request(Method::PATCH, &path, &app.admin)
+            .json(&json!({"revision":1,"mutation_id":uuid::Uuid::new_v4().to_string(),"name":"X","owner_id":outsider.user.id}))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        app.request(Method::PATCH, &path, &app.admin)
+            .json(&UpdatePlaylist {
+                revision: 1,
+                mutation_id: uuid::Uuid::new_v4().to_string(),
+                name: "   ".into(),
+            })
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        app.request(Method::PATCH, &path, &app.admin)
+            .json(&UpdatePlaylist {
+                revision: 0,
+                mutation_id: uuid::Uuid::new_v4().to_string(),
+                name: "Stale".into(),
+            })
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::CONFLICT
+    );
+    let renamed: PlaylistSummary = app
+        .request(Method::PATCH, &path, &app.admin)
+        .json(&rename)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(renamed.name, "Renamed session");
+    assert_eq!(renamed.revision, 2);
+    assert_eq!(renamed.item_count, 1);
+    assert!(renamed.can_edit);
+    let replay: PlaylistSummary = app
+        .request(Method::PATCH, &path, &app.admin)
+        .json(&rename)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        replay.revision, 2,
+        "identical replay must not increment again"
+    );
+    assert_eq!(
+        app.request(Method::PATCH, &path, &app.admin)
+            .json(&UpdatePlaylist {
+                revision: 2,
+                mutation_id: rename.mutation_id.clone(),
+                name: "Different input".into(),
+            })
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::CONFLICT
+    );
+    let editor_view: PlaylistDetail = app
+        .request(Method::GET, &path, &editor)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(editor_view.playlist.name, "Renamed session");
+    assert!(editor_view.playlist.can_edit);
+    assert!(
+        !editor_view.items[0].can_stream,
+        "metadata access still grants no audio"
+    );
+
+    let delete = format!("{path}?revision=1&mutation_id={}", uuid::Uuid::new_v4());
+    assert_eq!(
+        app.request(Method::DELETE, &delete, &app.admin)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::CONFLICT
+    );
+    let delete = format!("{path}?revision=2&mutation_id={}", uuid::Uuid::new_v4());
+    assert_eq!(
+        app.request(Method::DELETE, &delete, &outsider)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        app.request(Method::DELETE, &delete, &app.admin)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    for actor in [&app.admin, &editor, &outsider] {
+        assert_eq!(
+            app.request(Method::GET, &path, actor)
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::NOT_FOUND,
+            "deleted playlist must not be readable through any grant"
+        );
+    }
+    assert_eq!(
+        app.client
+            .get(format!("{}/api/shares/{}", app.base, share.token))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NOT_FOUND,
+        "deletion revokes existing metadata share links"
+    );
+    assert_eq!(
+        app.request(Method::DELETE, &delete, &app.admin)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NOT_FOUND,
+        "a committed delete is not resurrected by a replay"
+    );
+    let page: TrackPage = app
+        .request(Method::GET, "/api/tracks?limit=10", &app.admin)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        page.items.len(),
+        1,
+        "deleting a playlist must not delete owned tracks"
+    );
+    assert_eq!(
+        app.request(
+            Method::GET,
+            &format!("/api/tracks/{}/stream", track.id),
+            &app.admin
+        )
+        .send()
+        .await
+        .unwrap()
+        .status(),
+        StatusCode::OK,
+        "owned original streaming is independent of playlist metadata"
+    );
+}
+#[tokio::test]
 async fn collaboration_conflicts_idempotency_reordering_sharing_and_revocation() {
     let app = TestApp::new().await;
     let u = app.upload(&app.admin).await;

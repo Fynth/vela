@@ -327,6 +327,14 @@ pub struct PlaylistEntry {
 pub struct CreatePlaylist {
     pub name: String,
 }
+/// Owner-only rename with revision CAS and an idempotent mutation identity.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UpdatePlaylist {
+    pub revision: i64,
+    pub mutation_id: String,
+    pub name: String,
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlaylistMutation {
     pub revision: i64,

@@ -8,7 +8,7 @@ Status meanings: implemented=source exists; verified=checks recorded in PROGRESS
 | 1 Music cloud | Verified upload/playback slice | Account setup/auth, real batch browser uploads, metadata/artwork, private paginated catalog, original range streaming, player; expanded storage wizard remains |
 | 2 URL import | Verified direct-source slice | Preview, durable queue/progress/retry/cancel, streaming, exact dedup, SSRF; browser/public download and recovery tested; source collections/licenses/storage estimates need richer adapters |
 | 3 Complete library | Partial | Search/favorites/stats, paginated album/artist browsing, revisioned editor, read-only snapshot scanning, typed filters/title/newest ordering and private import/scan job center present; next verified editions, batch metadata editing, organization and remaining filter dimensions |
-| 4 Sharing | Partial | Local accounts, explicit collaborator viewer/editor grants, revision-safe edits, expiring/revocable metadata links present; collaborator list/revocation and leave UX present; next invitations, permission-specific media access, revision feed, profiles, ownership transfer |
+| 4 Sharing | Partial | Local accounts, explicit collaborator viewer/editor grants, revision-safe edits, owner CAS rename/delete, expiring/revocable metadata links present; collaborator list/revocation/leave UX present; next invitations, permission-specific media access, revision feed, profiles, ownership transfer |
 | 5 Multi-server | Partial: public preview only | Server identity registry, secure credentials, native/OpenSubsonic adapters, bounded concurrent unified search, origin-labelled queues, two-server real integration |
 | 6 Federation | Partial opt-in public profile; social protocol planned | ActivityPub interoperability profile, explicit opt-in visibility, WebFinger/discovery, origin verification/signatures/replay limits, follow/access requests, durable deliveries, remote metadata cache, blocked peers, privacy tests between two instances |
 | 7 Playback quality | Partial browser controls | Queue/seek/volume/repeat/fair shuffle/history/next priorities/keys/media-session integration; 0.7 adds browser context/progress restore and bounded reconnect; 0.8 adds shared-state Now Playing; 0.9 adds consented history and explicit local radio; next optional controlled FFmpeg, quality selection, validated ReplayGain/gapless/crossfade and sleep timer |
@@ -35,24 +35,36 @@ The eighth workspace application `vela-desktop` is a real Linux native client, n
 WebView audio substitute. It signs in with memory-only credentials, pages/searches
 the private owner catalog, plays authorized WAV/FLAC/MP3/MP4/Vorbis originals through
 one supervised Rodio/CPAL output thread, and shares the framework-free occurrence
-queue with the web app. Prepared originals are private0600 temp files capped at250MiB,
-verified by size/BLAKE3 ETag, unlinked before decoding on Linux and released on
-replacement/sign-out/failure/exit. MPRIS2 state/commands run on a separate thread and
-fail open to in-app controls. A real-window automated journey verified playback,
-seek, navigation continuity, queue duplicates/reorder, light theme,640×700 element
-bounds and zero leftover temp originals; MPRIS and null-sink audio tests also ran.
+queue with the web app. Prepared originals are unnamed private0600 files capped at
+250MiB, created without a directory entry from the first byte, verified by
+size/BLAKE3 ETag and released on replacement/sign-out/failure/exit; a dead output
+worker is disabled and can be reconnected explicitly. MPRIS2 state/commands run on a
+separate thread with bounded channels and fail open to in-app controls. A real-window
+automated journey verified playback, seek, navigation continuity, queue duplicates/
+reorder, light theme,640×700 element bounds and zero temporary directory entries;
+MPRIS and null-sink audio tests also ran.
 
-This is FUNCTIONAL_TESTED for the Linux library/queue slice only. It is not a package,
-installer, secure credential store, offline client, background mobile service,
-favorites/playlists/albums UI or Apple/Android/Windows implementation. Next native
-work: favorites/playlist/album surfaces and session persistence with a reviewed
-native secret store, then a real Linux package and external MPRIS/session smoke; the
-Android Media3 and Apple AVFoundation targets remain blocked until their toolchains
-exist. No mobile hardware claim is implied.
+The same0.12 source increment fixed browser queue truthfulness: move-down, a
+Clear-upcoming that keeps the current occurrence and played prefix, an explained
+disabled remove-current, and first-page controls disabled from the incoming cursor.
+Owners can now CAS-rename and permanently delete a playlist with inline confirmation
+and move-down ordering; deletion cascades entries/collaborator grants/share links but
+never tracks, assets or audio rights. Real TCP owner/editor/outsider/CSRF/stale/
+replay/share-revocation/track-preservation tests pass, and Chromium40/40 plus
+Firefox40/40 source runs include the new lifecycle queue scenarios and all prior
+publication/history/DSP/radio/player regressions.
+
+This is FUNCTIONAL_TESTED for the Linux library/queue and source web slices only. It
+is not a package, installer, secure credential store, offline client, background
+mobile service, favorites/playlists/albums native UI or Apple/Android/Windows
+implementation. Next native work: favorites/playlist/album surfaces and session
+persistence with a reviewed native secret store, then a real Linux package and
+external MPRIS/session smoke; the Android Media3 and Apple AVFoundation targets
+remain blocked until their toolchains exist. No mobile hardware claim is implied.
 
 ## Next ordered slices
 
-The full VELA_ULTIMATE_AUTONOMOUS_FEDERATED_MUSIC_MASTER_PROMPT.md supplied2026-10-17 supersedes prior priority ordering. It was read in full; the existing0.8.1 repository/runtime were inspected and backed up. New golden IDs G01–G24 are distinguished in QA_EVIDENCE from older UX IDs.
+The full VELA_MUSIC_OMEGA_AUTONOMOUS_ENGINEERING_SPEC.md supplied2026-10-18 supersedes prior priority ordering. It was read in full; the existing dirty post-0.11 repository/runtime were inspected and preserved. Golden IDs G01–G24 are distinguished in QA_EVIDENCE from older UX IDs.
 
 1. Preserve verified0.9 private meaningful listening events, global/device consent, idempotency, retention, export/delete and real History/Home recents, plus all existing player/ingest/share/security regressions.157 Rust tests,35 Chromium and35 Firefox scenarios pass; exact scope/evidence is in PROGRESS.
 2. Preserve verified explicit serial DSP worker and measured/tag-fallback track radio; add actual consented history/favorites-based Home ranking, exclusions/feedback, sparse-library daily/weekly mixes and durable refresh. The20-run PCM release benchmark is in PERFORMANCE; measure real-music relevance/scale before increasing concurrency or adding ML.

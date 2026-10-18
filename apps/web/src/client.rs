@@ -109,6 +109,7 @@ pub(crate) async fn mutate(
     let request = match method {
         "DELETE" => Request::delete(path),
         "PUT" => Request::put(path),
+        "PATCH" => Request::patch(path),
         _ => Request::post(path),
     }
     .header("X-CSRF-Token", csrf);

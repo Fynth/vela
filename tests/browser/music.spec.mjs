@@ -77,6 +77,13 @@ test('first-run setup, real FLAC upload, artwork, decode, favorites and safe sha
   await expect(page.locator('.queue-row')).toHaveCount(3);
   await page.locator('.queue-row').nth(1).getByRole('button', { name: 'Move track up', exact: true }).click();
   await expect(page.locator('.queue-row').nth(1)).toHaveClass(/current/);
+  await page.locator('.queue-row').nth(0).getByRole('button', { name: 'Move queue occurrence 1 down', exact: true }).click();
+  await expect(page.locator('.queue-row').nth(0)).toHaveClass(/current/);
+  await expect(page.locator('.queue-row').nth(0).getByRole('button', { name: 'Remove queued track', exact: true })).toBeDisabled();
+  await expect(page.locator('#queue-current-remove-note')).toHaveCount(1);
+  await page.getByRole('button', { name: 'Clear upcoming tracks', exact: true }).click();
+  await expect(page.locator('.queue-row')).toHaveCount(1);
+  await expect(page.locator('.queue-row').first()).toHaveClass(/current/);
   await page.getByRole('button', { name: 'Close playback queue', exact: true }).click();
   await page.getByRole('button', { name: 'Favorite track', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Remove favorite', exact: true })).toBeVisible();
@@ -140,6 +147,45 @@ test('first-run setup, real FLAC upload, artwork, decode, favorites and safe sha
   await page.screenshot({ path: 'test-results/library-desktop.png', fullPage: true });
   expect(errors).toEqual([]);
   adminCookies = await page.context().cookies();
+});
+
+test('owner renames and deletes a playlist without changing owned tracks', async ({ page }) => {
+  await openAdminFixture(page);
+  const before = await (await page.request.get('/api/tracks?limit=100')).json();
+  await navigate(page, 'Playlists');
+  await page.locator('#playlist-name').fill('Lifecycle list');
+  await page.getByRole('button', { name: '+ Create', exact: true }).click();
+  const created = page.locator('.playlist-card').filter({ hasText: 'Lifecycle list' });
+  await expect(created).toBeVisible();
+  await created.click();
+  await expect(page.locator('.playlist-detail h2')).toHaveText('Lifecycle list');
+  await expect(page.locator('#playlist-rename')).toHaveValue('Lifecycle list');
+
+  await page.locator('#playlist-rename').fill('Lifecycle renamed');
+  await page.getByRole('button', { name: 'Save name', exact: true }).click();
+  await expect(page.getByText('Playlist renamed.', { exact: true })).toBeVisible();
+  await expect(page.locator('.playlist-detail h2')).toHaveText('Lifecycle renamed');
+  await expect(page.locator('.playlist-detail')).toContainText('Revision 1');
+  await expect(created).toHaveCount(0);
+  const renamedCard = page.locator('.playlist-card').filter({ hasText: 'Lifecycle renamed' });
+  await expect(renamedCard).toBeVisible();
+
+  const listed = await (await page.request.get('/api/playlists')).json();
+  const target = listed.find(playlist => playlist.name === 'Lifecycle renamed');
+  expect(target).toBeDefined();
+  await page.getByRole('button', { name: 'Delete playlist', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Confirm delete', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(page.locator('.playlist-detail h2')).toHaveText('Lifecycle renamed');
+  await page.getByRole('button', { name: 'Delete playlist', exact: true }).click();
+  await page.getByRole('button', { name: 'Confirm delete', exact: true }).click();
+  await expect(page.getByText('Playlist deleted. Your tracks and audio are unchanged.', { exact: true })).toBeVisible();
+  await expect(page.locator('.playlist-detail')).toHaveCount(0);
+  await expect(renamedCard).toHaveCount(0);
+  expect((await page.request.get(`/api/playlists/${target.id}`)).status()).toBe(404);
+  const after = await (await page.request.get('/api/tracks?limit=100')).json();
+  expect(after.items.map(track => track.id)).toEqual(before.items.map(track => track.id));
+  await page.screenshot({ path: 'test-results/playlist-lifecycle.png', fullPage: true });
 });
 
 test('malicious URL import rejected through UI and small-screen layout remains usable', async ({ page }) => {

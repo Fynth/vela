@@ -405,7 +405,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/scans", get(scan_jobs))
         .route("/api/scans/{id}/cancel", post(scan_cancel))
         .route("/api/playlists", get(playlists).post(playlist_create))
-        .route("/api/playlists/{id}", get(playlist))
+        .route(
+            "/api/playlists/{id}",
+            get(playlist).patch(playlist_rename).delete(playlist_delete),
+        )
         .route("/api/playlists/{id}/items", post(playlist_add))
         .route("/api/playlists/{id}/order", put(playlist_order))
         .route("/api/playlists/{id}/items/{item}", delete(playlist_remove))
@@ -1160,6 +1163,28 @@ async fn playlist(
 ) -> Result<Json<PlaylistDetail>> {
     Ok(Json(s.playlists.detail(&auth.response.user, &id).await?))
 }
+async fn playlist_rename(
+    State(s): State<AppState>,
+    WriteAuth(auth): WriteAuth,
+    Path(id): Path<String>,
+    input: std::result::Result<Json<UpdatePlaylist>, axum::extract::rejection::JsonRejection>,
+) -> Result<Json<PlaylistSummary>> {
+    let Json(input) = input.map_err(|_| invalid("Invalid playlist rename"))?;
+    Ok(Json(
+        s.playlists.rename(&auth.response.user, &id, input).await?,
+    ))
+}
+async fn playlist_delete(
+    State(s): State<AppState>,
+    WriteAuth(auth): WriteAuth,
+    Path(id): Path<String>,
+    Query(input): Query<RemoveQuery>,
+) -> Result<StatusCode> {
+    s.playlists
+        .delete(&auth.response.user, &id, input.revision, &input.mutation_id)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
 async fn playlist_add(
     State(s): State<AppState>,
     WriteAuth(auth): WriteAuth,
@@ -1181,6 +1206,7 @@ async fn playlist_order(
     ))
 }
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RemoveQuery {
     revision: i64,
     mutation_id: String,

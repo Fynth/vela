@@ -17,12 +17,7 @@ impl PlaylistService {
         Self { pool }
     }
     pub async fn create(&self, user: &User, input: CreatePlaylist) -> Result<PlaylistSummary> {
-        let name = input.name.trim();
-        if name.is_empty() || name.chars().count() > 120 || name.chars().any(char::is_control) {
-            return Err(Error::Invalid(
-                "Playlist name must be 1–120 characters".into(),
-            ));
-        }
+        let name = valid_name(&input.name)?;
         let id = uuid::Uuid::new_v4().to_string();
         let inserted=sqlx::query("INSERT INTO playlists(id,owner_id,name) SELECT ?,?,? WHERE (SELECT COUNT(*) FROM playlists WHERE owner_id=?) < 200").bind(&id).bind(&user.id).bind(name).bind(&user.id).execute(&self.pool).await?;
         if inserted.rows_affected() == 0 {
@@ -36,6 +31,83 @@ impl PlaylistService {
             item_count: 0,
             can_edit: true,
         })
+    }
+    /// Owner-only rename. Editors may change entries but not ownership metadata.
+    /// The mutation UUID makes an identical replay return the current summary;
+    /// a stale revision or a reused identity with different input conflicts.
+    pub async fn rename(
+        &self,
+        user: &User,
+        id: &str,
+        input: UpdatePlaylist,
+    ) -> Result<PlaylistSummary> {
+        let name = valid_name(&input.name)?;
+        validate_mutation(input.revision, &input.mutation_id)?;
+        let hash = mutation_hash_json("rename", &input)?;
+        self.require_owner(user, id).await?;
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        if !begin_mutation_fields(&mut tx, user, id, input.revision, &input.mutation_id, &hash)
+            .await?
+        {
+            tx.commit().await?;
+            return self.owned_summary(user, id).await;
+        }
+        sqlx::query("UPDATE playlists SET name=? WHERE id=?")
+            .bind(name)
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+        finish_mutation_fields(&mut tx, user, id, &input.mutation_id, input.revision, &hash)
+            .await?;
+        tx.commit().await?;
+        self.owned_summary(user, id).await
+    }
+    /// Owner-only permanent delete. Cascades entries, collaborator grants, share
+    /// links and mutation records; tracks/assets/stream rights are untouched.
+    /// A committed delete makes the playlist and its share links404. Repeating a
+    /// DELETE therefore reports404 rather than resurrecting the record.
+    pub async fn delete(
+        &self,
+        user: &User,
+        id: &str,
+        revision: i64,
+        mutation_id: &str,
+    ) -> Result<()> {
+        validate_mutation(revision, mutation_id)?;
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let owner: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM playlists WHERE id=? AND owner_id=?)")
+                .bind(id)
+                .bind(&user.id)
+                .fetch_one(&mut *tx)
+                .await?;
+        if !owner {
+            return Err(Error::NotFound);
+        }
+        let deleted = sqlx::query("DELETE FROM playlists WHERE id=? AND owner_id=? AND revision=?")
+            .bind(id)
+            .bind(&user.id)
+            .bind(revision)
+            .execute(&mut *tx)
+            .await?;
+        if deleted.rows_affected() == 0 {
+            return Err(Error::Conflict(
+                "Playlist changed. Refresh and retry the delete.".into(),
+            ));
+        }
+        sqlx::query(
+            "INSERT INTO audit_events(actor_id,action,object_id) VALUES(?,'playlist.delete',?)",
+        )
+        .bind(&user.id)
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+    async fn owned_summary(&self, user: &User, id: &str) -> Result<PlaylistSummary> {
+        let row=sqlx::query("SELECT p.*, (SELECT COUNT(*) FROM playlist_items i WHERE i.playlist_id=p.id) item_count, 1 can_edit FROM playlists p WHERE p.id=? AND p.owner_id=?").bind(id).bind(&user.id).fetch_optional(&self.pool).await?.ok_or(Error::NotFound)?;
+        Ok(summary(&row))
     }
     pub async fn list(&self, user: &User) -> Result<Vec<PlaylistSummary>> {
         let rows=sqlx::query("SELECT p.*, (SELECT COUNT(*) FROM playlist_items i WHERE i.playlist_id=p.id) item_count, (p.owner_id=? OR COALESCE(c.can_edit,0)) can_edit FROM playlists p LEFT JOIN playlist_collaborators c ON c.playlist_id=p.id AND c.user_id=? WHERE p.owner_id=? OR c.user_id IS NOT NULL ORDER BY p.created_at DESC,p.id LIMIT 200").bind(&user.id).bind(&user.id).bind(&user.id).fetch_all(&self.pool).await?;
@@ -339,22 +411,39 @@ fn track(r: &sqlx::sqlite::SqliteRow) -> Track {
         favorite: r.get("favorite"),
     }
 }
-fn mutation_hash(action: &str, input: &PlaylistMutation) -> Result<String> {
-    if uuid::Uuid::parse_str(&input.mutation_id).is_err() || input.revision < 0 {
+fn valid_name(name: &str) -> Result<&str> {
+    let name = name.trim();
+    if name.is_empty() || name.chars().count() > 120 || name.chars().any(char::is_control) {
+        return Err(Error::Invalid(
+            "Playlist name must be 1–120 characters".into(),
+        ));
+    }
+    Ok(name)
+}
+fn validate_mutation(revision: i64, mutation_id: &str) -> Result<()> {
+    if uuid::Uuid::parse_str(mutation_id).is_err() || revision < 0 {
         return Err(Error::Invalid(
             "A valid mutation UUID and revision are required".into(),
         ));
     }
+    Ok(())
+}
+fn mutation_hash_json<T: serde::Serialize>(action: &str, input: &T) -> Result<String> {
     Ok(token_hash(&format!(
         "{action}:{}",
         serde_json::to_string(input).map_err(|e| Error::Internal(e.into()))?
     )))
 }
-async fn begin_mutation(
+fn mutation_hash(action: &str, input: &PlaylistMutation) -> Result<String> {
+    validate_mutation(input.revision, &input.mutation_id)?;
+    mutation_hash_json(action, input)
+}
+async fn begin_mutation_fields(
     tx: &mut Transaction<'_, Sqlite>,
     user: &User,
     id: &str,
-    input: &PlaylistMutation,
+    revision: i64,
+    mutation_id: &str,
     hash: &str,
 ) -> Result<bool> {
     let access:Option<bool>=sqlx::query_scalar("SELECT p.owner_id=? OR COALESCE(c.can_edit,0) FROM playlists p LEFT JOIN playlist_collaborators c ON c.playlist_id=p.id AND c.user_id=? WHERE p.id=?").bind(&user.id).bind(&user.id).bind(id).fetch_optional(&mut **tx).await?;
@@ -363,13 +452,13 @@ async fn begin_mutation(
         Some(false) => return Err(Error::Forbidden),
         Some(true) => {}
     }
-    if let Some(row)=sqlx::query("SELECT actor_id,request_hash FROM playlist_mutations WHERE playlist_id=? AND mutation_id=?").bind(id).bind(&input.mutation_id).fetch_optional(&mut **tx).await? {
+    if let Some(row)=sqlx::query("SELECT actor_id,request_hash FROM playlist_mutations WHERE playlist_id=? AND mutation_id=?").bind(id).bind(mutation_id).fetch_optional(&mut **tx).await? {
         if row.get::<String,_>("actor_id")==user.id && row.get::<String,_>("request_hash")==hash { return Ok(false); }
         return Err(Error::Conflict("Mutation identifier was already used for another edit".into()));
     }
     let result = sqlx::query("UPDATE playlists SET revision=revision+1 WHERE id=? AND revision=?")
         .bind(id)
-        .bind(input.revision)
+        .bind(revision)
         .execute(&mut **tx)
         .await?;
     if result.rows_affected() == 0 {
@@ -379,6 +468,31 @@ async fn begin_mutation(
     }
     Ok(true)
 }
+async fn begin_mutation(
+    tx: &mut Transaction<'_, Sqlite>,
+    user: &User,
+    id: &str,
+    input: &PlaylistMutation,
+    hash: &str,
+) -> Result<bool> {
+    begin_mutation_fields(tx, user, id, input.revision, &input.mutation_id, hash).await
+}
+async fn finish_mutation_fields(
+    tx: &mut Transaction<'_, Sqlite>,
+    user: &User,
+    id: &str,
+    mutation_id: &str,
+    revision: i64,
+    hash: &str,
+) -> Result<()> {
+    sqlx::query("INSERT INTO playlist_mutations(playlist_id,mutation_id,actor_id,request_hash,result_revision) VALUES(?,?,?,?,?)").bind(id).bind(mutation_id).bind(&user.id).bind(hash).bind(revision+1).execute(&mut **tx).await?;
+    sqlx::query("INSERT INTO audit_events(actor_id,action,object_id) VALUES(?,'playlist.edit',?)")
+        .bind(&user.id)
+        .bind(id)
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
 async fn finish_mutation(
     tx: &mut Transaction<'_, Sqlite>,
     user: &User,
@@ -386,13 +500,7 @@ async fn finish_mutation(
     input: &PlaylistMutation,
     hash: &str,
 ) -> Result<()> {
-    sqlx::query("INSERT INTO playlist_mutations(playlist_id,mutation_id,actor_id,request_hash,result_revision) VALUES(?,?,?,?,?)").bind(id).bind(&input.mutation_id).bind(&user.id).bind(hash).bind(input.revision+1).execute(&mut **tx).await?;
-    sqlx::query("INSERT INTO audit_events(actor_id,action,object_id) VALUES(?,'playlist.edit',?)")
-        .bind(&user.id)
-        .bind(id)
-        .execute(&mut **tx)
-        .await?;
-    Ok(())
+    finish_mutation_fields(tx, user, id, &input.mutation_id, input.revision, hash).await
 }
 async fn audit(pool: &SqlitePool, actor: &str, action: &str, id: &str) -> Result<()> {
     sqlx::query("INSERT INTO audit_events(actor_id,action,object_id) VALUES(?,?,?)")

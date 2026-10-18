@@ -69,11 +69,11 @@ Current0.8 increment (2026-10-17): root Now Playing verified with110 Rust tests,
 | Browser playback P0 | PARTIAL | web/main.rs; player.js | G01/G04: FLAC/MP3/Ogg decode/seek; EXP03 navigation continuity | HTMLMediaElement, actual browser codec support |
 | Play next / add last P0 | VERIFIED | web/main.rs; experience.rs | EXP04: occurrence-aware insertion, no interruption | Bounded browser queue; no handoff |
 | Fair occurrence order P0 | VERIFIED | web/playback.rs; root PlaybackUi | PLAY01/02:8 unit tests + playback E2E + mode isolation | Chromium/Firefox audio; transient history, no native proof |
-| Queue/repeat/shuffle P0 | PARTIAL | web/main.rs | Existing duplicate/reorder E2E; EXP04 | 0.6 bounded fair history/priority model; no drag/drop/save-queue/handoff |
+| Queue/repeat/shuffle P0 | PARTIAL | web/main.rs | Existing duplicate/reorder E2E; EXP04;0.12 move-down/clear-upcoming/first-page browser assertions | 0.6 bounded fair history/priority model; no drag/drop/save-queue/handoff |
 | Browser resume/reconnect P0 | VERIFIED | web/session.rs, browser_player.rs, main.rs, player.js | RES01–04/NET01–02/AUTH01,3 unit policy tests +7 real browser cases | Paused per-account bookmark; bounded streaming retry; no offline/native/device sync |
 | Library/filters/favorites P0 | VERIFIED | media/filters.rs; web/filters.rs/main.rs | Typed filter/TCP; browser11–13 |50-item pages; no full-library virtualization |
 | Albums/artists P0 | PARTIAL | media/catalog.rs; web/main.rs | G04; existing group/race E2E | Provisional groups; visible-page playback; no editions/biographies |
-| Playlist create/share/collaboration P0 | PARTIAL | core/playlists.rs; web/main.rs | G05; revision/idempotency/revoke TCP/E2E | Named local grants; metadata never grants audio |
+| Playlist create/rename/delete/share P0 | PARTIAL | core/playlists.rs; web/main.rs | G05; revision/idempotency/revoke TCP/E2E;0.12 owner CAS rename/delete + confirmation + move-down; Chromium/Firefox40 | Named local grants; metadata never grants audio; no folders/smart rules/owner transfer |
 | Upload/URL/folder ingest P0 | VERIFIED | media/imports/scanner; web modules | G01/G10; real audio/SSRF/recovery | Direct authorized files only; no DRM extraction |
 | Jobs/progress P1 | VERIFIED | core/jobs.rs; web/jobs.rs | Existing mixed-page/TCP/browser14/15/30 | Owned jobs; no SSE or global admin queue |
 | Metadata/artwork P1 | PARTIAL | media/metadata.rs; web/metadata.rs | Existing unchanged-source/revision tests | No write-back/bulk/enrichment/recording matching |
