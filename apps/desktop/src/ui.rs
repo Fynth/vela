@@ -87,6 +87,7 @@ struct Catalog {
     epoch: u64,
     query: String,
     cursor: Option<String>,
+    favorites: bool,
     page: Arc<TrackPage>,
 }
 
@@ -98,6 +99,7 @@ struct Ui {
     engine_cleanup: Rc<RefCell<Option<AudioEngine>>>,
     login_gate: Gate,
     catalog_gate: Gate,
+    feedback_gate: Gate,
     source_gate: Gate,
     logout_gate: Gate,
     epoch: Signal<u64>,
@@ -117,6 +119,7 @@ struct Ui {
     catalog: Signal<Option<Catalog>>,
     catalog_loading: Signal<bool>,
     catalog_error: Signal<String>,
+    favorite_busy: Signal<String>,
     queue: Signal<Vec<Track>>,
     order: Signal<PlaybackOrder>,
     shuffle: Signal<bool>,
@@ -166,6 +169,7 @@ impl Ui {
     fn cancel_all(&self) {
         self.login_gate.cancel();
         self.catalog_gate.cancel();
+        self.feedback_gate.cancel();
         self.source_gate.cancel();
         self.logout_gate.cancel();
     }
@@ -205,6 +209,7 @@ impl Ui {
         self.cursor.set(None);
         self.catalog_loading.set(false);
         self.catalog_error.set(String::new());
+        self.favorite_busy.set(String::new());
         self.queue.set(Vec::new());
         self.order.set(PlaybackOrder::default());
         self.shuffle.set(false);
@@ -271,6 +276,7 @@ impl Ui {
             && catalog.epoch == *self.epoch.peek()
             && catalog.query == *self.query.peek()
             && catalog.cursor == *self.cursor.peek()
+            && catalog.favorites == (*self.view.peek() == "favorites")
             && !*self.catalog_loading.peek()
             && self.catalog_error.peek().is_empty()
     }
@@ -331,7 +337,7 @@ fn login(mut ui: Ui) {
                     user: auth.user,
                     origin,
                 }));
-                load_catalog(ui, String::new(), None);
+                load_catalog(ui, String::new(), None, false);
             }
             Err(error) => ui.login_error.set(error),
         }
@@ -371,7 +377,7 @@ fn expired(mut ui: Ui, error: &str) -> bool {
     true
 }
 
-fn load_catalog(mut ui: Ui, query: String, cursor: Option<String>) {
+fn load_catalog(mut ui: Ui, query: String, cursor: Option<String>, favorites: bool) {
     let Some(account) = ui.account.peek().clone().filter(|_| ui.signed_in()) else {
         return;
     };
@@ -386,10 +392,15 @@ fn load_catalog(mut ui: Ui, query: String, cursor: Option<String>) {
     }
     ui.query.set(query.clone());
     ui.cursor.set(cursor.clone());
+    ui.view.set(if favorites { "favorites" } else { "library" });
     let ticket = ui.catalog_gate.begin(account.epoch);
     ui.catalog_loading.set(true);
     spawn(async move {
-        if !ticket.current(&ui) || *ui.query.peek() != query || *ui.cursor.peek() != cursor {
+        if !ticket.current(&ui)
+            || *ui.query.peek() != query
+            || *ui.cursor.peek() != cursor
+            || (*ui.view.peek() == "favorites") != favorites
+        {
             return;
         }
         let result = account
@@ -397,20 +408,29 @@ fn load_catalog(mut ui: Ui, query: String, cursor: Option<String>) {
             .tracks(
                 (!query.is_empty()).then_some(query.as_str()),
                 cursor.as_deref(),
+                favorites,
                 ticket.cancel.clone(),
             )
             .await;
-        if !ticket.current(&ui) || *ui.query.peek() != query || *ui.cursor.peek() != cursor {
+        if !ticket.current(&ui)
+            || *ui.query.peek() != query
+            || *ui.cursor.peek() != cursor
+            || (*ui.view.peek() == "favorites") != favorites
+        {
             return;
         }
         ui.catalog_loading.set(false);
         match result {
-            Ok(page) => ui.catalog.set(Some(Catalog {
-                epoch: ticket.epoch,
-                query,
-                cursor,
-                page: Arc::new(page),
-            })),
+            Ok(page) => {
+                ui.catalog_error.set(String::new());
+                ui.catalog.set(Some(Catalog {
+                    epoch: ticket.epoch,
+                    query,
+                    cursor,
+                    favorites,
+                    page: Arc::new(page),
+                }));
+            }
             Err(error) => {
                 if !expired(ui.clone(), &error) {
                     ui.catalog_error.set(error);
@@ -490,9 +510,79 @@ fn start_source(mut ui: Ui, reuse: bool, autoplay: bool, position_ms: u64) {
     });
 }
 
+fn toggle_favorite(mut ui: Ui, catalog: Catalog, track: Track) {
+    if !ui.catalog_current(&catalog) || !ui.favorite_busy.peek().is_empty() {
+        return;
+    }
+    let Some(account) = ui
+        .account
+        .peek()
+        .clone()
+        .filter(|account| ui.signed_in() && account.epoch == catalog.epoch)
+    else {
+        return;
+    };
+    let desired = !track.favorite;
+    let ticket = ui.feedback_gate.begin(catalog.epoch);
+    ui.favorite_busy.set(track.id.clone());
+    spawn(async move {
+        let result = account
+            .client
+            .favorite(&track.id, desired, ticket.cancel.clone())
+            .await;
+        if !ticket.current(&ui) {
+            return;
+        }
+        if *ui.favorite_busy.peek() == track.id {
+            ui.favorite_busy.set(String::new());
+        }
+        match result {
+            Ok(()) => {
+                if catalog.favorites && !desired {
+                    // Re-read the filtered page instead of leaving a stale row.
+                    load_catalog(ui.clone(), catalog.query.clone(), None, true);
+                } else {
+                    let mut page = (*catalog.page).clone();
+                    for item in &mut page.items {
+                        if item.id == track.id {
+                            item.favorite = desired;
+                        }
+                    }
+                    ui.catalog.set(Some(Catalog {
+                        page: Arc::new(page),
+                        ..catalog.clone()
+                    }));
+                }
+                for item in ui.queue.write().iter_mut() {
+                    if item.id == track.id {
+                        item.favorite = desired;
+                    }
+                }
+                ui.notice.set(
+                    if desired {
+                        "Added to favorites."
+                    } else {
+                        "Removed from favorites."
+                    }
+                    .into(),
+                );
+            }
+            Err(error) => {
+                if !expired(ui.clone(), &error) {
+                    ui.catalog_error.set(error);
+                }
+            }
+        }
+    });
+}
+
 fn play_catalog(mut ui: Ui, catalog: Catalog, at: usize) {
-    if !ui.catalog_current(&catalog) || at >= catalog.page.items.len() || ui.audio.peek().is_none()
-    {
+    if !ui.catalog_current(&catalog) {
+        ui.catalog_error
+            .set("This page changed. Refresh the library before playing.".into());
+        return;
+    }
+    if at >= catalog.page.items.len() || ui.audio.peek().is_none() {
         return;
     }
     let mut tracks = catalog.page.items.clone();
@@ -898,48 +988,54 @@ fn library(ui: Ui) -> Element {
     let error = ui.catalog_error.read().clone();
     let draft = ui.query_draft.read().clone();
     let query = ui.query.read().clone();
+    let favorites = *ui.view.read() == "favorites";
     let catalog = ui
         .catalog
         .read()
         .clone()
         .filter(|catalog| ui.catalog_current(catalog));
+    let catalog_items = catalog
+        .as_ref()
+        .map_or(0, |catalog| catalog.page.items.len());
     let mut search = ui.query_draft;
     let submit = ui.clone();
     let refresh = ui.clone();
     let first = ui.clone();
     let next = ui.clone();
-    rsx! {section {class:"native-library","aria-label":"Private library",
-        div {class:"library-intro",div {span {class:"eyebrow","YOUR COLLECTION, YOUR ORIGINALS"} h1 {"A library that feels like home"} p {"Choose a track. Keep the rest of your day in the background."}}
-            button {class:"button secondary",disabled:loading,onclick:move |_|{let query=refresh.query.peek().clone();let cursor=refresh.cursor.peek().clone();load_catalog(refresh.clone(),query,cursor);},Icon {name:"history"} "Refresh library"}
+    rsx! {section {class:"native-library","aria-label":if favorites {"Favorite tracks"} else {"Private library"},"data-view":if favorites {"favorites"} else {"library"},"data-query":"{query}","data-loading":"{loading}","data-error":"{error}","data-catalog-items":"{catalog_items}",
+        div {class:"library-intro",div {span {class:"eyebrow",if favorites {"THE ONES YOU KEEP CLOSE"} else {"YOUR COLLECTION, YOUR ORIGINALS"}} h1 {if favorites {"Favorites, kept close"} else {"A library that feels like home"}} p {if favorites {"Only tracks you explicitly favorited, using the same owner-only catalog and audio rights."} else {"Choose a track. Keep the rest of your day in the background."}}}
+            button {class:"button secondary",disabled:loading,onclick:move |_|{let query=refresh.query.peek().clone();let cursor=refresh.cursor.peek().clone();let favorites=*refresh.view.peek()=="favorites";load_catalog(refresh.clone(),query,cursor,favorites);},Icon {name:"history"} if favorites {"Refresh favorites"} else {"Refresh library"}}
         }
-        form {class:"native-search",onsubmit:move |event|{event.prevent_default();let query=submit.query_draft.peek().trim().to_string();load_catalog(submit.clone(),query,None);},
-            Icon {name:"search"} label {class:"sr-only",r#for:"native-search","Search your library"}
+        form {class:"native-search",onsubmit:move |event|{event.prevent_default();let query=submit.query_draft.peek().trim().to_string();let favorites=*submit.view.peek()=="favorites";load_catalog(submit.clone(),query,None,favorites);},
+            Icon {name:"search"} label {class:"sr-only",r#for:"native-search",if favorites {"Search your favorites"} else {"Search your library"}}
             input {id:"native-search",value:"{draft}",maxlength:256,placeholder:"Search titles, artists or albums",oninput:move |event|search.set(event.value())}
             button {class:"button primary",r#type:"submit","Search"}
         }
-        div {class:"catalog-caption",p {if query.is_empty() {"Your private tracks · Up to 50 per page"} else {"Results for “{query}” · Up to 50 per page"}} span {"ORIGINAL AUDIO"}}
-        if loading {div {class:"native-loading",role:"status",span {class:"loading-mark","aria-hidden":"true"} "Loading your library…"}}
+        div {class:"catalog-caption",p {if favorites {if query.is_empty() {"Your favorites · Up to 50 per page"} else {"Favorite results for “{query}” · Up to 50 per page"}} else if query.is_empty() {"Your private tracks · Up to 50 per page"} else {"Results for “{query}” · Up to 50 per page"}} span {"ORIGINAL AUDIO"}}
+        if loading {div {class:"native-loading",role:"status",span {class:"loading-mark","aria-hidden":"true"} if favorites {"Loading your favorites…"} else {"Loading your library…"}}}
         if !error.is_empty() {div {class:"alert error",role:"alert","{error} Refresh the library to try again."}}
         if let Some(catalog) = catalog {
-            if catalog.page.items.is_empty() {div {class:"native-empty",Icon {name:"library"} h2 {if query.is_empty() {"Make room for your first listen"} else {"No matching tracks"}} p {if query.is_empty() {"Add music in Vela’s web app, then refresh this library. Your tracks stay private."} else {"Try a different title, artist or album. Search uses only your own library."}}}}
+            if catalog.page.items.is_empty() {div {class:"native-empty",Icon {name:"heart"} h2 {if favorites {if query.is_empty() {"No favorites yet"} else {"No matching favorites"}} else if query.is_empty() {"Make room for your first listen"} else {"No matching tracks"}} p {if favorites {if query.is_empty() {"Favorite a track from your library to find it here. Favorites are private to your account."} else {"Try a different title, artist or album. Only your favorite tracks are searched."}} else if query.is_empty() {"Add music in Vela’s web app, then refresh this library. Your tracks stay private."} else {"Try a different title, artist or album. Search uses only your own library."}}}}
             else {div {class:"native-track-table",div {class:"native-track-header","aria-hidden":"true",span {""} span {"TITLE / ARTIST"} span {"ALBUM"} span {"TIME"} span {"QUEUE"}}
                 for (at,track) in catalog.page.items.iter().cloned().enumerate() { {
-                    let play_ui=ui.clone();let played_catalog=catalog.clone();let next_ui=ui.clone();let next_catalog=catalog.clone();let last_ui=ui.clone();let last_catalog=catalog.clone();let next_track=track.clone();let last_track=track.clone();
+                    let play_ui=ui.clone();let played_catalog=catalog.clone();let next_ui=ui.clone();let next_catalog=catalog.clone();let last_ui=ui.clone();let last_catalog=catalog.clone();let next_track=track.clone();let last_track=track.clone();let favorite_ui=ui.clone();let favorite_catalog=catalog.clone();let favorite_track=track.clone();
                     let current=ui.current_track().is_some_and(|current|current.id==track.id);
+                    let favorite_disabled=ui.favorite_busy.read().as_str()==track.id;
                     rsx! {article {class:if current {"native-track current"} else {"native-track"},key:"{track.id}","data-native-track-id":"{track.id}",
                         button {class:"icon-button track-start",disabled:!ui.audio_ready(),title:if !ui.audio_ready() {"Native audio output is unavailable"} else {"Play original"},"aria-label":"Play {track.title}",onclick:move |_|play_catalog(play_ui.clone(),played_catalog.clone(),at),Icon {name:"play"}}
                         div {class:"native-track-name",div {class:"neutral-cover","aria-hidden":"true",Icon {name:"music"}} div {strong {"{track.title}"} small {"{track.artist}"}}}
                         span {class:"native-track-album","{track.album}"}
                         span {class:"native-track-time","{time_label(track.duration_ms.max(0) as u64)}"}
                         div {class:"native-track-actions",
+                            button {class:if track.favorite {"icon-button selected"} else {"icon-button"},"aria-pressed":track.favorite,disabled:favorite_disabled,"aria-label":if track.favorite {format!("Remove {} from favorites",track.title)} else {format!("Favorite {}",track.title)},title:if favorite_disabled {"Updating this favorite…"} else if track.favorite {"Remove from favorites"} else {"Add to favorites"},onclick:move |_|toggle_favorite(favorite_ui.clone(),favorite_catalog.clone(),favorite_track.clone()),Icon {name:"heart"}}
                             button {class:"icon-button","aria-label":"Play {track.title} next",title:"Play next",onclick:move |_|{if next_ui.catalog_current(&next_catalog) {enqueue(next_ui.clone(),next_track.clone(),true);}},Icon {name:"next-add"}}
                             button {class:"icon-button","aria-label":"Add {track.title} to queue",title:"Add to queue",onclick:move |_|{if last_ui.catalog_current(&last_catalog){enqueue(last_ui.clone(),last_track.clone(),false);}},Icon {name:"plus"}}
                         }
                     } }
                 } }
             } }
-            div {class:"native-pagination",button {class:"button secondary",disabled:ui.cursor.peek().is_none(),onclick:move |_|{let query=first.query.peek().clone();load_catalog(first.clone(),query,None);},"First page"}
-                if let Some(cursor)=catalog.page.next_cursor.clone() {button {class:"button secondary",onclick:move |_|{let query=next.query.peek().clone();load_catalog(next.clone(),query,Some(cursor.clone()));},"Next page"}}
+            div {class:"native-pagination",button {class:"button secondary",disabled:ui.cursor.peek().is_none(),onclick:move |_|{let query=first.query.peek().clone();let favorites=first.catalog.peek().as_ref().is_some_and(|c|c.favorites);load_catalog(first.clone(),query,None,favorites);},"First page"}
+                if let Some(cursor)=catalog.page.next_cursor.clone() {button {class:"button secondary",onclick:move |_|{let query=next.query.peek().clone();let favorites=next.catalog.peek().as_ref().is_some_and(|c|c.favorites);load_catalog(next.clone(),query,Some(cursor.clone()),favorites);},"Next page"}}
                 small {"Only this page is queued when you play a result."}
             }
         }
@@ -1046,6 +1142,7 @@ pub fn App() -> Element {
         engine_cleanup: use_hook(|| Rc::new(RefCell::new(None))),
         login_gate: use_hook(Gate::default),
         catalog_gate: use_hook(Gate::default),
+        feedback_gate: use_hook(Gate::default),
         source_gate: use_hook(Gate::default),
         logout_gate: use_hook(Gate::default),
         epoch: use_signal(|| 1),
@@ -1065,6 +1162,7 @@ pub fn App() -> Element {
         catalog: use_signal(|| None),
         catalog_loading: use_signal(|| false),
         catalog_error: use_signal(String::new),
+        favorite_busy: use_signal(String::new),
         queue: use_signal(Vec::new),
         order: use_signal(PlaybackOrder::default),
         shuffle: use_signal(|| false),
@@ -1175,19 +1273,23 @@ pub fn App() -> Element {
     let mut theme_signal = ui.theme;
     let mut view_signal = ui.view;
     let logout = ui.clone();
+    let nav_library = ui.clone();
+    let nav_favorites = ui.clone();
+    let compact_library = ui.clone();
+    let compact_favorites = ui.clone();
     let css = include_str!("../style.css");
     rsx! {
         document::Style {"{css}"}
         div {class:"native-app","data-theme":theme,
             if ui.signed_in(){
                 aside {class:"native-sidebar",div {class:"native-brand",Icon {name:"music"} span {"vela"} small {"NATIVE"}}
-                    nav {"aria-label":"Main navigation",button {class:if view=="library"{"native-nav active"}else{"native-nav"},"aria-label":"Library",onclick:move |_|view_signal.set("library"),Icon {name:"library"}"Library"} button {class:if view=="queue"{"native-nav active"}else{"native-nav"},"aria-label":"Queue",onclick:move |_|view_signal.set("queue"),Icon {name:"queue"}"Queue"}}
+                    nav {"aria-label":"Main navigation",button {class:if view=="library"{"native-nav active"}else{"native-nav"},"aria-label":"Library",onclick:move |_|{view_signal.set("library");load_catalog(nav_library.clone(),String::new(),None,false);},Icon {name:"library"}"Library"} button {class:if view=="favorites"{"native-nav active"}else{"native-nav"},"aria-label":"Favorites",onclick:move |_|{view_signal.set("favorites");load_catalog(nav_favorites.clone(),String::new(),None,true);},Icon {name:"heart"}"Favorites"} button {class:if view=="queue"{"native-nav active"}else{"native-nav"},"aria-label":"Queue",onclick:move |_|view_signal.set("queue"),Icon {name:"queue"}"Queue"}}
                     div {class:"native-private-note",Icon {name:"check"} strong {"Private by default"} p {"Your account and queue stay in this running app. Temporary audio is released on replacement or sign-out."} p {class:"native-mpris-note",role:"status","data-testid":"native-mpris-status","{ui.mpris_note}"}}
                 }
                 main {class:"native-content",header {class:"native-topbar",div {span {class:"eyebrow","YOUR PERSONAL MUSIC SPACE"} if let Some(account)=ui.account.read().as_ref(){strong {"{account.user.username}"} small {"{account.origin}"}}}
                     div {class:"topbar-actions",button {class:"icon-button","aria-label":"Change color theme",onclick:move |_|theme_signal.set(if theme=="dark"{"light"}else{"dark"}),if theme=="dark"{Icon {name:"sun"}}else{Icon {name:"moon"}}} button {class:"button secondary small",onclick:move |_|sign_out(logout.clone()),"Sign out"}}
                 }
-                    nav {class:"native-compact-nav","aria-label":"Compact navigation",button {class:if view=="library"{"active"}else{""},onclick:move |_|view_signal.set("library"),"Library"} button {class:if view=="queue"{"active"}else{""},onclick:move |_|view_signal.set("queue"),"Queue"}}
+                    nav {class:"native-compact-nav","aria-label":"Compact navigation",button {class:if view=="library"{"active"}else{""},onclick:move |_|{view_signal.set("library");load_catalog(compact_library.clone(),String::new(),None,false);},"Library"} button {class:if view=="favorites"{"active"}else{""},onclick:move |_|{view_signal.set("favorites");load_catalog(compact_favorites.clone(),String::new(),None,true);},"Favorites"} button {class:if view=="queue"{"active"}else{""},onclick:move |_|view_signal.set("queue"),"Queue"}}
                     if !notice.is_empty(){div {class:"alert notice",role:"status","{notice}"}}
                     if view=="queue"{{queue_view(ui.clone())}}else{{library(ui.clone())}}
                     p {class:"native-preparation-note","Tracks are prepared before playing. This device keeps no offline library; sign in again after closing Vela."}

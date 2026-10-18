@@ -108,8 +108,10 @@ Sign-out clears the queue/catalog and stops native audio, but no cross-device
 session, device handoff or remote-control protocol exists.
 
 The native UI currently covers Library, Queue, transport, theme, sign-in and sign-out.
-Favorites, playlists, albums, artists, search history, settings/privacy, listening
-history and recommendations are browser-web features only. Native listening events
+Favorites are implemented natively (filtered view, per-row favorite/unfavorite and
+queue-state synchronization). Playlists, albums, artists, search history,
+settings/privacy, listening history and recommendations remain browser-web features
+only. Native listening events
 are not sent, so consent/history cannot be inferred from native preparation or
 decoding. MPRIS requires a working session D-Bus and reports bounded public metadata
 only; a failed bus degrades to in-app controls. Android Media3, iOS AVFoundation,

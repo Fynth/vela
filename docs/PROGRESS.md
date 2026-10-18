@@ -161,6 +161,16 @@ sent, so consent/history is not bypassed or inferred.
   and zero temporary entries after exit, and the bounded-channel MPRIS session test
   (`target/checks/native-0.12b-*`, `native-0.12b-window/`). The review's reported
   17-test count was reconciled against the actual25 enumerated tests.
+- Native favorites follow-up: the desktop client now has a Favorites navigation
+  view backed by the existing owner-only `favorites=true` catalog read, per-row
+  favorite/unfavorite with a feedback gate and busy-track id, queue-state
+  synchronization, and a filtered-page re-read after unfavorite. A stale search
+  click during the new flow reproduced a real stale-error retention; successful
+  catalog loads now clear the prior error, and the QA waits for the rendered query
+  state instead of an old row. Real-window named checks pass for favorite→Favorites
+  (exactly one row)→unfavorite→empty→Library restores three tracks, with screenshot
+  `target/checks/native-favorites-window9/native-favorites-dark.png`; desktop23/25
+  tests (both opt-ins separately), strict Clippy, and233 workspace tests pass.
 - The same session's DSP packet added9 deterministic numerical tests (module now19:
   pure/two-tone spectra, silence, sub-window, clipping/oversized PCM, determinism,
   click/ZCR, -60dBFS, non-finite bounds) inside `crates/media/src/analysis.rs`; one

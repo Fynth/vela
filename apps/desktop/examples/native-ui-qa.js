@@ -41,6 +41,19 @@ try {
   fill('#native-origin', config.origin); fill('#native-username', config.username); fill('#native-password', config.password);
   el('.signin-form form').requestSubmit();
   await wait(() => document.querySelectorAll('[data-native-track-id]').length === 3, 'Three real private uploaded tracks');
+  await click('Favorite Signal');
+  await wait(() => button('Remove Signal from favorites'), 'Real favorite mutation acknowledged');
+  assert(button('Remove Signal from favorites'), 'Favorite mutation acknowledged by the API');
+  await click('Favorites');
+  await wait(() => document.querySelectorAll('[data-native-track-id]').length === 1 && button('Play Signal'), 'Favorites API view shows exactly the favorite');
+  assert(document.querySelectorAll('[data-native-track-id]').length === 1 && button('Play Signal'), 'Favorites view shows only the favorite track');
+  await capture('favorites-dark');
+  await click('Remove Signal from favorites');
+  await wait(() => document.querySelectorAll('[data-native-track-id]').length === 0 && button('Refresh favorites'), 'Unfavorite re-reads the filtered page');
+  assert(document.querySelectorAll('[data-native-track-id]').length === 0, 'Unfavorite removes the row from the filtered view');
+  await click('Library');
+  await wait(() => document.querySelectorAll('[data-native-track-id]').length === 3, 'Library restores three tracks');
+  assert(document.querySelectorAll('[data-native-track-id]').length === 3, 'Library navigation restores the full owned catalog');
   await resize(1280, 840);
   assert(document.querySelectorAll('audio,iframe').length === 0, 'No HTML media or iframe playback substitute');
   fill('#native-volume', '0'); await sleep(400);
@@ -83,8 +96,10 @@ try {
   await click('Clear queue'); await wait(() => phase() === 'Idle', 'Clear queue stops native audio');
   assert(document.querySelectorAll('[data-native-queue-index]').length === 0, 'Queue is cleared');
   await click('Library'); fill('#native-search', 'Beacon'); el('.native-search').requestSubmit();
-  await wait(() => button('Play Beacon'), 'MP3 real search');
-  await click('Play Beacon'); await wait(() => phase() === 'Playing' && position() > 100, 'Real MP3 native decoder advances');
+  await wait(() => el('.native-library')?.dataset.query === 'Beacon' && Number(el('.native-library')?.dataset.catalogItems) === 1 && button('Play Beacon'), 'MP3 real search');
+  await click('Play Beacon');
+  try { await wait(() => phase() === 'Playing' && position() > 100, 'Real MP3 native decoder advances'); }
+  catch { const library = el('.native-library'); throw new Error(`Real MP3 native decoder advances (phase=${phase()} position=${position()} preparing=${!!el('.preparation-progress')} error=${el('.player-error')?.textContent?.trim() || '-'} library=${library ? JSON.stringify(library.dataset) : 'none'} search=${el('#native-search')?.value || '-'} rows=${document.querySelectorAll('[data-native-track-id]').length} api=${JSON.stringify(performance.getEntriesByType('resource').map(e=>e.name).filter(n=>n.includes('/api/tracks')).slice(-3))})`); }
   if (config.closeWhilePlaying) {
     await click('Pause');
     fill('#native-search', 'Native Continuity'); el('.native-search').requestSubmit();

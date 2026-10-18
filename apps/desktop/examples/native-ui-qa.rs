@@ -51,7 +51,7 @@ fn Harness() -> Element {
                     let name = message["capture"].as_str().unwrap().to_owned();
                     if !matches!(
                         name.as_str(),
-                        "library-dark" | "queue-light" | "compact-light"
+                        "library-dark" | "queue-light" | "compact-light" | "favorites-dark"
                     ) {
                         break json!({"ok":false,"failure":"Unknown capture stage"});
                     }

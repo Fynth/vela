@@ -132,6 +132,7 @@ impl VelaClient {
         &self,
         q: Option<&str>,
         cursor: Option<&str>,
+        favorites: bool,
         cancel: CancellationToken,
     ) -> Result<TrackPage, String> {
         let q = q.map(str::trim).filter(|q| !q.is_empty());
@@ -145,6 +146,9 @@ impl VelaClient {
         {
             let mut query = url.query_pairs_mut();
             query.append_pair("limit", "50");
+            if favorites {
+                query.append_pair("favorites", "true");
+            }
             if let Some(q) = q {
                 query.append_pair("q", q);
             }
@@ -888,7 +892,7 @@ mod tests {
         assert!(canonical_uuid(&auth.user.id));
         assert!(lower_hex64(&auth.csrf_token));
         let catalog = client
-            .tracks(None, None, CancellationToken::new())
+            .tracks(None, None, false, CancellationToken::new())
             .await
             .unwrap();
         assert_eq!(catalog.items.len(), 1);
@@ -896,7 +900,7 @@ mod tests {
         assert_ne!(catalog.items[0].id, node.foreign.id);
         assert_eq!(
             client
-                .tracks(Some(&node.own.title), None, CancellationToken::new())
+                .tracks(Some(&node.own.title), None, false, CancellationToken::new())
                 .await
                 .unwrap()
                 .items
@@ -905,7 +909,7 @@ mod tests {
         );
         assert!(
             client
-                .tracks(None, Some("../private"), CancellationToken::new())
+                .tracks(None, Some("../private"), false, CancellationToken::new())
                 .await
                 .is_err()
         );
@@ -927,12 +931,34 @@ mod tests {
             .unwrap();
         assert!(
             client
-                .tracks(None, None, CancellationToken::new())
+                .tracks(None, None, false, CancellationToken::new())
                 .await
                 .unwrap()
                 .items[0]
                 .favorite
         );
+        let favorites = client
+            .tracks(None, None, true, CancellationToken::new())
+            .await
+            .unwrap();
+        assert_eq!(favorites.items.len(), 1);
+        assert_eq!(favorites.items[0].id, node.own.id);
+        client
+            .favorite(&node.own.id, false, CancellationToken::new())
+            .await
+            .unwrap();
+        assert!(
+            client
+                .tracks(None, None, true, CancellationToken::new())
+                .await
+                .unwrap()
+                .items
+                .is_empty()
+        );
+        client
+            .favorite(&node.own.id, true, CancellationToken::new())
+            .await
+            .unwrap();
         let prepared = client
             .prepare(&node.own, CancellationToken::new(), progress().0)
             .await
@@ -990,7 +1016,7 @@ mod tests {
         assert!(clone.inner.session.lock().unwrap().is_none());
         assert_eq!(
             clone
-                .tracks(None, None, CancellationToken::new())
+                .tracks(None, None, false, CancellationToken::new())
                 .await
                 .unwrap_err(),
             SIGNED_OUT
@@ -1294,8 +1320,11 @@ mod tests {
         let cancel = CancellationToken::new();
         let running_client = client.clone();
         let running_cancel = cancel.clone();
-        let request =
-            tokio::spawn(async move { running_client.tracks(None, None, running_cancel).await });
+        let request = tokio::spawn(async move {
+            running_client
+                .tracks(None, None, false, running_cancel)
+                .await
+        });
         tokio::time::timeout(Duration::from_secs(3), started.notified())
             .await
             .unwrap();
@@ -1329,7 +1358,7 @@ mod tests {
             let client = fixture_client(&http, &directory).await;
             assert_eq!(
                 client
-                    .tracks(None, None, CancellationToken::new())
+                    .tracks(None, None, false, CancellationToken::new())
                     .await
                     .unwrap_err(),
                 INVALID_RESPONSE
@@ -1427,7 +1456,7 @@ mod tests {
             let client = fixture_client(&http, &directory).await;
             assert_eq!(
                 client
-                    .tracks(None, None, CancellationToken::new())
+                    .tracks(None, None, false, CancellationToken::new())
                     .await
                     .unwrap_err(),
                 INVALID_RESPONSE

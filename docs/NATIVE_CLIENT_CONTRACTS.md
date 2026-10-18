@@ -17,9 +17,9 @@ time. The existing server, schema, HTTP API and frozen0.11 runtime are unchanged
 
 Launch `vela-desktop`, sign in to one Vela origin, page/search the private owned
 library, play an original through the device's native audio output, pause/resume,
-seek, change volume, navigate Library/Queue without interrupting audio, use
-next/previous/shuffle/repeat, queue duplicates/play-next/remove/reorder, switch
-theme, sign out. MPRIS exposes actual state and forwards play/pause/next/previous/
+seek, change volume, navigate Library/Favorites/Queue without interrupting audio,
+favorite/unfavorite owned tracks, search favorites, use next/previous/shuffle/repeat,
+queue duplicates/play-next/remove/reorder, switch theme, sign out. MPRIS exposes actual state and forwards play/pause/next/previous/
 seek/volume where the bus is available.
 
 ## Implemented boundaries
@@ -40,6 +40,11 @@ seek/volume where the bus is available.
   `/proc/self/fd/N`. A lease lives only while its current occurrence is playing and
   is released on replacement/failure/sign-out/exit. A dead worker is reported as
   not playable and can be replaced only by an explicit same-account reconnect.
+- Favorites use the existing owner-only `/api/tracks?favorites=true` read and
+  `/api/tracks/{id}/favorite` write; the native view reuses the same catalog/audio
+  rights, updates matching queue rows, and re-reads the filtered page after an
+  unfavorite. A feedback gate plus busy track id prevents duplicate/rapid mutations;
+  failures remain visible and no optimistic success is claimed.
 - `playback.rs` (reused by path from the web crate): bounded occurrence indices,
   fair shuffle deck/history, explicit next priority, repeat semantics. Structural
   queue edits synchronize the order model; metadata does not reset traversal.
@@ -57,7 +62,7 @@ seek/volume where the bus is available.
 This first adapter downloads the whole authorized original before decoding. It is
 not progressive streaming, gapless, offline, a download entitlement, background
 mobile playback, secure credential persistence, device handoff, packaged install,
-favorites/playlists/albums/artists UI, or a federated source resolver. It sends no
+playlists/albums/artists native UI, or a federated source resolver. It sends no
 native listening events. Only Linux x86_64 is built/tested on this host; Windows,
 macOS, Android and iOS remain separate targets. Hardware output, screen readers and
 physical media keys are not certified.
@@ -81,6 +86,11 @@ physical media keys are not certified.
   worker still advertised as playable (explicit reconnect now), QA sink assertions
   and a UTF-8 slice panic; the reported test-count discrepancy was resolved by
   enumerating25 actual tests.
+- Favorites journey passes in the same real window: the owner favorite API
+  acknowledges the row, Favorites shows exactly that track, unfavorite re-reads the
+  filtered page to empty, and Library navigation restores all three owned tracks.
+  Evidence: `target/checks/native-favorites-window9/` (including `native-favorites-dark.png`),
+  `native-favorites-{clippy2,workspace-tests}.log`, and233 workspace tests.
 - `scripts/verify_native_client.py` against an isolated fixture server/account/media
   in a real WebKitGTK window: 15 named checks including real WAV/FLAC/MP3 playback,
   seek, queue duplicates/reorder, 640×700 element bounds, no overflow, sign-out and

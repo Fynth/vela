@@ -39,7 +39,9 @@ queue with the web app. Prepared originals are unnamed private0600 files capped 
 250MiB, created without a directory entry from the first byte, verified by
 size/BLAKE3 ETag and released on replacement/sign-out/failure/exit; a dead output
 worker is disabled and can be reconnected explicitly. MPRIS2 state/commands run on a
-separate thread with bounded channels and fail open to in-app controls. A real-window
+separate thread with bounded channels and fail open to in-app controls. The native
+client also has an owner-only Favorites view with per-row favorite/unfavorite,
+queue-state synchronization and a verified empty/unfavorite/Library-return journey. A real-window
 automated journey verified playback, seek, navigation continuity, queue duplicates/
 reorder, light theme,640×700 element bounds and zero temporary directory entries;
 MPRIS and null-sink audio tests also ran.
