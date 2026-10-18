@@ -18,8 +18,35 @@ onset-regularity disclaimer. Full Chromium run with the rebuilt web assets:40 pa
 1 live-import skip in2.0m, including G08/G09, G07 and PC01–02. Screenshot:
 `target/checks/dsp-tempo-v2/radio-1440-dark.png` (Drift is a steady tone, so the row
 correctly shows "Not established"). No schema, server HTTP, native or original-data
-runtime change. The frozen live0.12.0 runtime still contains spectral-1 rows and was
-not upgraded; exposing spectral-2 requires a later verified package/upgrade.
+runtime change. The live runtime was subsequently upgraded to0.12.1; existing
+analysis rows remain spectral-1 until explicitly reanalyzed.
+
+## 0.12.1 spectral-2 patch release + preserved-data runtime handover — verified (2026-10-18)
+
+`target/releases/vela-0.12.1-{x86_64-unknown-linux-gnu,source}.tar.gz` and
+`vela-0.12.1-SHA256SUMS` were built from commit `9aa062a` (native
+`d88a2dec844153906197e82d250ae2849deb5e99afb8e77ef66551629fbe0b90`, source
+`e5249f5df75631e462fe7c6d399758e7afa28e14add911199f314cb2a36b0765`) and extracted to
+`target/runtime/vela-0.12.1/` (27MB, schema11). `scripts/verify_package.py` passed.
+Exact-package Chromium and Firefox each passed40 scenarios with1 live-import skip
+(1.8m/2.2m), including G08/G09 spectral-2 Radio, G07 history, PC01–02, auth,
+publication and player regressions.
+
+Before handover, a fresh private0600 backup
+`target/upgrade-backups/before-0.12.1-20261018T174417Z.tar.gz` (440464312 bytes) was
+created and restore-verified into an isolated empty directory: SQLite integrity/FK
+ok,1 user/20 tracks/20 assets/20 analysis/1 artwork/0 playlists. The old unit file was
+preserved at `target/upgrade-backups/vela-local-development-0.12.0.service` (0600).
+The service was stopped gracefully, the new runtime validated by
+`install-user-service.py`, and the unit handed to build0.12.1 without touching
+`data/`.
+
+Post-upgrade: health reports0.12.1; MainPID354876 active/enabled with0 restarts;
+SQLite integrity/FK ok; counts unchanged (1 user/20 tracks/20 assets/20 analysis/
+1 artwork/0 playlists). Existing spectral-1 analysis rows are retained and are not
+reinterpreted; spectral-2 applies to new analysis jobs. No schema migration or
+original media write occurred. Rollback remains the preserved0.12.0 runtime/archive,
+old unit file and pre-upgrade backup.
 
 ## Portable Linux desktop package0.12 — verified launch smoke (2026-10-18)
 
