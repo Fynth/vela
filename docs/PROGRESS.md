@@ -21,7 +21,7 @@ correctly shows "Not established"). No schema, server HTTP, native or original-d
 runtime change. The live runtime was subsequently upgraded to0.12.1; existing
 analysis rows remain spectral-1 until explicitly reanalyzed.
 
-## Native playlist folders — source verified (2026-10-18)
+## Native playlist folders — source verified (2026-10-18, `9bfdb39`)
 
 The native Playlists view now uses the real folder APIs: create, per-folder filtering,
 CAS rename/delete and CAS Move-to-folder from playlist detail. Deleting a folder
