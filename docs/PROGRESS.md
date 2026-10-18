@@ -33,7 +33,7 @@ plays the three-track queue, then reorders/restores/removes entries. Evidence:
 `target/checks/native-playlist-add3/`,24/25 desktop tests plus both opt-ins, strict
 Clippy/fmt. No schema, server, web or original-data/runtime change.
 
-## Native unified saved-peer search0.12 — verified (2026-10-18)
+## Native unified saved-peer search0.12 — verified (2026-10-18, `6418ba2`)
 
 The native Public view now searches up to eight saved canonical peers concurrently
 through each peer's public catalog `q` endpoint, with independent five-second
