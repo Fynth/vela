@@ -84,8 +84,9 @@ non-regression only for this success path.
 
 Evidence: server network lib tests4 (including cursor forwarding) and API31 pass; strict
 workspace+WASM Clippy/fmt; full Chromium41 passed+1 live-import skip in2.0m and
-Firefox41+1 skip in two clean runs (159s/175s) from `target/checks/preview-cursor-firefox/`. Source postdates the live0.12.6
-runtime; the next patch will deploy it. Firefox rerun pending. No schema or
+Firefox41+1 skip in three clean runs (159s/175s pre-fix and 177s at HEAD `3a3f463`
+after the server cursor-forwarding fix) from `target/checks/preview-cursor-firefox/`.
+Source postdates the live0.12.6 runtime; the next patch will deploy it. No schema or
 original-data change.
 
 ## Phase 0 measurement baseline — verified (2026-10-18, `72d9860`)
