@@ -129,11 +129,30 @@ peers, cached browse-only metadata and preview/per-peer search pagination. Evide
 `target/checks/desktop-0.12.2-verify.log`,
 `desktop-package-screens/vela-desktop-0.12.2-package-launch.png`.
 
+## Offline device copies
+
+An explicit per-track **Save offline** action downloads through the same validated
+authorized original path (exact size, BLAKE3 ETag,250MiB cap) and then copies the
+completed unnamed original into an account-scoped private cache. Layout:
+`$XDG_DATA_HOME/vela/offline/<account-id>/<track-id>.audio` plus a versioned JSON
+manifest; directories are0700 and files0600, written via private temp+rename. Limits
+are100 tracks/2GiB; malformed, mismatched-size or orphaned entries are ignored. No
+credentials, session tokens, audio URLs or listening events are stored.
+
+The Library shows saved copies and **Play offline** decodes the local file through the
+single native engine with context `Offline · <title>`. This is one-track local
+playback: previous/next are disabled offline, and there is no background sync,
+removal UI, queue/download manager, Android/iOS offline or server-side entitlement
+refresh. Sign-out clears in-memory state but retains the account-scoped files; another
+account cannot see them. The real-window QA stops the fixture server, verifies the HTTP
+health probe fails, plays the saved original to advancing media time, and checks the
+audio/manifest exist at0600.
+
 ## Verification
 
 - `cargo fmt --all -- --check`; strict Clippy `-p vela-desktop --all-targets
-  --features native-qa`; `cargo test --locked -p vela-desktop`: 26 passed,
-  2 ignored (opt-in audio/MPRIS) from28 listed tests (8 audio,6 client,3 MPRIS,
+  --features native-qa`; `cargo test --locked -p vela-desktop`: 27 passed,
+  2 ignored (opt-in audio/MPRIS) from29 listed tests (8 audio,6 client,3 MPRIS,
   8 shared playback). Logs: `target/checks/native-0.12b-{fmt,clippy,tests}.log`.
 - Ignored `audio::tests::native_owned_null_sink_play_pause_seek_eof_replace_stop_and_cleanup`
   executed under an owned Pulse null sink: passed.

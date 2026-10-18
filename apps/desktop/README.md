@@ -1,7 +1,9 @@
 # Vela Music desktop (Linux)
 
 This portable package contains the native Linux client. It connects to an existing
-Vela server origin; it does not start the server and keeps no offline library.
+Vela server origin; it does not start the server. You can explicitly save individual
+owned tracks as private, account-scoped offline copies (Linux playback works with the
+server stopped; there is no offline queue, background sync or removal UI).
 
 Run `bin/vela-desktop`. Sign in with an account created by your Vela administrator.
 The client uses the device's native audio output, keeps credentials only in process

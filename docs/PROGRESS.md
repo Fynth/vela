@@ -21,6 +21,27 @@ correctly shows "Not established"). No schema, server HTTP, native or original-d
 runtime change. The live runtime was subsequently upgraded to0.12.1; existing
 analysis rows remain spectral-1 until explicitly reanalyzed.
 
+## Native explicit offline copies0.12.2 — verified (2026-10-18)
+
+The native Library now offers an explicit per-track Save offline action. It downloads
+through the existing validated authorized-original path (exact size/BLAKE3 ETag,
+250MiB cap), then copies the completed unnamed original into an account-scoped private
+cache: `$XDG_DATA_HOME/vela/offline/<account>/` with versioned JSON manifests,0700
+directories,0600 files, private temp+rename, and100-track/2GiB bounds. Malformed,
+size-mismatched and orphaned entries are ignored; no credentials, URLs or history are
+stored.
+
+Saved copies appear in the Library and Play offline decodes the local file through the
+single native engine; previous/next are disabled in offline mode. The real-window
+fixture downloads a track, **stops the actual fixture server**, verifies a no-store
+health probe fails, plays the saved original to advancing media with context
+`Offline · <title>`, and confirms exactly one audio+manifest pair at0600. Sign-out
+clears in-memory state but files remain account-scoped. Evidence:
+`target/checks/native-offline3/`;27/29 desktop tests plus both opt-ins, strict
+Clippy/fmt. No offline queue/removal/sync, mobile/background or entitlement refresh.
+Source postdates the preserved0.12.2 desktop archive. No schema, server HTTP, web or
+original-data/runtime change.
+
 ## Native cached-peer age + Retry live0.12.2 — verified (2026-10-18, `7609a76`)
 
 Cached public metadata now carries its fetch time into the search result. The

@@ -281,6 +281,23 @@ try {
     await wait(() => document.querySelectorAll('[data-native-track-id]').length === 3, 'Library after public playback');
     await click('Sign out'); await wait(() => button('Sign in'), 'Native sign-out clears account');
     assert(!el('.native-player') && document.querySelectorAll('[data-native-track-id]').length === 0, 'Sign-out removes private catalog and player');
+    fill('#native-origin', config.origin); fill('#native-username', config.username); fill('#native-password', config.password);
+    el('.signin-form form').requestSubmit();
+    await wait(() => document.querySelectorAll('[data-native-track-id]').length === 3, 'Library after offline sign-in');
+    const offlineTitle = el('[data-native-track-id] .native-track-name strong')?.textContent;
+    assert(offlineTitle, 'Offline fixture track is listed');
+    await click(`Save ${offlineTitle} offline`);
+    await wait(() => (el('.alert.notice')?.textContent || '').includes('Saved for offline listening.'), 'Offline download completed');
+    await wait(() => button(`Play offline ${offlineTitle}`), 'Offline copy listed');
+    assert(el('[data-offline-track-id]'), 'Offline section exposes a private device copy');
+    dioxus.send({handshake:'server-stop'});
+    await dioxus.recv();
+    let serverDown = false;
+    try { const probe = await fetch(`/health?offline=${Date.now()}`, {cache:'no-store'}); serverDown = !probe.ok; } catch { serverDown = true; }
+    assert(serverDown, 'Fixture server is actually stopped before offline playback');
+    await click(`Play offline ${offlineTitle}`);
+    await wait(() => phase() === 'Playing' && position() > 100 && (el('.native-player-status small')?.textContent || '').includes('Offline ·'), 'Offline playback');
+    assert(phase() === 'Playing' && (el('.native-player-status small')?.textContent || '').includes('Offline ·'), 'Saved original plays natively with the server stopped');
     dioxus.send({ok:true, checks});
   }
 } catch(error) { dioxus.send({ok:false, checks, failure:String(error.message)}); }

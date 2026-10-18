@@ -88,6 +88,41 @@ fn Harness() -> Element {
                     captures.push(json!({"name":name,"passed":matches!(capture,Ok(Ok(_)))}));
                     let _ = eval.send(json!({"continue":true}));
                 }
+                Ok(Ok(message)) if message["handshake"].is_string() => {
+                    let kind = message["handshake"].as_str().unwrap_or_default();
+                    let (request, ack) = match kind {
+                        "server-stop" => (
+                            std::env::var("VELA_NATIVE_QA_STOP_REQUEST").ok(),
+                            std::env::var("VELA_NATIVE_QA_STOPPED_ACK").ok(),
+                        ),
+                        "server-start" => (
+                            std::env::var("VELA_NATIVE_QA_START_REQUEST").ok(),
+                            std::env::var("VELA_NATIVE_QA_STARTED_ACK").ok(),
+                        ),
+                        _ => (None, None),
+                    };
+                    let (Some(request), Some(ack)) = (request, ack) else {
+                        break json!({"ok":false,"failure":"Unknown native fixture handshake"});
+                    };
+                    if std::fs::write(&request, kind).is_err() {
+                        break json!({"ok":false,"failure":"Could not request fixture server transition"});
+                    }
+                    let waited = tokio::task::spawn_blocking(move || {
+                        for _ in 0..200 {
+                            if std::path::Path::new(&ack).exists() {
+                                return true;
+                            }
+                            std::thread::sleep(std::time::Duration::from_millis(100));
+                        }
+                        false
+                    })
+                    .await
+                    .unwrap_or(false);
+                    if !waited {
+                        break json!({"ok":false,"failure":"Fixture server transition timed out"});
+                    }
+                    let _ = eval.send(json!({"continue":true}));
+                }
                 Ok(Ok(message)) => break message,
                 _ => {
                     break json!({"ok":false,"failure":"Native UI driver timed out or evaluation failed"});

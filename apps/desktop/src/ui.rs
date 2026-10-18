@@ -104,6 +104,7 @@ struct Ui {
     playlist_write_gate: Gate,
     browse_gate: Gate,
     remote_gate: Gate,
+    offline_gate: Gate,
     source_gate: Gate,
     logout_gate: Gate,
     epoch: Signal<u64>,
@@ -159,6 +160,10 @@ struct Ui {
     remote_peer_more_error: Signal<String>,
     remote_retry_busy: Signal<String>,
     remote_retry_error: Signal<String>,
+    offline: Signal<Vec<crate::offline::OfflineTrack>>,
+    offline_busy: Signal<String>,
+    offline_error: Signal<String>,
+    offline_active: Signal<bool>,
     saved_peers: Signal<Vec<String>>,
     queue: Signal<Vec<Track>>,
     order: Signal<PlaybackOrder>,
@@ -287,6 +292,10 @@ impl Ui {
         self.remote_peer_more_error.set(String::new());
         self.remote_retry_busy.set(String::new());
         self.remote_retry_error.set(String::new());
+        self.offline.set(Vec::new());
+        self.offline_busy.set(String::new());
+        self.offline_error.set(String::new());
+        self.offline_active.set(false);
         self.queue.set(Vec::new());
         self.order.set(PlaybackOrder::default());
         self.shuffle.set(false);
@@ -425,12 +434,38 @@ fn login(mut ui: Ui) {
         ui.connecting.set(false);
         match result {
             Ok((client, auth)) => {
+                let account_id = auth.user.id.clone();
                 ui.account.set(Some(Account {
                     epoch: ticket.epoch,
                     client,
                     user: auth.user,
                     origin,
                 }));
+                ui.offline.set(Vec::new());
+                let mut offline_ui = ui.clone();
+                spawn(async move {
+                    let loaded = tokio::task::spawn_blocking({
+                        let account_id = account_id.clone();
+                        move || crate::offline::load(&account_id)
+                    })
+                    .await;
+                    if offline_ui
+                        .account
+                        .peek()
+                        .as_ref()
+                        .map(|account| account.user.id.as_str())
+                        != Some(account_id.as_str())
+                    {
+                        return;
+                    }
+                    match loaded {
+                        Ok(Ok(tracks)) => offline_ui.offline.set(tracks),
+                        Ok(Err(error)) => offline_ui.offline_error.set(error),
+                        Err(_) => offline_ui
+                            .offline_error
+                            .set("Saved offline music could not be read.".into()),
+                    }
+                });
                 load_catalog(ui, String::new(), None, false);
             }
             Err(error) => ui.login_error.set(error),
@@ -535,6 +570,7 @@ fn load_catalog(mut ui: Ui, query: String, cursor: Option<String>, favorites: bo
 }
 
 fn start_source(mut ui: Ui, reuse: bool, autoplay: bool, position_ms: u64) {
+    ui.offline_active.set(false);
     ui.remote_now.set(None);
     ui.remote_queue.set(Vec::new());
     ui.remote_index.set(0);
@@ -1575,6 +1611,126 @@ fn sign_in(ui: Ui) -> Element {
     } }
 }
 
+fn download_offline(mut ui: Ui, track: Track) {
+    if !ui.offline_busy.peek().is_empty()
+        || ui
+            .offline
+            .peek()
+            .iter()
+            .any(|saved| saved.track.id == track.id)
+    {
+        return;
+    }
+    let Some(account) = ui.account.peek().clone().filter(|_| ui.signed_in()) else {
+        return;
+    };
+    let account_id = account.user.id.clone();
+    let track_id = track.id.clone();
+    let ticket = ui.offline_gate.begin(account.epoch);
+    ui.offline_busy.set(track_id.clone());
+    ui.offline_error.set(String::new());
+    spawn(async move {
+        let (progress, _updates) = tokio::sync::watch::channel(DownloadProgress::default());
+        let result = account
+            .client
+            .prepare(&track, ticket.cancel.clone(), progress)
+            .await;
+        if !ticket.current(&ui)
+            || ui
+                .account
+                .peek()
+                .as_ref()
+                .is_none_or(|account| account.user.id != account_id)
+        {
+            return;
+        }
+        let prepared = match result {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                ui.offline_busy.set(String::new());
+                if !expired(ui.clone(), &error) {
+                    ui.offline_error.set(error);
+                }
+                return;
+            }
+        };
+        let save = tokio::task::spawn_blocking({
+            let account_id = account_id.clone();
+            let track = track.clone();
+            move || crate::offline::save(&account_id, &track, &prepared)
+        })
+        .await;
+        if !ticket.current(&ui) {
+            return;
+        }
+        ui.offline_busy.set(String::new());
+        match save {
+            Ok(Ok(())) => {
+                let loaded = tokio::task::spawn_blocking({
+                    let account_id = account_id.clone();
+                    move || crate::offline::load(&account_id)
+                })
+                .await;
+                match loaded {
+                    Ok(Ok(tracks)) => ui.offline.set(tracks),
+                    Ok(Err(error)) => ui.offline_error.set(error),
+                    Err(_) => ui
+                        .offline_error
+                        .set("Saved offline music could not be read.".into()),
+                }
+                ui.notice.set("Saved for offline listening.".into());
+            }
+            Ok(Err(error)) => ui.offline_error.set(error),
+            Err(_) => ui
+                .offline_error
+                .set("The offline copy could not be written.".into()),
+        }
+    });
+}
+
+fn play_offline(mut ui: Ui, saved: crate::offline::OfflineTrack) {
+    if !ui.signed_in() || *ui.view.peek() != "library" && *ui.view.peek() != "favorites" {
+        return;
+    }
+    let Some(account) = ui.account.peek().clone() else {
+        return;
+    };
+    let Some(audio) = ui.audio.peek().clone() else {
+        return;
+    };
+    let path = match crate::offline::audio_path(&account.user.id, &saved.track.id) {
+        Ok(path) => path,
+        Err(error) => {
+            ui.offline_error.set(error);
+            return;
+        }
+    };
+    let prepared = match crate::offline::prepare(&path) {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            ui.offline_error.set(error);
+            return;
+        }
+    };
+    let selection = ui.new_selection();
+    ui.source_error.set(String::new());
+    ui.offline_active.set(true);
+    ui.remote_now.set(None);
+    ui.remote_queue.set(Vec::new());
+    ui.remote_index.set(0);
+    ui.queue.set(vec![saved.track.clone()]);
+    ui.order.write().reset(1, 0);
+    ui.context.set(format!("Offline · {}", saved.track.title));
+    ui.prepared.set(None);
+    match audio.load(selection, prepared.clone(), true, 0) {
+        Ok(()) => ui.prepared.set(Some(prepared)),
+        Err(error) => {
+            ui.offline_active.set(false);
+            ui.source_error.set(error);
+        }
+    }
+}
+
 fn library(ui: Ui) -> Element {
     let loading = *ui.catalog_loading.read();
     let error = ui.catalog_error.read().clone();
@@ -1594,6 +1750,13 @@ fn library(ui: Ui) -> Element {
     let refresh = ui.clone();
     let first = ui.clone();
     let next = ui.clone();
+    let offline = ui.offline.read().clone();
+    let offline_busy = ui.offline_busy.read().clone();
+    let offline_error = ui.offline_error.read().clone();
+    let offline_ids = offline
+        .iter()
+        .map(|saved| saved.track.id.clone())
+        .collect::<std::collections::HashSet<_>>();
     rsx! {section {class:"native-library","aria-label":if favorites {"Favorite tracks"} else {"Private library"},"data-view":if favorites {"favorites"} else {"library"},"data-query":"{query}","data-loading":"{loading}","data-error":"{error}","data-catalog-items":"{catalog_items}",
         div {class:"library-intro",div {span {class:"eyebrow",if favorites {"THE ONES YOU KEEP CLOSE"} else {"YOUR COLLECTION, YOUR ORIGINALS"}} h1 {if favorites {"Favorites, kept close"} else {"A library that feels like home"}} p {if favorites {"Only tracks you explicitly favorited, using the same owner-only catalog and audio rights."} else {"Choose a track. Keep the rest of your day in the background."}}}
             button {class:"button secondary",disabled:loading,onclick:move |_|{let query=refresh.query.peek().clone();let cursor=refresh.cursor.peek().clone();let favorites=*refresh.view.peek()=="favorites";load_catalog(refresh.clone(),query,cursor,favorites);},Icon {name:"history"} if favorites {"Refresh favorites"} else {"Refresh library"}}
@@ -1603,6 +1766,21 @@ fn library(ui: Ui) -> Element {
             input {id:"native-search",value:"{draft}",maxlength:256,placeholder:"Search titles, artists or albums",oninput:move |event|search.set(event.value())}
             button {class:"button primary",r#type:"submit","Search"}
         }
+        if !offline.is_empty() {
+            div {class:"catalog-caption",p {"Saved offline · {offline.len()} private device copies"} span {"NO SERVER NEEDED"}}
+            div {class:"native-queue-list",for saved in offline.iter().cloned() {
+                {
+                    let play_ui = ui.clone();
+                    let title = saved.track.title.clone();
+                    rsx! { article {class:"native-queue-row",key:"offline-{saved.track.id}","data-offline-track-id":"{saved.track.id}",
+                        div {class:"neutral-cover","aria-hidden":"true",Icon {name:"down"}}
+                        div {class:"native-queue-select",div {strong {"{saved.track.title}"} small {"{saved.track.artist} · {saved.length_bytes / 1024} KiB on this device"} small {"Private offline copy"}}}
+                        button {class:"button primary small","aria-label":"Play offline {title}",onclick:move |_|play_offline(play_ui.clone(),saved.clone()),Icon {name:"play"} "Play offline"}
+                    } }
+                }
+            } }
+        }
+        if !offline_error.is_empty() {div {class:"alert error",role:"alert","{offline_error}"}}
         div {class:"catalog-caption",p {if favorites {if query.is_empty() {"Your favorites · Up to 50 per page"} else {"Favorite results for “{query}” · Up to 50 per page"}} else if query.is_empty() {"Your private tracks · Up to 50 per page"} else {"Results for “{query}” · Up to 50 per page"}} span {"ORIGINAL AUDIO"}}
         if loading {div {class:"native-loading",role:"status",span {class:"loading-mark","aria-hidden":"true"} if favorites {"Loading your favorites…"} else {"Loading your library…"}}}
         if !error.is_empty() {div {class:"alert error",role:"alert","{error} Refresh the library to try again."}}
@@ -1610,7 +1788,7 @@ fn library(ui: Ui) -> Element {
             if catalog.page.items.is_empty() {div {class:"native-empty",Icon {name:"heart"} h2 {if favorites {if query.is_empty() {"No favorites yet"} else {"No matching favorites"}} else if query.is_empty() {"Make room for your first listen"} else {"No matching tracks"}} p {if favorites {if query.is_empty() {"Favorite a track from your library to find it here. Favorites are private to your account."} else {"Try a different title, artist or album. Only your favorite tracks are searched."}} else if query.is_empty() {"Add music in Vela’s web app, then refresh this library. Your tracks stay private."} else {"Try a different title, artist or album. Search uses only your own library."}}}}
             else {div {class:"native-track-table",div {class:"native-track-header","aria-hidden":"true",span {""} span {"TITLE / ARTIST"} span {"ALBUM"} span {"TIME"} span {"QUEUE"}}
                 for (at,track) in catalog.page.items.iter().cloned().enumerate() { {
-                    let play_ui=ui.clone();let played_catalog=catalog.clone();let next_ui=ui.clone();let next_catalog=catalog.clone();let last_ui=ui.clone();let last_catalog=catalog.clone();let next_track=track.clone();let last_track=track.clone();let favorite_ui=ui.clone();let favorite_catalog=catalog.clone();let favorite_track=track.clone();
+                    let play_ui=ui.clone();let played_catalog=catalog.clone();let next_ui=ui.clone();let next_catalog=catalog.clone();let last_ui=ui.clone();let last_catalog=catalog.clone();let next_track=track.clone();let last_track=track.clone();let favorite_ui=ui.clone();let favorite_catalog=catalog.clone();let favorite_track=track.clone();let offline_ui=ui.clone();let offline_track=track.clone();let offline_saved=offline_ids.contains(&track.id);let offline_working=offline_busy==track.id;let offline_title=track.title.clone();
                     let current=ui.current_track().is_some_and(|current|current.id==track.id);
                     let favorite_disabled=ui.favorite_busy.read().as_str()==track.id;
                     rsx! {article {class:if current {"native-track current"} else {"native-track"},key:"{track.id}","data-native-track-id":"{track.id}",
@@ -1622,6 +1800,7 @@ fn library(ui: Ui) -> Element {
                             button {class:if track.favorite {"icon-button selected"} else {"icon-button"},"aria-pressed":track.favorite,disabled:favorite_disabled,"aria-label":if track.favorite {format!("Remove {} from favorites",track.title)} else {format!("Favorite {}",track.title)},title:if favorite_disabled {"Updating this favorite…"} else if track.favorite {"Remove from favorites"} else {"Add to favorites"},onclick:move |_|toggle_favorite(favorite_ui.clone(),favorite_catalog.clone(),favorite_track.clone()),Icon {name:"heart"}}
                             button {class:"icon-button","aria-label":"Play {track.title} next",title:"Play next",onclick:move |_|{if next_ui.catalog_current(&next_catalog) {enqueue(next_ui.clone(),next_track.clone(),true);}},Icon {name:"next-add"}}
                             button {class:"icon-button","aria-label":"Add {track.title} to queue",title:"Add to queue",onclick:move |_|{if last_ui.catalog_current(&last_catalog){enqueue(last_ui.clone(),last_track.clone(),false);}},Icon {name:"plus"}}
+                            button {class:"icon-button",disabled:offline_saved||offline_working,"aria-label":if offline_saved {format!("Already saved offline: {offline_title}")} else if offline_working {format!("Saving offline: {offline_title}")} else {format!("Save {offline_title} offline")},title:if offline_saved {"Saved on this device"} else if offline_working {"Downloading a private copy…"} else {"Save a private copy for offline listening"},onclick:move |_|download_offline(offline_ui.clone(),offline_track.clone()),Icon {name:"down"}}
                         }
                     } }
                 } }
@@ -1959,6 +2138,7 @@ fn start_remote(mut ui: Ui) {
     if !ui.signed_in() || *ui.view.peek() != "public" {
         return;
     }
+    ui.offline_active.set(false);
     let Some(item) = ui.remote_queue.peek().get(*ui.remote_index.peek()).cloned() else {
         return;
     };
@@ -2040,6 +2220,9 @@ fn remote_step(mut ui: Ui, delta: i32) {
 }
 
 fn player_previous(ui: Ui) {
+    if *ui.offline_active.peek() {
+        return;
+    }
     if ui.remote_now.peek().is_some() {
         remote_step(ui, -1);
     } else {
@@ -2048,6 +2231,9 @@ fn player_previous(ui: Ui) {
 }
 
 fn player_next(ui: Ui) {
+    if *ui.offline_active.peek() {
+        return;
+    }
     if ui.remote_now.peek().is_some() {
         remote_step(ui, 1);
     } else {
@@ -2612,6 +2798,7 @@ pub fn App() -> Element {
         playlist_write_gate: use_hook(Gate::default),
         browse_gate: use_hook(Gate::default),
         remote_gate: use_hook(Gate::default),
+        offline_gate: use_hook(Gate::default),
         source_gate: use_hook(Gate::default),
         logout_gate: use_hook(Gate::default),
         epoch: use_signal(|| 1),
@@ -2669,6 +2856,10 @@ pub fn App() -> Element {
         remote_peer_more_error: use_signal(String::new),
         remote_retry_busy: use_signal(String::new),
         remote_retry_error: use_signal(String::new),
+        offline: use_signal(Vec::new),
+        offline_busy: use_signal(String::new),
+        offline_error: use_signal(String::new),
+        offline_active: use_signal(|| false),
         saved_peers: use_signal(|| crate::peers::load().unwrap_or_default()),
         queue: use_signal(Vec::new),
         order: use_signal(PlaybackOrder::default),

@@ -2,6 +2,7 @@
 pub mod audio;
 pub mod client;
 pub mod mpris;
+pub mod offline;
 pub mod peers;
 #[path = "../../web/src/playback.rs"]
 pub mod playback;

@@ -27,7 +27,7 @@ const NETWORK_ERROR: &str = "Unable to reach the Vela server. Check the connecti
 const AUDIO_ERROR: &str =
     "Unable to prepare private temporary audio. Check available disk space and retry.";
 const PREPARE_BUSY: &str = "Busy: another track is preparing. Cancel it first.";
-const MAX_MEDIA_BYTES: u64 = 250 * 1024 * 1024;
+pub(crate) const MAX_MEDIA_BYTES: u64 = 250 * 1024 * 1024;
 const MAX_JSON_BYTES: usize = 4 * 1024 * 1024;
 const FILE_CHUNK: usize = 64 * 1024;
 

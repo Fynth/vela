@@ -248,8 +248,21 @@ def main():
                     with (evidence / 'audio-unit.log').open('wb') as audio_log:
                         subprocess.run(['cargo', 'test', '--locked', '-p', 'vela-desktop', '--lib', 'audio::tests::native_owned_null_sink_play_pause_seek_eof_replace_stop_and_cleanup', '--', '--ignored', '--exact', '--nocapture'], cwd=ROOT, env=environment, stdout=audio_log, stderr=subprocess.STDOUT, timeout=180, check=True)
                 environment['VELA_NATIVE_QA_CLOSE_PLAYING'] = '1' if args.close_while_playing else '0'
+                stop_request = private / 'server-stop.request'
+                stopped_ack = private / 'server-stopped.ack'
+                for marker in (stop_request, stopped_ack):
+                    marker.unlink(missing_ok=True)
+                environment.update({'VELA_NATIVE_QA_STOP_REQUEST': str(stop_request), 'VELA_NATIVE_QA_STOPPED_ACK': str(stopped_ack)})
                 driver = subprocess.Popen([str(args.driver.resolve())], env=environment, stdout=window_log, stderr=subprocess.STDOUT)
-                driver.wait(timeout=180)
+                while driver.poll() is None:
+                    if stop_request.exists():
+                        if server.poll() is None:
+                            server.send_signal(signal.SIGTERM)
+                            server.wait(timeout=30)
+                        stopped_ack.write_text('stopped')
+                        stop_request.unlink(missing_ok=True)
+                    time.sleep(0.1)
+                driver.wait(timeout=30)
                 result = json.loads(report.read_text())
                 if driver.returncode or not result['result']['ok'] or not all(image['passed'] for image in result['screenshots']):
                     raise RuntimeError(f'Native window verification failed; inspect {report}')
@@ -258,6 +271,18 @@ def main():
                 report.write_text(json.dumps(result, indent=2) + '\n')
                 if originals:
                     raise RuntimeError('Native process left a completed temporary original after exit')
+                offline_audio = list((private / 'home' / 'vela' / 'offline').glob('*/*.audio'))
+                offline_json = list((private / 'home' / 'vela' / 'offline').glob('*/*.json'))
+                if len(offline_audio) != 1 or len(offline_json) != 1:
+                    raise RuntimeError('Offline fixture did not persist exactly one audio+manifest pair')
+                if any(path.stat().st_mode & 0o077 for path in offline_audio + offline_json):
+                    raise RuntimeError('Offline fixture files are not private0600')
+                result['offline_copies'] = {
+                    'audio': str(offline_audio[0]),
+                    'manifest': str(offline_json[0]),
+                    'bytes': offline_audio[0].stat().st_size,
+                }
+                report.write_text(json.dumps(result, indent=2) + '\n')
                 if args.test_peer:
                     config_path = private / 'home' / 'vela' / 'peers.json'
                     config = json.loads(config_path.read_text())
