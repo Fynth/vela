@@ -72,6 +72,26 @@ catalog adapters and genuinely playable authorized remote streaming; then schedu
 recommendation refresh. Preserve the0.11 runtime, all backups/releases/evidence and
 this exact checkpoint; re-inspect process/data on resume.
 
+Resume commands on this host (do not clean target or replace data/):
+```bash
+git status --short && git log --oneline -6
+curl -sS http://127.0.0.1:3210/health
+CARGO_BUILD_JOBS=2 cargo test --locked --workspace -- --test-threads=2
+CARGO_BUILD_JOBS=2 cargo clippy --locked --workspace --all-targets -- -D warnings
+CARGO_BUILD_JOBS=2 cargo clippy --locked -p vela-web --target wasm32-unknown-unknown -- -D warnings
+CARGO_BUILD_JOBS=2 cargo build --locked -p vela-desktop --example native-ui-qa --features native-qa
+python3 scripts/verify_native_client.py --evidence target/checks/native-resume-$(date +%s) --test-audio-engine
+CARGO_BUILD_JOBS=2 VELA_WASM_BINDGEN="$PWD/target/tools/wasm-bindgen-0.2.129-x86_64-unknown-linux-musl/wasm-bindgen" scripts/build-web.sh
+(cd tests/browser && npx playwright test --browser=chromium)   # separate fresh server/data
+```
+The live unit is `vela-local-development.service`, MainPID78464, frozen
+`target/runtime/vela-0.11.0/`, ORIGINAL `data/`; re-read them rather than trusting
+this paragraph. Playwright cleans `tests/browser/test-results` at each invocation:
+copy screenshots to `target/checks/` immediately after a run. The native QA opens a
+real window and creates/removes an owned Pulse null sink; never run it against the
+default output. `wasm-bindgen` is not on PATH; use the pinned target/tools binary.
+
+
 ## Native Linux client0.12.0 — verified source, original runtime preserved (2026-10-18)
 
 Application/source checkpoint `3a285e0`. Started from the dirty post-0.11 worktree
