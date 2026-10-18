@@ -161,7 +161,7 @@ sent, so consent/history is not bypassed or inferred.
   and zero temporary entries after exit, and the bounded-channel MPRIS session test
   (`target/checks/native-0.12b-*`, `native-0.12b-window/`). The review's reported
   17-test count was reconciled against the actual25 enumerated tests.
-- Native favorites follow-up: the desktop client now has a Favorites navigation
+- Native favorites follow-up `358dd6f`: the desktop client now has a Favorites navigation
   view backed by the existing owner-only `favorites=true` catalog read, per-row
   favorite/unfavorite with a feedback gate and busy-track id, queue-state
   synchronization, and a filtered-page re-read after unfavorite. A stale search
