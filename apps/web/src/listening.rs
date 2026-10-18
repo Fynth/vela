@@ -581,6 +581,20 @@ fn download_export(export: &ListeningExport) -> Result<(), String> {
     result
 }
 
+fn device_age_label(timestamp: i64) -> String {
+    let now = (js_sys::Date::now() / 1000.0) as i64;
+    let age = now.saturating_sub(timestamp);
+    if age < 60 {
+        "just now".into()
+    } else if age < 3_600 {
+        format!("{}m ago", age / 60)
+    } else if age < 86_400 {
+        format!("{}h ago", age / 3_600)
+    } else {
+        format!("{}d ago", age / 86_400)
+    }
+}
+
 #[component]
 pub fn PrivacySettings(
     auth: Signal<Option<AuthResponse>>,
@@ -594,6 +608,13 @@ pub fn PrivacySettings(
     let requests = use_hook(RequestScope::default);
     let privacy_requests = requests.clone();
     let mut export_context = use_signal(|| None::<(String, u64, bool)>);
+    let mut devices = use_signal(Vec::<ListeningDevice>::new);
+    let mut devices_loading = use_signal(|| false);
+    let mut devices_error = use_signal(String::new);
+    let revoke_busy = use_signal(String::new);
+    let revoke_confirm = use_signal(String::new);
+    let device_requests = use_hook(RequestScope::default);
+    let device_requests_effect = device_requests.clone();
     use_effect(move || {
         let current = view.read();
         let _auth = auth.read();
@@ -608,9 +629,40 @@ pub fn PrivacySettings(
     let cleanup = requests.clone();
     let alive = use_hook(|| Rc::new(Cell::new(true)));
     let dropped = alive.clone();
+    let cleanup_devices = device_requests.clone();
     use_drop(move || {
         dropped.set(false);
         cleanup.cancel();
+        cleanup_devices.cancel();
+    });
+    let devices_alive = alive.clone();
+    use_effect(move || {
+        let session = token(auth);
+        let _auth = auth.read();
+        let _revision = view.read().preferences.as_ref().map(|value| value.revision);
+        if session.is_empty() {
+            devices.set(Vec::new());
+            return;
+        }
+        device_requests_effect.cancel();
+        devices_loading.set(true);
+        devices_error.set(String::new());
+        let Ok(signal) = device_requests_effect.begin() else {
+            devices_loading.set(false);
+            return;
+        };
+        let alive = devices_alive.clone();
+        spawn_local(async move {
+            let result = client::get::<ListeningDevices>("/api/listening/devices", &signal).await;
+            if !alive.get() || token(auth) != session {
+                return;
+            }
+            devices_loading.set(false);
+            match result {
+                Ok(list) => devices.set(list.devices),
+                Err(message) => devices_error.set(message),
+            }
+        });
     });
     let current = view.read().clone();
     let preferences = current.preferences.clone();
@@ -661,6 +713,63 @@ pub fn PrivacySettings(
             button { class: "button danger small", disabled: blocked, onclick: move |_| confirm.set(true), "Delete history…" }
         }
         if !export_error().is_empty() { p { role: "alert", "{export_error}" } }
+        div { class: "listening-devices", "aria-label": "Devices with listening history",
+            h3 { "Listening devices" }
+            p { "Each browser that consented to collection is listed here. Revoking a device deletes that device's saved sessions and invalidates any export prepared under the previous privacy revision." }
+            if devices_loading() { p { role: "status", "Loading listening devices…" } }
+            if !devices_error().is_empty() { p { class: "alert error", role: "alert", "{devices_error()}" } }
+            if !devices_loading() && devices_error().is_empty() && devices().is_empty() { p { "No device has consented to collection yet." } }
+            for device in devices() {
+                {
+                    let device_id = device.device_id.clone();
+                    let current_device = preferences.as_ref().is_some_and(|value| value.device_id == device_id);
+                    let revoke_id = device_id.clone();
+                    let revoke_confirm_id = device_id.clone();
+                    let revoke_ui = collector.clone();
+                    let revision = privacy_revision;
+                    let session = token(auth);
+                    let alive = alive.clone();
+                    let mut revoke_busy = revoke_busy;
+                    let mut revoke_confirm = revoke_confirm;
+                    let devices = devices;
+                    let device_requests = device_requests.clone();
+                    let busy = revoke_busy() == device_id;
+                    let last_active = device.last_activity_at.map(device_age_label).unwrap_or_else(|| "never".into());
+                    let collection = if device.enabled { "collection on" } else { "collection off" };
+                    rsx! { article { class: "history-track", "data-listening-device": "{device_id}",
+                        div { class: "history-play", div { strong { if current_device { "This browser" } else { "Listening device" } } small { "{device.session_count} sessions · {collection} · last active {last_active}" } } }
+                        if revoke_confirm() == device_id {
+                            button { class: "button danger small", disabled: busy, "aria-label": "Confirm revoke listening device {device_id}", onclick: move |_| {
+                                let Some(revision) = revision else { return; };
+                                let Ok(signal) = device_requests.begin() else { return; };
+                                revoke_busy.set(revoke_id.clone());
+                                devices_error.set(String::new());
+                                let path = format!("/api/listening/devices/{}?revision={}", revoke_id, revision);
+                                let session = session.clone();
+                                let alive = alive.clone();
+                                let mut devices = devices;
+                                let revoke_ui = revoke_ui.clone();
+                                let mut revoke_busy = revoke_busy;
+                                let mut revoke_confirm = revoke_confirm;
+                                spawn_local(async move {
+                                    let result = client::api_abortable::<ListeningDevices>("DELETE", &path, None, &session, Some(&signal)).await;
+                                    if !alive.get() || token(auth) != session { return; }
+                                    revoke_busy.set(String::new());
+                                    revoke_confirm.set(String::new());
+                                    match result {
+                                        Ok(list) => { devices.set(list.devices); revoke_ui.reload(); }
+                                        Err(message) => devices_error.set(message),
+                                    }
+                                });
+                            }, if busy { "Revoking…" } else { "Confirm revoke" } }
+                            button { class: "button secondary small", onclick: move |_| revoke_confirm.set(String::new()), "Keep device" }
+                        } else {
+                            button { class: "button danger small", disabled: busy, "aria-label": "Revoke listening device {device_id}", onclick: move |_| revoke_confirm.set(revoke_confirm_id.clone()), "Revoke device…" }
+                        }
+                    } }
+                }
+            }
+        }
         if confirm() { div { class: "history-delete-confirm", role: "group", "aria-label": "Confirm history deletion",
             p { "Delete all listening history for this account and turn off collection on every device? This cannot be undone. Existing music and playlists are preserved." }
             button { class: "button danger", disabled: current.busy, onclick: move |_| { collector.configure(false, false, retention, true); confirm.set(false); }, "Delete history and turn off collection" }

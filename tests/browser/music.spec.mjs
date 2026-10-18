@@ -1624,6 +1624,17 @@ test('G07 private history measures actual playback only after account and device
   await global.check();await expect(global).toBeChecked();await expect(device).toBeEnabled();
   expect((await exportHistory()).events).toEqual([]);
   await device.check();await expect(device).toBeChecked();await expect(global).toBeEnabled();
+  const secondDevice=randomUUID();
+  const currentPreferences=await (await page.request.get(`/api/listening/preferences?device_id=${secondDevice}`)).json();
+  const secondGrant=await page.request.put('/api/listening/preferences',{headers:{'X-CSRF-Token':me.csrf_token},data:{revision:currentPreferences.revision,enabled:true,retention_days:90,device_id:secondDevice,device_enabled:true}});
+  expect(secondGrant.ok()).toBeTruthy();
+  await page.getByRole('button',{name:'Refresh privacy settings',exact:true}).click();
+  await expect(page.locator('[data-listening-device]')).toHaveCount(2);
+  await expect(page.locator(`[data-listening-device="${secondDevice}"]`)).toContainText('Listening device');
+  await page.getByRole('button',{name:`Revoke listening device ${secondDevice}`,exact:true}).click();
+  await page.getByRole('button',{name:`Confirm revoke listening device ${secondDevice}`,exact:true}).click();
+  await expect(page.locator('[data-listening-device]')).toHaveCount(1);
+  await expect(page.locator(`[data-listening-device="${secondDevice}"]`)).toHaveCount(0);
   await findTrack(page,'History Tide');
   await page.getByRole('button',{name:'Play History Tide',exact:true}).click();
   await expect(page.locator('#vela-audio')).toHaveJSProperty('paused',false);

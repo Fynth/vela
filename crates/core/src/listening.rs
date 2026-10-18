@@ -292,6 +292,59 @@ impl ListeningService {
     }
 
     /// Erasure also revokes collection, so delayed batches cannot resurrect it.
+    pub async fn devices(&self, user: &User) -> Result<ListeningDevices> {
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        prune_owner(&mut tx, &user.id, now()).await?;
+        ensure_preferences(&mut tx, &user.id, now()).await?;
+        let devices = devices_in(&mut tx, &user.id).await?;
+        tx.commit().await?;
+        Ok(devices)
+    }
+
+    pub async fn revoke_device(
+        &self,
+        user: &User,
+        device_id: &str,
+        revision: i64,
+    ) -> Result<ListeningDevices> {
+        uuid(device_id)?;
+        if revision < 0 {
+            return Err(invalid("A current revision is required"));
+        }
+        let timestamp = now();
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        ensure_preferences(&mut tx, &user.id, timestamp).await?;
+        let current: i64 =
+            sqlx::query_scalar("SELECT revision FROM listening_preferences WHERE user_id=?")
+                .bind(&user.id)
+                .fetch_one(&mut *tx)
+                .await?;
+        if current != revision || current == i64::MAX {
+            return Err(conflict(
+                "Listening privacy settings changed; reload before revoking a device",
+            ));
+        }
+        let removed = sqlx::query("DELETE FROM listening_devices WHERE user_id=? AND device_id=?")
+            .bind(&user.id)
+            .bind(device_id)
+            .execute(&mut *tx)
+            .await?;
+        if removed.rows_affected() == 0 {
+            return Err(Error::NotFound);
+        }
+        sqlx::query(
+            "UPDATE listening_preferences SET revision=revision+1,updated_at=? WHERE user_id=?",
+        )
+        .bind(timestamp)
+        .bind(&user.id)
+        .execute(&mut *tx)
+        .await?;
+        prune_owner(&mut tx, &user.id, timestamp).await?;
+        let devices = devices_in(&mut tx, &user.id).await?;
+        tx.commit().await?;
+        Ok(devices)
+    }
+
     pub async fn clear(&self, user: &User, device_id: &str) -> Result<ListeningPreferences> {
         uuid(device_id)?;
         let timestamp = now();
@@ -377,6 +430,32 @@ async fn retention(tx: &mut Transaction<'_, Sqlite>, owner: &str) -> Result<u16>
     .fetch_one(&mut **tx)
     .await? as u16)
 }
+async fn devices_in(tx: &mut Transaction<'_, Sqlite>, owner: &str) -> Result<ListeningDevices> {
+    let revision: i64 =
+        sqlx::query_scalar("SELECT revision FROM listening_preferences WHERE user_id=?")
+            .bind(owner)
+            .fetch_one(&mut **tx)
+            .await?;
+    let rows = sqlx::query(
+        "SELECT d.device_id,d.enabled,(SELECT COUNT(*) FROM listening_sessions s WHERE s.user_id=d.user_id AND s.device_id=d.device_id) session_count,(SELECT MAX(s.updated_at) FROM listening_sessions s WHERE s.user_id=d.user_id AND s.device_id=d.device_id) last_activity_at FROM listening_devices d WHERE d.user_id=? ORDER BY last_activity_at IS NULL,last_activity_at DESC,d.device_id ASC",
+    )
+    .bind(owner)
+    .fetch_all(&mut **tx)
+    .await?;
+    let devices = rows
+        .into_iter()
+        .map(|row| {
+            Ok(ListeningDevice {
+                device_id: row.try_get("device_id")?,
+                enabled: row.try_get("enabled")?,
+                session_count: row.try_get("session_count")?,
+                last_activity_at: row.try_get("last_activity_at")?,
+            })
+        })
+        .collect::<std::result::Result<Vec<_>, sqlx::Error>>()?;
+    Ok(ListeningDevices { revision, devices })
+}
+
 async fn prune_owner(tx: &mut Transaction<'_, Sqlite>, owner: &str, timestamp: i64) -> Result<u64> {
     Ok(sqlx::query("DELETE FROM listening_sessions WHERE user_id=? AND started_at < ? - COALESCE((SELECT retention_days FROM listening_preferences WHERE user_id=?),90)*86400")
         .bind(owner).bind(timestamp).bind(owner).execute(&mut **tx).await?.rows_affected())

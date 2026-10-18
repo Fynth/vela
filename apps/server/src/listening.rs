@@ -1,5 +1,6 @@
 //! Owner-private transport. Consent and idempotency belong to core.
 use super::*;
+use axum::extract::Path;
 
 pub(super) fn routes() -> Router<AppState> {
     Router::new()
@@ -9,6 +10,8 @@ pub(super) fn routes() -> Router<AppState> {
         )
         .route("/api/listening/events", post(record))
         .route("/api/listening/history", get(history).delete(clear))
+        .route("/api/listening/devices", get(devices))
+        .route("/api/listening/devices/{device_id}", delete(revoke_device))
         .route("/api/listening/export", get(export))
         .layer(DefaultBodyLimit::max(16 * 1024))
 }
@@ -75,6 +78,32 @@ async fn export(State(s): State<AppState>, Auth(auth): Auth) -> Result<Response>
     );
     Ok(response)
 }
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RevisionQuery {
+    revision: i64,
+}
+
+async fn devices(State(s): State<AppState>, Auth(auth): Auth) -> Result<Json<ListeningDevices>> {
+    Ok(Json(s.listening.devices(&auth.response.user).await?))
+}
+
+async fn revoke_device(
+    State(s): State<AppState>,
+    WriteAuth(auth): WriteAuth,
+    Path(device_id): Path<String>,
+    Query(q): Query<RevisionQuery>,
+) -> Result<Json<ListeningDevices>> {
+    if !(0..=i64::MAX).contains(&q.revision) {
+        return Err(invalid("Invalid listening revision"));
+    }
+    Ok(Json(
+        s.listening
+            .revoke_device(&auth.response.user, &device_id, q.revision)
+            .await?,
+    ))
+}
+
 async fn clear(
     State(s): State<AppState>,
     WriteAuth(auth): WriteAuth,

@@ -3789,3 +3789,158 @@ async fn malformed_library_filter_queries_are_bounded_json_errors() {
 
 #[path = "support/publications.rs"]
 mod publication_tests;
+
+#[tokio::test]
+async fn listening_device_grants_are_listed_and_revoked_with_revision_cas() {
+    let app = TestApp::new().await;
+    let owned = app.upload(&app.admin).await.track;
+    let device_a = uuid::Uuid::new_v4().to_string();
+    let device_b = uuid::Uuid::new_v4().to_string();
+    let enable_a = UpdateListeningPreferences {
+        revision: 0,
+        enabled: true,
+        retention_days: 90,
+        device_id: device_a.clone(),
+        device_enabled: true,
+    };
+    let rev1: ListeningPreferences = app
+        .request(Method::PUT, "/api/listening/preferences", &app.admin)
+        .json(&enable_a)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let batch_a = ListeningBatch {
+        device_id: device_a.clone(),
+        revision: rev1.revision,
+        events: vec![ListeningProgress {
+            session_id: uuid::Uuid::new_v4().to_string(),
+            sequence: 1,
+            track_id: owned.id.clone(),
+            listened_ms: 1500,
+            position_ms: 1500,
+            started_at: vela_core::now() - 2,
+            ended: true,
+        }],
+    };
+    assert_eq!(
+        app.request(Method::POST, "/api/listening/events", &app.admin)
+            .json(&batch_a)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK
+    );
+    let enable_b = UpdateListeningPreferences {
+        revision: rev1.revision,
+        enabled: true,
+        retention_days: 30,
+        device_id: device_b.clone(),
+        device_enabled: true,
+    };
+    let rev2: ListeningPreferences = app
+        .request(Method::PUT, "/api/listening/preferences", &app.admin)
+        .json(&enable_b)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let batch_b = ListeningBatch {
+        device_id: device_b.clone(),
+        revision: rev2.revision,
+        events: vec![ListeningProgress {
+            session_id: uuid::Uuid::new_v4().to_string(),
+            sequence: 1,
+            track_id: owned.id,
+            listened_ms: 2500,
+            position_ms: 2500,
+            started_at: vela_core::now() - 1,
+            ended: true,
+        }],
+    };
+    assert_eq!(
+        app.request(Method::POST, "/api/listening/events", &app.admin)
+            .json(&batch_b)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK
+    );
+    let listed: ListeningDevices = app
+        .request(Method::GET, "/api/listening/devices", &app.admin)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(listed.revision, rev2.revision);
+    assert_eq!(listed.devices.len(), 2);
+    assert!(
+        listed
+            .devices
+            .iter()
+            .all(|device| device.session_count == 1)
+    );
+    assert!(
+        listed
+            .devices
+            .iter()
+            .all(|device| device.last_activity_at.is_some())
+    );
+    let stale = format!(
+        "/api/listening/devices/{device_a}?revision={}",
+        rev1.revision
+    );
+    assert_eq!(
+        app.request(Method::DELETE, &stale, &app.admin)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::CONFLICT
+    );
+    let current = format!(
+        "/api/listening/devices/{device_a}?revision={}",
+        rev2.revision
+    );
+    let after: ListeningDevices = app
+        .request(Method::DELETE, &current, &app.admin)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(after.revision > rev2.revision);
+    assert_eq!(after.devices.len(), 1);
+    assert_eq!(after.devices[0].device_id, device_b);
+    let export: ListeningExport = app
+        .request(Method::GET, "/api/listening/export", &app.admin)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(export.events.len(), 1);
+    assert_eq!(export.events[0].device_id, device_b);
+    let missing = format!(
+        "/api/listening/devices/{device_a}?revision={}",
+        after.revision
+    );
+    assert_eq!(
+        app.request(Method::DELETE, &missing, &app.admin)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+}

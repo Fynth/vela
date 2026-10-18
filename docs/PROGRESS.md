@@ -21,6 +21,25 @@ correctly shows "Not established"). No schema, server HTTP, native or original-d
 runtime change. The live runtime was subsequently upgraded to0.12.1; existing
 analysis rows remain spectral-1 until explicitly reanalyzed.
 
+## Listening-device listing and revocation — verified (2026-10-18)
+
+Settings now lists the owner's consented listening devices with session counts,
+enabled state and last activity (bounded32). Each row supports inline-confirmed
+revocation guarded by the current privacy revision; the server deletes that owner/device
+grant and its cascaded sessions, increments the privacy revision and returns the new
+list. Stale revisions return409, unknown/foreign devices404, and held exports are
+invalidated by the revision change. Bulk deletion remains the existing delete-all-and-
+disable path.
+
+Core/service+HTTP test covers two real devices, counts/activity, stale409, revoke,
+cascade/export with only the remaining device and repeat404. G07 extended with a real
+second device grant through the API, Settings listing, 320px layout, confirmation and
+revocation while history/DSP/export/erasure checks remain green. Evidence:
+`target/checks/listening-devices/` (320px privacy screenshot), Chromium40 passed+1
+live-import skip in2.4m, API30 tests, web20 tests, strict core/server/web Clippy/fmt.
+Source postdates the0.12.2 runtime; next patch release will deploy it. No schema
+migration, original-data rewrite or native change.
+
 ## Native offline queue + removal0.12.2 — verified (2026-10-18, `b0bf085`)
 
 Offline playback now uses all saved copies in newest-saved order: Play offline builds

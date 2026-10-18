@@ -19,6 +19,26 @@ pub struct UpdateListeningPreferences {
     pub device_id: String,
     pub device_enabled: bool,
 }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ListeningDevice {
+    pub device_id: String,
+    pub enabled: bool,
+    pub session_count: i64,
+    pub last_activity_at: Option<i64>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ListeningDevices {
+    pub revision: i64,
+    pub devices: Vec<ListeningDevice>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RevokeListeningDevice {
+    pub revision: i64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct ListeningProgress {
