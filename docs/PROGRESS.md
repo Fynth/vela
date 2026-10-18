@@ -21,7 +21,7 @@ correctly shows "Not established"). No schema, server HTTP, native or original-d
 runtime change. The live runtime was subsequently upgraded to0.12.1; existing
 analysis rows remain spectral-1 until explicitly reanalyzed.
 
-## Native TLS federation — source verified (2026-10-18)
+## Native TLS federation — source verified (2026-10-18, `e605c83`)
 
 Native peer transport now supports a debug-only HTTPS loopback override with a test CA,
 so the real reqwest client performs certificate-chain/SNI/handshake validation for
