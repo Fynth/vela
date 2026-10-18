@@ -21,7 +21,7 @@ correctly shows "Not established"). No schema, server HTTP, native or original-d
 runtime change. The live runtime was subsequently upgraded to0.12.1; existing
 analysis rows remain spectral-1 until explicitly reanalyzed.
 
-## Native browse-only public metadata cache0.12.1 — verified (2026-10-18)
+## Native browse-only public metadata cache0.12.1 — verified (2026-10-18, `a3cb52c`; package `d7c0efb`)
 
 A successful native public catalog fetch is now cached as bounded public metadata
 under `$XDG_CACHE_HOME/vela/public-catalog` (fallback `~/.cache`): versioned JSON,
