@@ -1,3 +1,19 @@
+# Verified native Linux source slice0.12
+
+Source slice: workspace0.12.0 working tree. The frozen0.11.0 server runtime and
+original data were not replaced. Commit hash is recorded in PROGRESS after integration.
+
+| Feature | Exact paths | Verified source | Executed evidence | Result | Next | Owner |
+| --- | --- | --- | --- | --- | --- | --- |
+| Native Linux client transport/audio | apps/desktop/src/{client,audio,lib,ui,main}.rs; apps/desktop/style.css |0.12 worktree |23 desktop tests; strict Clippy `--all-targets --features native-qa`; fmt; ignored owned-null-sink audio test; real WebKitGTK window against isolated fixture server/account/media | PASS for Linux library/queue playback | Packaging, secure persistence, favorites/playlists UI, offline/background | main/audio/client/UI |
+| MPRIS2 observer | apps/desktop/src/mpris.rs |0.12 worktree | Ignored real-session test under private `dbus-run-session`: properties and play/pause/next/previous/seek/volume forwarding | PASS for Linux session bus | External controller/session hardware smoke | main |
+| Responsive native window | apps/desktop/examples/native-ui-qa.{rs,js}; apps/desktop/style.css |0.12 worktree |15 named checks at1280×840 and640×700: real WAV/FLAC/MP3 playback, pause/seek, navigation continuity, duplicate queue, reorder, element bounds, no overflow, sign-out, zero temp originals; close-while-playing variant passed | PASS for recorded Linux scope | Physical output, screen reader, packaged window | main/QA |
+| Failure found and fixed | apps/desktop/style.css |0.12 worktree | First compact run reproduced queue grid rows overflowing640px (remove buttons clipped); element-level assertion retained; `minmax(0,1fr)` fix; complete rerun passed | FAILED then PASSED | Preserve failed evidence | main |
+
+Evidence paths are under ignored `target/checks/native-0.12-*`; `native-0.12-window2`
+is the preserved failed compact run. These are Linux window/audio tests, not mobile
+background, Apple/Windows, installer or physical-audio certification.
+
 # Verified0.11 package/runtime checkpoint
 
 Source/application `fe0484d62f1a2ae33a8c25ee901d4ed6b9568f06`.

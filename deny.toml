@@ -3,11 +3,15 @@ version = 2
 yanked = "deny"
 # Current Lofty uses this compile-time macro; upstream has no safe upgrade.
 # Review on each Lofty update. Do not ignore runtime vulnerability advisories.
-ignore = [{ id = "RUSTSEC-2024-0436", reason = "Unmaintained compile-time paste macro via Lofty 0.25.4; no fixed upstream release. Tracked in SECURITY.md." }]
+ignore = [
+    { id = "RUSTSEC-2024-0436", reason = "Unmaintained compile-time paste macro via Lofty 0.25.4; no fixed upstream release. Tracked in SECURITY.md." },
+    { id = "RUSTSEC-2024-0370", reason = "Informational maintenance notice, no patched version; GTK 0.18 compile-time glib/gtk macros required by Dioxus desktop 0.7.10. Review each desktop upgrade; SECURITY.md." },
+    { id = "RUSTSEC-2025-0057", reason = "Informational maintenance notice, no patched version; fxhash 0.2 through Wry 0.53.5 kuchikiki/selectors for embedded local Dioxus HTML. Remote navigation disabled. Review each desktop upgrade; SECURITY.md." },
+]
 
 [licenses]
 version = 2
-allow = ["AGPL-3.0-or-later", "MIT", "Apache-2.0", "Apache-2.0 WITH LLVM-exception", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unicode-3.0", "Zlib", "MPL-2.0", "CC0-1.0", "Unlicense", "BSL-1.0", "CDLA-Permissive-2.0"]
+allow = ["AGPL-3.0-or-later", "MIT", "Apache-2.0", "Apache-2.0 WITH LLVM-exception", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unicode-3.0", "Zlib", "MPL-2.0", "CC0-1.0", "Unlicense", "BSL-1.0", "CDLA-Permissive-2.0", "NCSA"]
 confidence-threshold = 0.8
 
 [bans]

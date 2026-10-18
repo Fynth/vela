@@ -12,7 +12,7 @@ Status meanings: implemented=source exists; verified=checks recorded in PROGRESS
 | 5 Multi-server | Partial: public preview only | Server identity registry, secure credentials, native/OpenSubsonic adapters, bounded concurrent unified search, origin-labelled queues, two-server real integration |
 | 6 Federation | Partial opt-in public profile; social protocol planned | ActivityPub interoperability profile, explicit opt-in visibility, WebFinger/discovery, origin verification/signatures/replay limits, follow/access requests, durable deliveries, remote metadata cache, blocked peers, privacy tests between two instances |
 | 7 Playback quality | Partial browser controls | Queue/seek/volume/repeat/fair shuffle/history/next priorities/keys/media-session integration; 0.7 adds browser context/progress restore and bounded reconnect; 0.8 adds shared-state Now Playing; 0.9 adds consented history and explicit local radio; next optional controlled FFmpeg, quality selection, validated ReplayGain/gapless/crossfade and sleep timer |
-| 8 Native/offline | Planned | Desktop packages, Android Media3 service, iOS AVFoundation background audio, download manifests/hash/resume/quota, device transfer/sync; actual device evidence required |
+| 8 Native/offline | Partial: Linux desktop slice | Real0.12 Dioxus Linux client with in-memory native HTTP, Rodio/CPAL output thread, MPRIS2, bounded prepared originals and verified Library/Queue playback. **Outstanding:** packaged installer, secure credential persistence, favorites/playlists/albums native UI, offline manifests/hash/resume/quota, Android Media3 service, iOS AVFoundation background audio, Windows/macOS clients, device transfer/sync; actual device evidence required |
 | 9 Interoperability | Planned | OpenSubsonic contracts/client tests, private listening history/stats, authorized lyrics/LRC, typed smart playlists, M3U/export, deterministic recommendations, optional distinct podcasts/radio |
 | 10 Shared experiences | Planned | Authorized WebSocket rooms, clock/latency/reconnect semantics, shared queues, opt-in activity feeds, collection exploration, interoperability |
 | 11 Hardening | Partial | Regression/security/benchmark/backup/deploy work underway; ongoing audits, real container/ARM64 builds, stress/seek/upload/restart tests, accessibility review, release notes |
@@ -29,6 +29,27 @@ full social federation or a unified remote player. Next: standards-based identit
 signatures, blocked peers and real saved catalog adapters; actual Linux/Android
 native playback/packaging and offline engine. Apple builds need an Apple toolchain.
 
+## Current0.12 increment
+
+The eighth workspace application `vela-desktop` is a real Linux native client, not a
+WebView audio substitute. It signs in with memory-only credentials, pages/searches
+the private owner catalog, plays authorized WAV/FLAC/MP3/MP4/Vorbis originals through
+one supervised Rodio/CPAL output thread, and shares the framework-free occurrence
+queue with the web app. Prepared originals are private0600 temp files capped at250MiB,
+verified by size/BLAKE3 ETag, unlinked before decoding on Linux and released on
+replacement/sign-out/failure/exit. MPRIS2 state/commands run on a separate thread and
+fail open to in-app controls. A real-window automated journey verified playback,
+seek, navigation continuity, queue duplicates/reorder, light theme,640×700 element
+bounds and zero leftover temp originals; MPRIS and null-sink audio tests also ran.
+
+This is FUNCTIONAL_TESTED for the Linux library/queue slice only. It is not a package,
+installer, secure credential store, offline client, background mobile service,
+favorites/playlists/albums UI or Apple/Android/Windows implementation. Next native
+work: favorites/playlist/album surfaces and session persistence with a reviewed
+native secret store, then a real Linux package and external MPRIS/session smoke; the
+Android Media3 and Apple AVFoundation targets remain blocked until their toolchains
+exist. No mobile hardware claim is implied.
+
 ## Next ordered slices
 
 The full VELA_ULTIMATE_AUTONOMOUS_FEDERATED_MUSIC_MASTER_PROMPT.md supplied2026-10-17 supersedes prior priority ordering. It was read in full; the existing0.8.1 repository/runtime were inspected and backed up. New golden IDs G01–G24 are distinguished in QA_EVIDENCE from older UX IDs.
@@ -36,7 +57,7 @@ The full VELA_ULTIMATE_AUTONOMOUS_FEDERATED_MUSIC_MASTER_PROMPT.md supplied2026-
 1. Preserve verified0.9 private meaningful listening events, global/device consent, idempotency, retention, export/delete and real History/Home recents, plus all existing player/ingest/share/security regressions.157 Rust tests,35 Chromium and35 Firefox scenarios pass; exact scope/evidence is in PROGRESS.
 2. Preserve verified explicit serial DSP worker and measured/tag-fallback track radio; add actual consented history/favorites-based Home ranking, exclusions/feedback, sparse-library daily/weekly mixes and durable refresh. The20-run PCM release benchmark is in PERFORMANCE; measure real-music relevance/scale before increasing concurrency or adding ML.
 3. Implement an opt-in lawful network slice: stable origin identity/capabilities and per-object publication/rights provenance first; two independent instances and private negative controls, then signed/replay-safe standards-based social discovery and separately authorized streams. No public audio by default. FEDERATION_PROTOCOL/NETWORK_RIGHTS now define the limited read-only public profile; signed social federation remains unfinished.
-4. Implement actual Linux desktop and Android native audio behind a shared command/event/capability contract, then secure offline manifests/sync. Linux GTK/WebKit/ALSA are present; Android SDK/Gradle are absent and no devices are verified. Apple builds remain blocked on an Apple toolchain/runner, with implementable shared work continuing. PLATFORM_MATRIX separates code, compilation and hardware evidence.
+4. Continue actual Linux desktop packaging/session persistence and, only with their real toolchains, Android Media3 and Apple native audio behind the shared command/event/capability contract. Linux GTK/WebKit/ALSA are present and the0.12 native playback slice is verified; Android SDK/Gradle and Apple/Xcode remain absent, and no device is verified. PLATFORM_MATRIX separates code, compilation and hardware evidence.
 5. Continue independent device handoff, shared rooms, sharing invitations and scoped media grants; multi-server/OpenSubsonic adapters, recording/edition models, richer organization, accessibility, remaining lawful source adapters and production hardening. Each needs its own complete acceptance rather than an empty crate.
 
 ## Cross-cutting acceptance

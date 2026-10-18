@@ -23,6 +23,7 @@ Vela is a modular monolith: one Axum/Tokio process, one local SQLite database, i
 | `vela-imports` | Source interface, controlled egress, durable bounded direct downloads and job recovery |
 | `vela-server` | HTTP routing, auth/CSRF extraction, browser origin checks, multipart streaming, response headers, semaphore lifetimes, worker supervision |
 | `vela-web` | Dioxus interface, same-origin API calls, account-scoped queue state, native browser audio/File APIs |
+| `vela-desktop` | Dioxus Linux presentation, in-memory native HTTP client, supervised Rodio/CPAL output thread and MPRIS2 observer |
 
 ```mermaid
 flowchart LR
@@ -167,3 +168,25 @@ exactly matching schema/build only. It validates archives/source/migration hashe
 original-data ownership/locks and actual served bytes before writing a private unit,
 with bounded readiness and rollback. It is separate from the backed-up schema upgrade
 procedure and never configures public exposure, root permissions or linger.
+
+## Native Linux client0.12
+
+`apps/desktop` is the eighth workspace application, not a second server or a
+crate-per-feature split. `client.rs` owns the in-memory session and bounded native
+HTTP transport; `audio.rs` owns one supervised Rodio/CPAL output thread with a
+bounded command channel and generation/source guards; `mpris.rs` observes immutable
+snapshots on its own thread and forwards typed commands; `ui.rs` owns account,
+catalog, queue and deferred-work generations. The framework-free
+`apps/web/src/playback.rs` occurrence model is reused by path so queue semantics do
+not fork, while no HTML media element, iframe or web page substitutes for audio.
+
+The first source adapter streams one owner-authorized original into a private
+temporary file with a250MiB cap, exact size and BLAKE3 ETag verification, then
+unlinks it and reopens `/proc/self/fd/N` for decoders. Preparation is explicit and
+separate from decode; a lease lives only while its queue occurrence is current and
+is released on replacement, failure, sign-out or exit. WAV/FLAC/MP3/MP4/Vorbis are
+decoded locally; seek/pause/volume/EOF/replacement are typed commands, not UI timers.
+Credentials are memory-only; no listening events, offline manifests, device handoff,
+federated sources, secure persistence or packaging exist in this slice. ADR0017,
+NATIVE_CLIENT_CONTRACTS, PLATFORM_MATRIX and PROGRESS state the verified scope and
+separate Linux window/audio evidence from Android/Apple/Windows claims.

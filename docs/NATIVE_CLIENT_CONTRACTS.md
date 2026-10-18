@@ -1,0 +1,79 @@
+# Native Linux client0.12 — verified bounded increment
+
+Status: verified source slice on Linux x86_64 only. It is not a packaged installer,
+not mobile/background audio, not offline playback and not completion of G18.
+Evidence is listed at the end; see ADR0017 for the decision record.
+
+## Ownership
+
+Main owns workspace/`Cargo.lock`, this contract, `apps/desktop/src/lib.rs`,
+`main.rs`, tests/builds/docs. `apps/desktop/src/audio.rs` is the audio adapter;
+`client.rs` is the native HTTP/account boundary; `ui.rs` and `style.css` are
+presentation; `mpris.rs` is the Linux media observer. No contributor runs Cargo,
+changes original runtime/data or commits; max2 compiler jobs, one Cargo build at a
+time. The existing server, schema, HTTP API and frozen0.11 runtime are unchanged.
+
+## User journey
+
+Launch `vela-desktop`, sign in to one Vela origin, page/search the private owned
+library, play an original through the device's native audio output, pause/resume,
+seek, change volume, navigate Library/Queue without interrupting audio, use
+next/previous/shuffle/repeat, queue duplicates/play-next/remove/reorder, switch
+theme, sign out. MPRIS exposes actual state and forwards play/pause/next/previous/
+seek/volume where the bus is available.
+
+## Implemented boundaries
+
+- `client.rs`: in-memory session cookie and CSRF only; no cookie jar, config file,
+  keychain or local storage. HTTPS DNS origins or numeric loopback HTTP; no
+  userinfo/query/fragment/control/non-canonical path; redirects and ambient proxies
+  disabled; TLS verification on; bounded DNS/connect/read/JSON/media operations;
+  exact expected size plus response BLAKE3 ETag before preparation; closed UUID
+  stream paths; errors never echo password/cookie/URL/query/upstream body. Requests
+  carry independent cancellation and session/query/selection/generation/lifetime
+  checks.
+- `lib.rs` + `audio.rs`: one long-lived output thread on a supervised device, one
+  bounded command channel, generation/source guards, real decoder duration/seek,
+  pause/resume/volume/EOF/replacement/stop. Prepared originals are private `0600`
+  temporary files capped at250MiB; on Linux they are unlinked immediately and each
+  decoder reopens `/proc/self/fd/N`. A lease lives only while its current occurrence
+  is playing and is released on replacement/failure/sign-out/exit.
+- `playback.rs` (reused by path from the web crate): bounded occurrence indices,
+  fair shuffle deck/history, explicit next priority, repeat semantics. Structural
+  queue edits synchronize the order model; metadata does not reset traversal.
+- `mpris.rs`: separate thread/current-thread Tokio runtime, typed command channel,
+  bounded text, no credentials/HTTP/audio ownership. Missing/failed session bus
+  degrades to in-app controls. No local paths or private fields are published.
+- `ui.rs`/`style.css`: real loading/empty/error/preparing/cancel/retry states,
+  duplicate occurrence identity, disabled-state explanations, responsive
+  1280×840 and640×700 layouts, light/dark, keyboard focus and reduced motion.
+  Sign-out clears catalog/queue/player and stops native audio.
+
+## Explicit non-goals / limitations
+
+This first adapter downloads the whole authorized original before decoding. It is
+not progressive streaming, gapless, offline, a download entitlement, background
+mobile playback, secure credential persistence, device handoff, packaged install,
+favorites/playlists/albums/artists UI, or a federated source resolver. It sends no
+native listening events. Only Linux x86_64 is built/tested on this host; Windows,
+macOS, Android and iOS remain separate targets. Hardware output, screen readers and
+physical media keys are not certified.
+
+## Verification
+
+- `cargo fmt --all -- --check`; strict Clippy `-p vela-desktop --all-targets
+  --features native-qa`; `cargo test --locked -p vela-desktop`: 23 passed,
+  2 ignored (opt-in audio/MPRIS). Logs: `target/checks/native-0.12-{fmt,clippy,tests}.log`.
+- Ignored `audio::tests::native_owned_null_sink_play_pause_seek_eof_replace_stop_and_cleanup`
+  executed under an owned Pulse null sink: passed.
+- Ignored `mpris::tests::real_session_bus_exposes_properties_and_forwards_controls`
+  executed under a private `dbus-run-session`: passed.
+- `scripts/verify_native_client.py` against an isolated fixture server/account/media
+  in a real WebKitGTK window: 15 named checks including real WAV/FLAC/MP3 playback,
+  seek, queue duplicates/reorder, 640×700 element bounds, no overflow, sign-out and
+  zero leftover temporary originals. Also passed the close-while-playing variant.
+  Evidence: `target/checks/native-0.12-window4/` and
+  `target/checks/native-0.12-close-playing/` plus screenshots.
+- A first compact run exposed queue grid tracks overflowing640px; the assertion was
+  made element-level, `.native-queue-list` was constrained to `minmax(0,1fr)`, and
+  the complete run passed. Failed evidence remains under `native-0.12-window2/`.

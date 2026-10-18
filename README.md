@@ -63,14 +63,18 @@ Complete initial setup through loopback before enabling public access. Use HTTPS
 cargo fmt --all -- --check
 cargo clippy --locked --workspace --all-targets -- -D warnings
 cargo test --locked --workspace -- --test-threads=2
+cargo build --locked -p vela-desktop
 cargo clippy --locked -p vela-web --target wasm32-unknown-unknown -- -D warnings
 scripts/build-web.sh
 npm ci --prefix tests/browser
 (cd tests/browser && npx playwright install chromium firefox)
 (cd tests/browser && npx playwright test --browser=chromium)
 (cd tests/browser && npx playwright test --browser=firefox)
+# Opt-in real native window + owned Pulse null sink; uses isolated fixture data:
+cargo build --locked -p vela-desktop --example native-ui-qa --features native-qa
+python3 scripts/verify_native_client.py --evidence target/checks/native-window --test-audio-engine
 ```
 
-See [experience parity](docs/SPOTIFY_PARITY_MATRIX.md), [product flows](docs/PRODUCT_SPEC.md), [design system](docs/DESIGN_SYSTEM.md), [progress](docs/PROGRESS.md), [architecture](docs/ARCHITECTURE.md), [roadmap](docs/ROADMAP.md), [security](docs/SECURITY.md), [performance](docs/PERFORMANCE.md), [known limitations](docs/KNOWN_LIMITATIONS.md), and [research](docs/RESEARCH.md). CI configuration does not mean CI has run. Native mobile/desktop, offline downloads, unified multi-server playback, OpenSubsonic and standards-based social federation remain roadmap work. Persistent same-build Linux user supervision is available through the validated [user-service installer](docs/USER_SERVICE.md).
+See [experience parity](docs/SPOTIFY_PARITY_MATRIX.md), [product flows](docs/PRODUCT_SPEC.md), [design system](docs/DESIGN_SYSTEM.md), [progress](docs/PROGRESS.md), [architecture](docs/ARCHITECTURE.md), [roadmap](docs/ROADMAP.md), [security](docs/SECURITY.md), [performance](docs/PERFORMANCE.md), [known limitations](docs/KNOWN_LIMITATIONS.md), [native client contract](docs/NATIVE_CLIENT_CONTRACTS.md), and [research](docs/RESEARCH.md). CI configuration does not mean CI has run. The0.12 Linux x86_64 desktop client is a real native Dioxus/Rodio/MPRIS application with a verified private library/queue/playback slice; packaged installers, secure credential persistence, mobile background audio, Windows/macOS builds, offline downloads, unified multi-server playback, OpenSubsonic and standards-based social federation remain roadmap work. Persistent same-build Linux user supervision is available through the validated [user-service installer](docs/USER_SERVICE.md).
 
 AGPL-3.0-or-later. Real test audio is locally generated sine-wave material. Optional live-import tests use Wikimedia's explicitly licensed example audio, with attribution recorded in `tests/browser/README.md`.

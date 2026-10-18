@@ -87,3 +87,31 @@ at login; boot-before-login/logout behavior is unverified and no linger is enabl
 The installer is a same-build handover, not an updater; schema upgrades require a
 verified backup and the separate upgrade process. Native clients/offline/device
 handoff and Apple/Android hardware validation remain unfinished.
+
+## Native Linux client0.12 scope
+
+The0.12 Linux x86_64 desktop application is a real Dioxus/WebKitGTK window with a
+Rodio/CPAL output thread and MPRIS2 observer, verified against an isolated fixture
+server/account/media. It is not an installer, AppImage/deb/rpm/Flatpak, signed
+artifact, auto-updated client or release-ready desktop distribution. The window was
+created only on this Hyprland/X11 host; GNOME/KDE/Wayland variants, screen readers,
+physical audio output, headphone buttons and system sleep/resume are not certified.
+
+Playback downloads the complete authorized original into a private temporary file
+before decoding; there is no progressive streaming, gapless, crossfade, ReplayGain,
+quality selection or measured time-to-audible claim. The250MiB/one-source bound and
+preparation progress/cancel/retry are real, but large files incur preparation time
+and temporary disk use. Offline playback, download grants, manifests, quotas and
+airplane-mode behavior do not exist. Sign-in requires the account each launch:
+credentials and CSRF are memory-only and no keychain/secure persistence is claimed.
+Sign-out clears the queue/catalog and stops native audio, but no cross-device
+session, device handoff or remote-control protocol exists.
+
+The native UI currently covers Library, Queue, transport, theme, sign-in and sign-out.
+Favorites, playlists, albums, artists, search history, settings/privacy, listening
+history and recommendations are browser-web features only. Native listening events
+are not sent, so consent/history cannot be inferred from native preparation or
+decoding. MPRIS requires a working session D-Bus and reports bounded public metadata
+only; a failed bus degrades to in-app controls. Android Media3, iOS AVFoundation,
+Windows SMTC and macOS Now Playing remain unimplemented/blocked on their real
+toolchains, and Linux evidence cannot certify them.

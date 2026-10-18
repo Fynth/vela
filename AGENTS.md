@@ -2,7 +2,7 @@
 
 Build complete, private-by-default vertical slices. Preserve user data. Never report unexecuted checks as passing. Read docs/PROGRESS.md and docs/CONTRACTS.md before changes.
 
-Rust edition 2024; modular monolith. Domain DTOs have no framework dependencies. Core owns database initialization, configuration, authentication, and shared application services. Media owns file validation, ingestion, artwork, and range selection. Imports owns controlled egress and durable download jobs. Scanner owns capability-based read-only folder traversal, snapshots and durable scan jobs. Server owns HTTP transport. Web owns Dioxus rendering and browser playback.
+Rust edition 2024; modular monolith. Domain DTOs have no framework dependencies. Core owns database initialization, configuration, authentication, and shared application services. Media owns file validation, ingestion, artwork, and range selection. Imports owns controlled egress and durable download jobs. Scanner owns capability-based read-only folder traversal, snapshots and durable scan jobs. Server owns HTTP transport. Web owns Dioxus rendering and browser playback. Desktop owns the Linux native Dioxus presentation, in-memory native HTTP client and one Rodio/CPAL output authority; it is not a second server.
 
 Use parameterized SQL, migrations, bounded tasks, streaming file I/O, blocking pools for CPU/file metadata work. No media paths or secrets in public DTOs. Session tokens are random and hashed at rest. Cookie writes require the per-session CSRF header. No public registration; administrator creates users. Libraries are owned and private. Playlist metadata access never grants media access.
 
@@ -12,13 +12,15 @@ Web App owns one persistent HTMLMediaElement and the account-scoped queue/cursor
 
 Now Playing is a root-coordinated native dialog; child presentation owns no audio/HTTP. Keep per-open/session/occurrence guards on deferred feedback, close before unmounting, and isolate native focus handling from legacy overlays. Static CSS additions require an exact server allowlist entry and packaged-asset verification.
 
+Native desktop: apps/desktop owns one AudioEngine output thread and a bounded command channel; never add a second audio element/page or run HTTP/decoding on the UI thread. The native source adapter downloads one authorized original into a private0600 temporary file, verifies exact size plus BLAKE3 ETag and caps it at250MiB; Linux unlinks it before decode. Credentials/CSRF stay in memory, never in WebView storage/files/keychains until a reviewed secure store exists. Reuse apps/web/src/playback.rs by path for queue semantics. MPRIS is a read-only observer plus typed commands, never an account/HTTP/audio owner. Native windows/audio/background/packaging are separate evidence classes; record them in NATIVE_CLIENT_CONTRACTS/PLATFORM_MATRIX.
+
 Verified persistent local runtimes use a frozen binary/asset snapshot with the original data directory. target/ contains private backups, release archives and active runtime snapshots; do not run cargo clean or delete target wholesale. Preserve these checkpoints across builds and re-inspect the live process/data before upgrades.
 
 Keep Cargo.lock tracked. Build coordination: main agent owns workspace Cargo files, migrations and cross-module contracts. Parallel contributors edit only their assigned crate until integration. At most two Cargo compiler jobs on this host; avoid competing full builds. Run fmt, strict clippy, unit/API integration tests and wasm compilation before handoff. Browser, native and Docker validation must be identified separately.
 
 Maintain docs/ARCHITECTURE.md, ROADMAP.md, PROGRESS.md, SECURITY.md, PERFORMANCE.md, KNOWN_LIMITATIONS.md and ADRs. Track unsupported functionality honestly; do not add empty crates. Never publish externally without explicit authorization.
 
-The full VELA_ULTIMATE_AUTONOMOUS_FEDERATED_MUSIC_MASTER_PROMPT.md is the current product mandate. Its G01–G24 scenario numbers supersede earlier numbered UX examples; preserve named EXP/PLAY/RES/NET/AUTH/NP tests and state the mapping in QA_EVIDENCE. PLATFORM_MATRIX and NETWORK_RIGHTS distinguish actual native/network implementation from design checkpoints.
+The full VELA_MUSIC_OMEGA_AUTONOMOUS_ENGINEERING_SPEC.md is the current product mandate. Its G01–G24 scenario numbers supersede earlier numbered UX examples; preserve named EXP/PLAY/RES/NET/AUTH/NP tests and state the mapping in QA_EVIDENCE. PLATFORM_MATRIX and NETWORK_RIGHTS distinguish actual native/network implementation from design checkpoints.
 
 Private listening requires current account AND device consent and privacy revision. No install/upgrade opts users in. One logical session survives pauses and source recovery; explicit selection/replay after EOF creates another. Count only advancing media time corroborated by a monotonic clock; no seek/download-based listens. Delete atomically disables all collection and invalidates late outboxes. Held exports must check privacy epoch/revision as well as session/lifetime. Never use private self-reported history as public popularity or rights proof.
 
