@@ -37,6 +37,7 @@ def main():
     parser.add_argument('--test-audio-engine', action='store_true', help='Also execute the opt-in actual output/seek/EOF test under the owned sink')
     parser.add_argument('--close-while-playing', action='store_true', help='Close the real window during active native playback and check original cleanup')
     parser.add_argument('--test-peer', action='store_true', help='Start a second isolated Vela server and exercise its explicit public catalog')
+    parser.add_argument('--test-session', action='store_true', help='Also verify opt-in Secret Service session save/resume/delete across two native processes')
     args = parser.parse_args()
     evidence = args.evidence.resolve()
     if evidence.exists() and any(evidence.iterdir()):
@@ -50,6 +51,7 @@ def main():
     if not module.isdecimal():
         raise RuntimeError('Invalid owned Pulse module identity')
     server = driver = peer_process = peer2_process = None
+    session_service = None
     try:
         with tempfile.TemporaryDirectory(prefix='vela-native-fixture-') as folder:
             private = Path(folder)
@@ -298,6 +300,9 @@ def main():
                     })
                 # Per-process ALSA and Pulse routing, never a global default change.
                 environment.update({'TMPDIR': str(private / 'temporary'), 'ALSA_CONFIG_PATH': str(alsa), 'PULSE_SINK': SINK, 'GDK_BACKEND': 'x11', 'VELA_NATIVE_TEST_SINK': SINK, 'VELA_DESKTOP_SERVER_URL': origin, 'VELA_NATIVE_QA_USERNAME': 'nativefixture', 'VELA_NATIVE_QA_PASSWORD': password, 'VELA_NATIVE_QA_REPORT': str(report), 'XDG_DATA_HOME': str(private / 'home'), 'XDG_CONFIG_HOME': str(private / 'home'), 'XDG_CACHE_HOME': str(private / 'home/cache'), 'CARGO_BUILD_JOBS': '2'})
+                if args.test_session:
+                    session_service = 'org.vela.music.desktop.qa.' + secrets.token_hex(8)
+                    environment.update({'VELA_NATIVE_KEYRING_SERVICE': session_service, 'VELA_NATIVE_QA_TEST_SESSION': '1'})
                 if args.test_audio_engine:
                     with (evidence / 'audio-unit.log').open('wb') as audio_log:
                         subprocess.run(['cargo', 'test', '--locked', '-p', 'vela-desktop', '--lib', 'audio::tests::native_owned_null_sink_play_pause_seek_eof_replace_stop_and_cleanup', '--', '--ignored', '--exact', '--nocapture'], cwd=ROOT, env=environment, stdout=audio_log, stderr=subprocess.STDOUT, timeout=180, check=True)
@@ -355,6 +360,53 @@ def main():
                         raise RuntimeError('Saved peer config is not private0600')
                     result['saved_peer_config'] = {'path': str(config_path), 'peers': config['peers']}
                     report.write_text(json.dumps(result, indent=2) + '\n')
+                if args.test_session:
+                    if not session_service:
+                        raise RuntimeError('Session fixture service was not configured')
+                    def secret_lookup():
+                        return subprocess.run(['secret-tool', 'lookup', 'service', session_service], capture_output=True, text=True)
+                    stored = secret_lookup()
+                    if stored.returncode != 0 or not stored.stdout.strip():
+                        raise RuntimeError('Opt-in session was not written to the Secret Service')
+                    envelope = json.loads(stored.stdout)
+                    if envelope.get('version') != 1 or envelope.get('origin') != origin + '/' or len(envelope.get('token', '')) != 64:
+                        raise RuntimeError('Saved-session envelope is malformed')
+                    if 'password' in envelope or 'csrf' in envelope or 'username' in envelope:
+                        raise RuntimeError('Saved-session envelope contains forbidden credentials')
+                    resume_env = environment.copy()
+                    with (evidence / 'session-resume-server.log').open('wb') as resume_log:
+                        server = subprocess.Popen([str(args.server.resolve())], env=resume_env, stdout=resume_log, stderr=subprocess.STDOUT)
+                    resume_deadline = time.monotonic() + 15
+                    while True:
+                        try:
+                            with health.open(origin + '/health', timeout=1) as response:
+                                if response.status == 200:
+                                    break
+                        except OSError:
+                            if server.poll() is not None or time.monotonic() > resume_deadline:
+                                raise RuntimeError('Primary server did not restart for session resume')
+                            time.sleep(.05)
+                    resume_report = evidence / 'session-resume-report.json'
+                    resume_env.update({'VELA_NATIVE_QA_SESSION_PHASE': 'resume', 'VELA_NATIVE_QA_REPORT': str(resume_report)})
+                    with (evidence / 'session-resume-window.log').open('wb') as resume_window_log:
+                        resume_driver = subprocess.Popen([str(args.driver.resolve())], env=resume_env, stdout=resume_window_log, stderr=subprocess.STDOUT)
+                        resume_driver.wait(timeout=120)
+                    if resume_driver.returncode or not resume_report.exists():
+                        raise RuntimeError('Saved-session resume process failed')
+                    resumed = json.loads(resume_report.read_text())
+                    if not resumed['result']['ok']:
+                        raise RuntimeError(f"Saved-session resume failed: {resumed['result'].get('failure')}")
+                    cleared = secret_lookup()
+                    if cleared.returncode == 0 and cleared.stdout.strip():
+                        raise RuntimeError('Saved session survived explicit sign-out')
+                    result['session_resume'] = {
+                        'stored_origin': envelope['origin'],
+                        'token_stored': True,
+                        'contains_password': False,
+                        'resumed_checks': resumed['result']['checks'],
+                        'cleared_after_signout': True,
+                    }
+                    report.write_text(json.dumps(result, indent=2) + '\n')
                 print(json.dumps(result, indent=2))
     finally:
         for process in (driver, server, peer_process, peer2_process):
@@ -365,6 +417,8 @@ def main():
                 except subprocess.TimeoutExpired:
                     process.kill()
                     process.wait()
+        if session_service:
+            subprocess.run(['secret-tool', 'clear', 'service', session_service], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         subprocess.run(['pactl', 'unload-module', module], check=True)
 
 
