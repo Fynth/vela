@@ -27,21 +27,26 @@ def main():
                 if len(entries) > 500 or total > 256 * 1024 * 1024:
                     raise RuntimeError('Unexpected desktop package size')
                 entries.append(entry)
-            by_name = {entry.name: entry for entry in entries}
             expected = {'bin/vela-desktop', 'share/applications/vela-desktop.desktop',
                         'share/icons/hicolor/scalable/apps/vela-desktop.svg',
                         'share/doc/vela-desktop/README.md', 'LICENSE', 'BUILD.txt'}
-            if not expected.issubset(by_name) or len(by_name) != len(entries):
-                raise RuntimeError('Desktop package contents do not match the review manifest')
+            files = set()
             for entry in entries:
                 name = PurePosixPath(entry.name)
-                if name.is_absolute() or '..' in name.parts or not entry.isfile():
+                if name.is_absolute() or '..' in name.parts:
                     raise RuntimeError(f'Unsafe desktop package entry: {entry.name}')
+                if entry.isdir():
+                    continue
+                if not entry.isfile():
+                    raise RuntimeError(f'Unsupported desktop package entry: {entry.name}')
+                files.add(str(name))
                 target = root.joinpath(*name.parts)
                 target.parent.mkdir(parents=True, exist_ok=True)
                 with archive.extractfile(entry) as source, target.open('xb') as output:
                     output.write(source.read())
         build = dict(line.split('=', 1) for line in (root / 'BUILD.txt').read_text().splitlines() if '=' in line)
+        if files != expected:
+            raise RuntimeError('Desktop package contents do not match the review manifest')
         if build.get('version') != '0.12.0':
             raise RuntimeError('Unexpected packaged desktop version')
         binary = root / 'bin/vela-desktop'
@@ -57,7 +62,7 @@ def main():
         if 'Exec=vela-desktop' not in desktop or 'Icon=vela-desktop' not in desktop:
             raise RuntimeError('Desktop entry does not reference the packaged binary/icon')
         report = {'archive': str(args.archive.resolve()), 'sha256': hashlib.sha256(args.archive.read_bytes()).hexdigest(),
-                  'version': build['version'], 'commit': build.get('commit'), 'files': sorted(by_name), 'ldd_ok': True}
+                  'version': build['version'], 'commit': build.get('commit'), 'files': sorted(files), 'ldd_ok': True}
         if args.launch:
             if not os.environ.get('DISPLAY') and not os.environ.get('WAYLAND_DISPLAY'):
                 raise RuntimeError('--launch needs a graphical session')
