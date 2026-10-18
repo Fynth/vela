@@ -21,7 +21,7 @@ correctly shows "Not established"). No schema, server HTTP, native or original-d
 runtime change. The live runtime was subsequently upgraded to0.12.1; existing
 analysis rows remain spectral-1 until explicitly reanalyzed.
 
-## Native offline startup integrity sweep — verified (2026-10-18)
+## Native offline startup integrity sweep — verified (2026-10-18, `2706f4b`)
 
 After sign-in/resume, a bounded blocking sweep re-hashes up to100 saved offline copies
 against their v2 BLAKE3 manifests. Corrupt rows are labelled "Integrity check failed"
