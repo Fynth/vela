@@ -205,7 +205,7 @@ sent, so consent/history is not bypassed or inferred.
   `target/checks/native-playlist-edit-window3/` and
   `native-playlist-edit-{clippy,tests}.log`. Entry add/reorder, folders,
   albums/artists and packaging remain native gaps.
-- Native playlist entry editing follow-up: the detail view now supports revisioned
+- Native playlist entry editing follow-up `5d2b774`: the detail view now supports revisioned
   move-up/move-down and remove through the real order/item APIs, with busy/generation
   and selected-playlist guards and list count/detail refresh. The window journey
   swaps the two fixture entries, restores order, removes one entry and verifies
