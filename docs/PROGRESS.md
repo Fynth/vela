@@ -1,5 +1,40 @@
 # Verified progress
 
+## Player Reboot specification2026-10-19 — documentation only
+
+Prepared [Player Reboot](PLANS/2026-10-19/PLAYER_REBOOT/README.md) in response to two
+user screenshots and the explicit instruction to write only detailed Markdown.
+Source inspection anchor: `10fe946dac88b0f94e3178946838f62b0363b799`; initial tree clean.
+No subagents, application code/CSS/assets, Cargo files, migrations, user data,
+credentials, existing backups, runtime upgrades or public deployment were changed.
+
+Confirmed by code inspection: desktop `Client::prepare` receives/verifies an entire
+original before `AudioEngine::load`; normal selections do not consult a reusable
+catalog byte cache; current `prepared` is a source lease, not queue prefetch. The
+server already supports authorized HEAD/Range/validators but uses no-store. Window
+layout combines fixed panels and centered/max-width content with sidebar padding;
+the native QA harness forces X11. The screenshots alone do not identify the exact
+Hyprland strip cause, and the user's installed desktop executable is unidentified.
+The currently observed user service uses the preserved frozen 0.12.6 server; newer
+session/offline source repairs are recorded separately and not assumed installed.
+
+The 16-file package specifies window diagnosis, cache/progressive integrity tradeoffs,
+next preparation, device sync/handoff, independent optional Vela ID, rooms, native
+Android/iOS/desktop, continuous colorful music UX, detailed screen states, 240 feature
+proposals, W00–W13 delivery dependencies, future acceptance and data/privacy migration.
+Primary standards/platform sources are linked with their verification limits.
+
+No new Cargo/browser/native/audio/mobile/performance/restore checks were run; this
+entry is not application verification and does not supersede prior dated evidence.
+Only documentation structure/links/feature enumeration and diff hygiene are checked
+for this deliverable. Next implementation remains W00 build/runtime/data safeguards,
+then normal Hyprland geometry and reusable authorized media sources; implementation
+is outside this user's current MD-only request.
+
+Documentation checks: PASS for 16 new Markdown files, relative-link targets, table
+column consistency, whitespace and 240 ordered unique F-IDs in 16 groups of 15;
+`git diff --check` passed. These checks validate the plan artifact only.
+
 ## Documentation reconciliation2026-10-19 — docs-only, no verification
 
 Created [CURRENT_STATE.md](CURRENT_STATE.md) as the source/deployed/design index and

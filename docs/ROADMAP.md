@@ -1,5 +1,22 @@
 # Authoritative backlog
 
+## User-prioritized player reboot2026-10-19 — planning only
+
+The user's Hyprland/playback screenshots and explicit MD-only request are addressed
+in [Player Reboot](PLANS/2026-10-19/PLAYER_REBOOT/README.md). It supplements the dated
+audit with source-grounded explanations and 16 Markdown files: normal tiled-window
+geometry; reusable private cache/progressive playback; actual-next preparation;
+musical UI/screens; device queue/position sync and acknowledged handoff; independent
+optional Vela ID; real native clients; authorized rooms/network; 240 feature proposals;
+W00–W13 implementation order, acceptance and migration safeguards.
+
+Priority is existing daily listening correctness before expansion. This entry does
+not change implementation status: no app code/assets/schema/runtime were changed,
+no agents delegated and no new application tests were run. Newer session/offline
+source repairs must be preserved and distinguished from the installed desktop build.
+The exact order and future file ownership are in
+[execution dependencies](PLANS/2026-10-19/PLAYER_REBOOT/11_EXECUTION_DEPENDENCIES.md).
+
 ## Planning audit2026-10-19
 
 The current-source audit and detailed next implementation plan are indexed in
