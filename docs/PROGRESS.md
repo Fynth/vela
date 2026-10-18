@@ -21,7 +21,7 @@ correctly shows "Not established"). No schema, server HTTP, native or original-d
 runtime change. The live runtime was subsequently upgraded to0.12.1; existing
 analysis rows remain spectral-1 until explicitly reanalyzed.
 
-## Native cross-peer search pagination0.12.1 — verified (2026-10-18)
+## Native cross-peer search pagination0.12.1 — verified (2026-10-18, `5560eb1`)
 
 Each saved-peer search result now carries its own validated catalog cursor. A
 per-origin Load more follows only that peer's `next_cursor`, rechecks the exact
