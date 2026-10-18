@@ -132,6 +132,57 @@ Private defaults were unchanged. Full native clients and public federation remai
 
 # Current mandate evidence
 
+## Golden-scenario coverage map (2026-10-18 checkpoint)
+
+Mapping of all24 golden scenarios to executed evidence and honest status. Historical
+EXP/PLAY/PLNAV/RES/NET/AUTH/NP regression IDs and their browser scenarios are the
+executable substitutes where a golden cannot run on this host.
+
+- G01 migration/rollback: EXECUTED (0.10→0.12.6 chain; per-step backup/restore/counts).
+- G02 web upload/FLAC/artwork/playlist/stream: EXECUTED (browser suite + API tests).
+- G03 URL import/cancellation/SSRF: EXECUTED (jobs + malicious URL + importer tests).
+- G04 personalized Home/rotation: EXECUTED for owned signals; **G10-style fabricated
+  "Daily Mix" is intentionally absent** — onboarding/discovery is honest, not fake.
+- G05 queue/mini-fullscreen/Now Playing races: EXECUTED (EXP/PLAY/NP browser scenarios).
+- G06 concurrent playlist revisions/view-only/revocation: EXECUTED (browser + API).
+- G07 private history consent/exactly-once/export/delete/erasure: EXECUTED (G07).
+- G08 DSP on sine/silence/click/licensed songs: EXECUTED for synthetic fixtures and
+  real FLAC/MP3 decode; STFT/RMS/tempo/key descriptors with version/confidence.
+- G09 track radio from analyzed local tracks: EXECUTED (measured/tag/fallback reasons).
+- G10 onboarding + meaningful "Daily Mix": PARTIAL — real qualified listening drives
+  rotation/discovery; there is no scheduled/branded mix; not claimed as equal parity.
+- G11 A↔B federation opt-in/discovery/playable public track: EXECUTED for two isolated
+  instances (native+web) on loopback; EXECUTED for TLS via debug CA; **Internet/public
+  DNS/two physical hosts NOT_RUN.**
+- G12 cross-server search origin/availability/partial results: PARTIAL — unified native
+  search with per-peer cursor pagination and cached fallback exists; merged global
+  cursor and progressive partial-results UI are absent.
+- G13 cross-server playlist + B disconnect status: NOT_RUN (design checkpoint; folders
+  and metadata are local-only; remote playlist references are not created).
+- G14 forged peer/replay/SSRF/huge object abuse: EXECUTED (network/security tests).
+- G15 federated public recommendation/revocation/no cache leak: EXECUTED for the
+  realized subset (revocation/public-first behavior tested via publications).
+- G16 Android APK on device/emulator: BLOCKED (no Android SDK/NDK/Gradle on host).
+- G17 iOS simulator/device: BLOCKED (no macOS/Xcode).
+- G18 desktop packages on each platform in CI/physical: PARTIAL — Linux tar + WebKitGTK
+  launch EXECUTED per release; Windows/macOS installers BLOCKED; remote CI NOT_RUN.
+- G19 queue/device handoff phone↔desktop: NOT_RUN (no second platform).
+- G20 collaborative room/participants/latency: NOT_RUN (collaborator grants tested).
+- G21 100k benchmark/audio-usable-under-load: EXECUTED for metadata/rotation benchmarks
+  and document scope; a fresh 100k multi-server run NOT_RUN on this host.
+- G22 licensed provenance/uncertain-rights-private/takedown: EXECUTED (publications,
+  revocation, invalidation paths).
+- G23 keyboard/screen reader/Reduced Motion/localization/320px/theme: PARTIAL —
+  keyboard/Reduced Motion/theme/320px executed; localization and screen-reader runs
+  NOT_RUN.
+- G24 update/backup restore/graceful shutdown/resume/failure recovery: EXECUTED per
+  release (backup restore, SIGTERM, restart, failure-recovery tests).
+
+Summary of honest gaps: G10 full parity, G12 merged cursor/partial UI, G13 cross-server
+playlists, G16/G17/G19 platform evidence, G21 fresh 100k multi-server run, G23
+localization/screen-reader. Everything else in the realized slice set is EXECUTED with
+the evidence in this file and PROGRESS.
+
 The latest master mandate has24 golden scenarios. Historical G01–G14 numbers in older docs/tests belong to the earlier UX brief and do not automatically satisfy the new meanings. Preserve named regression IDs EXP/PLAY/PLNAV/RES/NET/AUTH/NP. New history uses G07-private-history, DSP G08-audio-analysis and radio G09-track-radio.
 
 | Feature | Exact paths | Latest verified source | Executed evidence | Status | Next / owner |
