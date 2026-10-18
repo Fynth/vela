@@ -33,7 +33,7 @@ plays the three-track queue, then reorders/restores/removes entries. Evidence:
 `target/checks/native-playlist-add3/`,24/25 desktop tests plus both opt-ins, strict
 Clippy/fmt. No schema, server, web or original-data/runtime change.
 
-## Native origin-labelled remote queue0.12 — verified (2026-10-18)
+## Native origin-labelled remote queue0.12 — verified (2026-10-18, `d14f8b0`)
 
 Remote playback now owns a separate in-memory queue of origin-labelled public
 results. Playing a unified-search result builds that queue from all stream-authorized
