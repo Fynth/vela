@@ -1,3 +1,10 @@
+# 0.12.5 — spectral-4 key + native folders
+
+Patch release: DSP spectral-4 adds a heuristic Krumhansl key with profile margin; web
+Radio shows Estimated key. The portable native client adds playlist-folder create/
+filter/move/rename/delete. No schema migration, HTTP contract change or original-data
+rewrite.
+
 # 0.12.4 — playlist folders (schema12)
 
 Owner-scoped playlist folders: create/list, CAS rename/delete, CAS move of owned
