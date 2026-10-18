@@ -1,5 +1,79 @@
 # Verified progress
 
+## Native Linux client0.12.0 — verified source, original runtime preserved (2026-10-18)
+
+Application/source checkpoint `3a285e0`. Started from the dirty post-0.11 worktree
+(workspace already0.12.0 with an uncommitted eighth app), inspected the actual git
+tree, running service, data and toolchains, and continued rather than recreating.
+There is no schema, migration, server HTTP or original-data change in this slice.
+The verified0.11.0 user runtime PID78464 remained active/healthy on127.0.0.1:3210
+with its original `data/` throughout; media and runtime/release/backup snapshots
+were not modified. No new backup was needed because this client writes no server
+data, and the existing private0.11 upgrade backup remains preserved.
+
+`apps/desktop` is a real Dioxus0.7.10 Linux application, not a WebView audio
+substitute. `client.rs` owns an in-memory cookie/CSRF transport with canonical
+HTTPS/loopback origins, TLS, no redirects/proxies, bounded requests and exact
+size+BLAKE3 ETag checks on one owner-authorized original. `audio.rs` owns one
+supervised Rodio/CPAL output thread with a bounded command channel and generation/
+source guards; prepared originals are private0600 temp files capped at250MiB,
+unlinked before decode on Linux and released on replacement/failure/sign-out/exit.
+`playback.rs` is reused by path from the web app so occurrence/duplicate/shuffle
+semantics do not fork. `mpris.rs` observes immutable snapshots and forwards typed
+commands on its own thread without credentials/HTTP/audio ownership. `ui.rs` covers
+sign-in, Library, Queue, transport, theme and honest preparing/cancel/retry states;
+sign-out stops native audio and clears private state. No native listening events are
+sent, so consent/history is not bypassed or inferred.
+
+### Executed gates and defects
+
+- `cargo fmt --all -- --check`; strict `cargo clippy --locked -p vela-desktop
+  --all-targets --features native-qa -- -D warnings`; `cargo test --locked -p
+  vela-desktop -- --test-threads=2`:23 passed,2 explicitly ignored opt-ins. Logs:
+  `target/checks/native-0.12-{fmt,clippy,tests}.log`.
+- The ignored real audio test passed under a script-created owned Pulse null sink
+  (`native-0.12-window4/audio-unit.log`); the ignored MPRIS test passed under a
+  private `dbus-run-session` (`native-0.12-mpris-session.log`).
+- `scripts/verify_native_client.py` ran the actual WebKitGTK window against a fresh
+  isolated server/account and three real uploaded fixtures (30s WAV, FLAC, MP3),
+  with the user's default output untouched.15 named checks passed: no HTML/iframe
+  substitute, real native clock, navigation continuity, paused stability/seek,
+  light theme, search preserving playback, duplicate queue, reorder/removal,
+  640×700 viewport with element-level queue/control/player bounds, no document
+  overflow, queue clear, MP3 decode and sign-out cleanup; zero temporary originals
+  remained. Evidence:`target/checks/native-0.12-window4/{report.json,*.png}`.
+  The close-while-playing variant also passed with zero leftover originals
+  (`native-0.12-close-playing/`).
+- The first compact run reproduced a real responsive defect: queue grid rows
+  overflowed640px and clipped their remove controls. The assertion was strengthened
+  from document scrollWidth to element rectangles, `.native-queue-list` was
+  constrained with `minmax(0,1fr)`, and the complete run passed. The failed report/
+  screenshot remain in `target/checks/native-0.12-window2/`.
+- The window harness initially reported a false compact failure because it floated
+  the Hyprland surface with an invalid action (`set`) and the tiled X11 window
+  ignored resize requests; `enable` is the documented Hyprland action. This was a
+  test-driver defect, not application behavior, and is fixed in the committed QA
+  example.
+- The same session's DSP packet added9 deterministic numerical tests (module now19:
+  pure/two-tone spectra, silence, sub-window, clipping/oversized PCM, determinism,
+  click/ZCR, -60dBFS, non-finite bounds) inside `crates/media/src/analysis.rs`; one
+  ambiguous float annotation was fixed by main, then `cargo test -p vela-media
+  analysis::tests` passed19/19 (`target/checks/dsp-0.12-tests.log`). This is
+  test-only and does not claim tempo/chroma/genre/mood inference.
+
+### Honest scope and next work
+
+FUNCTIONAL_TESTED only for the Linux library/queue native slice. There is no
+installer/package/signing, secure credential persistence, favorites/playlists/
+albums/artists native UI, offline/download manifest, background mobile service,
+device handoff or physical-output/screen-reader certification. Windows, macOS,
+Android and iOS remain unimplemented/blocked on their real toolchains; Linux
+evidence cannot certify them. Native listening history and federated remote sources
+are absent. Next autonomous work: integrate a pending web queue/deep-link polish
+slice, then the playlist rename/delete lifecycle, then native favorites and a
+reviewed session-persistence decision. Preserve the0.11 runtime, all backups/releases
+and the native evidence; re-inspect process/data on resume.
+
 ## Verified0.11.0 package and preserved original-data upgrade (2026-10-18)
 
 Application/source fe0484d62f1a2ae33a8c25ee901d4ed6b9568f06. Native/source archives

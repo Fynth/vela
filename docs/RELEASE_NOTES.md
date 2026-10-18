@@ -1,3 +1,28 @@
+# 0.12.0 — verified Linux native client source slice
+
+`vela-desktop` is a real Dioxus Linux application with an in-memory native HTTP
+session, one supervised Rodio/CPAL output thread and an MPRIS2 observer. It signs in
+to one Vela origin, pages/searches the private owned library, plays authorized
+WAV/FLAC/MP3/MP4/Vorbis originals, and shares the framework-free occurrence queue
+with the web app (play/pause/seek/volume/next/previous/shuffle/repeat, duplicates,
+play-next, reorder, remove, sign-out). Prepared originals are private0600 temporary
+files capped at250MiB with exact size+BLAKE3 ETag verification; Linux unlinks them
+before decoding and the lease is released on replacement/failure/sign-out/exit.
+Credentials are memory-only and no native listening events are collected.
+
+Verified on this Linux x86_64 host against an isolated fixture server/account/media:
+fmt, strict Clippy, 23 desktop tests, opt-in owned-null-sink audio and private
+D-Bus MPRIS tests, and a real WebKitGTK window at1280×840 and640×700 including
+playback, seek, navigation continuity, queue edits, theme,640px element bounds,
+sign-out and zero leftover temporary originals. A first compact run exposed queue
+rows overflowing the viewport; the assertion was strengthened and the layout fixed.
+
+This is a source slice, not a packaged/installable desktop release. There is no
+secure credential persistence, offline/download support, background mobile audio,
+favorites/playlists/albums native UI or Windows/macOS/Android/iOS implementation.
+The active service remains the verified0.11.0 runtime with the original data; no
+schema/API migration was introduced by this client. No artifact was published.
+
 # 0.10.0 — private listening suggestions (local review candidate)
 
 Home now offers exploration from owned favorites/real audio descriptors and,
