@@ -80,7 +80,7 @@ full Chromium41 passed+1 live-import skip in2.0m. Source postdates the live0.12.
 runtime; the next patch will deploy it. Firefox rerun pending. No schema or
 original-data change.
 
-## Phase 0 measurement baseline — verified (2026-10-18)
+## Phase 0 measurement baseline — verified (2026-10-18, `72d9860`)
 
 Executed the first plan phase with reproducible, isolated numbers: 100k metadata
 (first page p50 0.100ms, favorites p50 1.53ms), FTS rare/absent with the adaptive
