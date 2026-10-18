@@ -21,6 +21,22 @@ correctly shows "Not established"). No schema, server HTTP, native or original-d
 runtime change. The live runtime was subsequently upgraded to0.12.1; existing
 analysis rows remain spectral-1 until explicitly reanalyzed.
 
+## DSP chroma spectral-3 — verified (2026-10-18)
+
+`vela-pcm-spectral-3` adds chroma: accumulated55Hz–5kHz power is folded to12
+equal-tempered pitch classes by nearest semitone relative to A4=440Hz and normalized
+to sum1; there is no tuning, chord or key estimate. Existing spectral-2 caches are
+not reinterpreted. Web Radio measurements now show up to3 pitch classes and the honest
+nearest-semitone disclaimer.
+
+Evidence:21 analysis tests, including A440→A(96%), C#4→C#, a two-tone A/C# mix, plus
+silence/invalid-descriptor guards; server analysis API test derives the expected class
+from the measured centroid. Full Chromium:40 passed,1 live-import skip in2.1m with
+`vela-pcm-spectral-3` and the chroma row. Screenshot:
+`target/checks/dsp-chroma/radio-1440-dark.png`. Strict media/server/web Clippy, fmt,
+WASM Clippy. The live0.12.1 runtime remains spectral-2; spectral-3 is source-only until
+the next verified patch release. No schema, HTTP or native change.
+
 ## Native cross-peer search pagination0.12.1 — verified (2026-10-18, `5560eb1`)
 
 Each saved-peer search result now carries its own validated catalog cursor. A

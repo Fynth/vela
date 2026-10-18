@@ -17,8 +17,7 @@ least twice the envelope mean with a refractory gap, filters inter-onset interva
 to 60–200 BPM, and uses the median interval for BPM. Confidence is the
 onset-interval regularity (`1 − MAD/median`, scaled by support), bounded to 0..1.
 At least 64 analysis windows, 4 onsets and 3 valid intervals are required; flat,
-too-short or irregular envelopes return `None`. Chroma remains absent. The
-extractor version changes so immutable caches are not reinterpreted.
+too-short or irregular envelopes return `None`. Chroma was added later in spectral-3/ADR0020; spectral-2 caches are retained unchanged.
 
 ## Consequences
 

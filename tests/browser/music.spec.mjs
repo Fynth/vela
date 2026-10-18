@@ -1572,9 +1572,10 @@ test('G08 G09 actual background DSP creates explained private radio without repl
   await expect(page.locator('.analysis-seed-status')).toHaveText('Seed: Analysis complete',{timeout:20000});
   await page.getByText('Measured audio details',{exact:true}).click();
   await expect(page.locator('.radio-measurements')).toContainText('44100 Hz');
-  await expect(page.locator('.radio-measurements')).toContainText('vela-pcm-spectral-2');
+  await expect(page.locator('.radio-measurements')).toContainText('vela-pcm-spectral-3');
   await expect(page.locator('.radio-measurements')).toContainText('not LUFS');
   await expect(page.locator('.radio-measurements')).toContainText('Estimated tempo');
+  await expect(page.locator('.radio-measurements')).toContainText('Chroma pitch classes');
   await page.getByRole('button',{name:'Analyze up to 50 library tracks',exact:true}).click();
   await expect.poll(async()=>{const s=await(await page.request.get('/api/audio-analysis')).json();return s.complete>=2;},{timeout:20000}).toBeTruthy();
   await expect(page.locator('.radio-reason').filter({hasText:'Similar measured spectrum and signal level'}).first()).toBeVisible({timeout:20000});

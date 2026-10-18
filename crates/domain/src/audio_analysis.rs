@@ -32,7 +32,8 @@ pub struct AudioFeatures {
     /// Confidence is onset regularity, not a calibrated beat-tracking score.
     pub tempo_bpm: Option<f64>,
     pub tempo_confidence: Option<f64>,
-    /// Not inferred by this extractor; no calibrated key/chroma model yet.
+    /// Nearest-semitone spectral pitch-class energy, normalized to sum1.
+    /// No tuning estimation or key label is implied.
     pub chroma: Option<[f64; 12]>,
 }
 

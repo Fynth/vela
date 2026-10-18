@@ -22,7 +22,7 @@ use symphonia::core::{
     meta::MetadataOptions,
 };
 
-pub const EXTRACTOR_VERSION: &str = "vela-pcm-spectral-2";
+pub const EXTRACTOR_VERSION: &str = "vela-pcm-spectral-3";
 const FFT_SIZE: usize = 2048;
 const HOP_SIZE: usize = FFT_SIZE / 2;
 const BIN_COUNT: usize = FFT_SIZE / 2 + 1;
@@ -370,6 +370,31 @@ struct Accumulator {
     flux: Vec<f64>,
 }
 
+/// Map accumulated spectral power in 55Hz–5kHz onto12 equal-tempered pitch
+/// classes relative to A4=440Hz. Rounding to the nearest semitone is deliberate:
+/// no tuning estimate is performed, so retuned material can smear across classes.
+fn estimate_chroma(power: &[f64; BIN_COUNT], rate: u32) -> Option<[f64; 12]> {
+    let mut chroma = [0.0_f64; 12];
+    let bin_hz = rate as f64 / FFT_SIZE as f64;
+    for (bin, value) in power.iter().enumerate().skip(1) {
+        let frequency = bin as f64 * bin_hz;
+        if !(55.0..=5000.0).contains(&frequency) || *value <= 0.0 {
+            continue;
+        }
+        let midi = 69.0 + 12.0 * (frequency / 440.0).log2();
+        let pitch = (midi.round() as i64).rem_euclid(12) as usize;
+        chroma[pitch] += *value;
+    }
+    let total = chroma.iter().sum::<f64>();
+    if total <= 0.0 {
+        return None;
+    }
+    for value in &mut chroma {
+        *value /= total;
+    }
+    Some(chroma)
+}
+
 /// Estimate tempo from detected onset peaks in the normalized spectral-flux
 /// envelope. Inter-onset intervals are filtered to a 60–200 BPM range and the
 /// median interval sets the BPM; confidence is 1 − normalized median absolute
@@ -598,6 +623,7 @@ impl Accumulator {
             flatness = Some((geometric / (mean + epsilon)).clamp(0.0, 1.0));
         }
         let tempo = estimate_tempo(&self.flux, self.rate as f64 / HOP_SIZE as f64);
+        let chroma = estimate_chroma(&self.power, self.rate);
         AudioFeatures {
             extractor_version: EXTRACTOR_VERSION.to_owned(),
             sample_rate: self.rate,
@@ -622,7 +648,7 @@ impl Accumulator {
             band_energy: bands,
             tempo_bpm: tempo.map(|(bpm, _)| bpm),
             tempo_confidence: tempo.map(|(_, confidence)| confidence),
-            chroma: None,
+            chroma,
         }
     }
 }
@@ -776,7 +802,14 @@ mod tests {
         } else {
             assert!(features.tempo_confidence.is_none());
         }
-        assert!(features.chroma.is_none());
+        if let Some(chroma) = features.chroma {
+            assert!(
+                chroma
+                    .iter()
+                    .all(|value| value.is_finite() && *value >= 0.0)
+            );
+            assert!((chroma.iter().sum::<f64>() - 1.0).abs() < 1e-9);
+        }
     }
 
     #[test]
@@ -810,6 +843,50 @@ mod tests {
             assert!((result.band_energy.unwrap().iter().sum::<f64>() - 1.0).abs() < 1e-10);
             assert_eq!(result.analyzed_ms, 1000);
         }
+    }
+
+    #[test]
+    fn chroma_identifies_equal_tempered_pitch_classes_without_retuning() {
+        let a = tone(44_100, 440.0, 0.5, 1);
+        let chroma = a.chroma.expect("A440 has spectral pitch content");
+        assert_eq!(
+            chroma
+                .iter()
+                .enumerate()
+                .max_by(|left, right| left.1.total_cmp(right.1))
+                .map(|(index, _)| index),
+            Some(9)
+        );
+        assert!(chroma[9] > 0.7 && (chroma.iter().sum::<f64>() - 1.0).abs() < 1e-9);
+        assert_finite_descriptors(&a);
+
+        let c = tone(44_100, 277.18, 0.5, 1);
+        let chroma = c.chroma.expect("C#4 has spectral pitch content");
+        assert_eq!(
+            chroma
+                .iter()
+                .enumerate()
+                .max_by(|left, right| left.1.total_cmp(right.1))
+                .map(|(index, _)| index),
+            Some(1)
+        );
+        assert_finite_descriptors(&c);
+
+        let rate = 44_100_u32;
+        let frames = rate as usize;
+        let mixed = (0..frames)
+            .map(|sample| {
+                let t = sample as f64 / f64::from(rate);
+                ((std::f64::consts::TAU * 440.0 * t).sin()
+                    + (std::f64::consts::TAU * 277.18 * t).sin()) as f32
+                    * 0.25
+            })
+            .collect::<Vec<_>>();
+        let mixed = accumulate(rate, 1, &mixed).finish(true);
+        let chroma = mixed.chroma.expect("two tones produce pitch content");
+        assert!(chroma[9] > 0.2 && chroma[1] > 0.2);
+        assert!((chroma.iter().sum::<f64>() - 1.0).abs() < 1e-9);
+        assert_finite_descriptors(&mixed);
     }
 
     #[test]
@@ -1351,7 +1428,6 @@ mod tests {
         assert!((0.0..f64::from(rate) / 2.0).contains(&features.spectral_centroid_hz.unwrap()));
         assert_eq!(features.tempo_bpm, None);
         assert_eq!(features.tempo_confidence, None);
-        assert_eq!(features.chroma, None);
         assert_finite_descriptors(&features);
 
         // Exact ZCR semantics: sign changes only, zeros count as nonnegative,
@@ -1408,7 +1484,6 @@ mod tests {
             (0.25..=1.0).contains(&confidence),
             "confidence must stay bounded: {confidence}"
         );
-        assert_eq!(features.chroma, None);
         assert_finite_descriptors(&features);
     }
 

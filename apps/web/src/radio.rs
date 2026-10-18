@@ -226,6 +226,20 @@ fn measurement(value: Option<f64>, unit: &str) -> String {
     )
 }
 
+fn chroma_label(chroma: &[f64; 12]) -> String {
+    const NAMES: [&str; 12] = [
+        "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
+    ];
+    let mut indices = (0..12).collect::<Vec<_>>();
+    indices.sort_by(|left, right| chroma[*right].total_cmp(&chroma[*left]));
+    indices
+        .into_iter()
+        .take(3)
+        .map(|index| format!("{} {:.0}%", NAMES[index], chroma[index] * 100.0))
+        .collect::<Vec<_>>()
+        .join(" · ")
+}
+
 #[component]
 fn Measurements(features: AudioFeatures) -> Element {
     let seconds = features.analyzed_ms as f64 / 1000.0;
@@ -245,9 +259,10 @@ fn Measurements(features: AudioFeatures) -> Element {
             dt { "Zero-crossing fraction" } dd { "{features.zero_crossing_rate:.5}" }
             dt { "FFT windows" } dd { "{features.spectral_windows}" }
             dt { "Estimated tempo" } dd { match features.tempo_bpm { Some(bpm) => format!("{bpm:.1} BPM · {:.0}% onset regularity", features.tempo_confidence.unwrap_or(0.0) * 100.0), None => "Not established".to_owned() } }
+            dt { "Chroma pitch classes" } dd { match features.chroma { Some(chroma) => chroma_label(&chroma), None => "Not established".to_owned() } }
             dt { "Extractor" } dd { "{features.extractor_version}" }
         }
-        small { "RMS and peak describe digital samples. They are not LUFS, ReplayGain or perceived loudness. Tempo is an onset-regularity estimate, not a calibrated beat annotation. This extractor does not infer genre, mood, key or chroma." }
+        small { "RMS and peak describe digital samples. They are not LUFS, ReplayGain or perceived loudness. Tempo is an onset-regularity estimate, not a calibrated beat annotation. Chroma is nearest-semitone spectral pitch-class energy with no tuning or key estimate. This extractor does not infer genre, mood or key." }
     } }
 }
 
@@ -370,6 +385,15 @@ pub fn Radio(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn chroma_label_orders_pitch_classes_by_energy() {
+        let mut chroma = [0.0_f64; 12];
+        chroma[9] = 0.8;
+        chroma[1] = 0.15;
+        chroma[4] = 0.05;
+        assert_eq!(chroma_label(&chroma), "A 80% · C# 15% · E 5%");
+    }
+
     #[test]
     fn measurements_never_label_missing_or_nonfinite_values_as_real() {
         assert!(measurement(None, " Hz").contains("Unavailable"));

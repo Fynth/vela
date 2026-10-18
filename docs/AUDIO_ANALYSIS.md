@@ -5,7 +5,7 @@ The analysis engine lives in `crates/media/src/analysis.rs`. Its synchronous
 immutable managed media asset. The caller must run it on a bounded blocking
 worker. It performs no network access, database writes, media modification or
 playback work. Persist a result under the original asset's content hash and the
-extractor version `vela-pcm-spectral-2`, independently of editable catalog tags.
+extractor version `vela-pcm-spectral-3`, independently of editable catalog tags.
 
 This module is an extraction boundary, not a genre classifier, recommendation
 service, audio playback engine or proof that a track is legally shareable.
@@ -64,6 +64,10 @@ are calculated from that accumulated power spectrum:
   to 60–200 BPM; the median interval gives the BPM and confidence is
   `1 − median-absolute-deviation/median`, scaled by interval support. At least64
   windows,4 onsets and3 intervals are required; otherwise tempo is absent.
+- Chroma: accumulated power between55Hz and5kHz is folded onto12 equal-tempered
+  pitch classes relative to A4=440Hz by nearest semitone and normalized to sum1.
+  There is no tuning estimate; retuned material can smear across adjacent classes.
+  This is pitch-class energy, not a key label or chord transcription.
 
 Spectral fields are absent for digital silence. A clip shorter than one FFT
 window receives one zero-padded window; RMS/peak/frame counts still use only real
@@ -73,10 +77,10 @@ duration are exposed so callers can show coverage. These choices are versioned;
 changing them requires a new extractor version and independent cache entries.
 
 Tempo/tempo confidence are an onset-regularity estimate on the bounded analyzed
-prefix, not a beat-tracked or annotated-tempo model. Chroma, genre, mood, key,
-speech detection, acoustic fingerprint and semantic embeddings remain explicitly
-absent. There is no trained or calibrated model that would justify filling those
-fields.
+prefix, not a beat-tracked or annotated-tempo model. Chroma is nearest-semitone
+pitch-class energy without tuning/chord/key estimation. Genre, mood, key, speech
+detection, acoustic fingerprint and semantic embeddings remain explicitly absent.
+There is no trained or calibrated model that would justify filling those fields.
 
 ## Bounds, cancellation and failure
 

@@ -434,7 +434,20 @@ async fn actual_analysis_worker_and_radio_remain_private_and_preserve_original_s
     assert_eq!(features.channels, 1);
     assert!(features.rms > 0.0 && features.rms < 1.0 && features.peak > features.rms);
     assert!(features.spectral_centroid_hz.is_some());
-    assert!(features.tempo_bpm.is_none() && features.chroma.is_none());
+    assert!(features.tempo_bpm.is_none());
+    let chroma = features.chroma.expect("tonal fixture exposes chroma");
+    assert!((chroma.iter().sum::<f64>() - 1.0).abs() < 1e-9);
+    let centroid = features.spectral_centroid_hz.unwrap();
+    let expected =
+        ((69.0 + 12.0 * (centroid / 440.0).log2()).round() as i64).rem_euclid(12) as usize;
+    assert_eq!(
+        chroma
+            .iter()
+            .enumerate()
+            .max_by(|left, right| left.1.total_cmp(right.1))
+            .map(|(index, _)| index),
+        Some(expected)
+    );
     let radio: TrackRadio = app
         .request(Method::GET, &radio_path, &app.admin)
         .send()
