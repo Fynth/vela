@@ -41,6 +41,7 @@ struct Inner {
     http: Client,
     origin: Url,
     session: Mutex<Option<Session>>,
+    token: String,
     lifetime: CancellationToken,
     preparing: Arc<Semaphore>,
     #[cfg(test)]
@@ -52,7 +53,87 @@ struct Session {
     csrf: header::HeaderValue,
 }
 
+fn http_client() -> Result<Client, String> {
+    Client::builder()
+        .no_proxy()
+        .no_gzip()
+        .no_brotli()
+        .no_deflate()
+        .no_zstd()
+        .redirect(reqwest::redirect::Policy::none())
+        .connect_timeout(Duration::from_secs(10))
+        .read_timeout(Duration::from_secs(30))
+        .timeout(Duration::from_secs(300))
+        .dns_resolver(Arc::new(NativeResolver))
+        .user_agent(concat!("VelaNative/", env!("CARGO_PKG_VERSION")))
+        .build()
+        .map_err(|_| NETWORK_ERROR.to_owned())
+}
+
 impl VelaClient {
+    pub fn session_token(&self) -> String {
+        self.inner.token.clone()
+    }
+    pub async fn resume(
+        origin: &str,
+        token: &str,
+        cancel: CancellationToken,
+    ) -> Result<(Self, AuthResponse), String> {
+        let origin = canonical_origin(origin)?;
+        if token.len() != 64 || !lower_hex64(token) {
+            return Err("The saved session is invalid. Sign in again.".into());
+        }
+        let http = http_client()?;
+        let lifetime = CancellationToken::new();
+        let mut cookie = header::HeaderValue::from_str(&format!("vela_session={token}"))
+            .map_err(|_| INVALID_RESPONSE.to_owned())?;
+        cookie.set_sensitive(true);
+        let (session, auth) = bounded(&cancel, &lifetime, Duration::from_secs(20), async {
+            let response = http
+                .get(endpoint(&origin, "/api/me"))
+                .header(header::COOKIE, cookie.clone())
+                .header(header::ACCEPT, "application/json")
+                .send()
+                .await
+                .map_err(|_| NETWORK_ERROR.to_owned())?;
+            if response.status() != StatusCode::OK {
+                return Err(if response.status() == StatusCode::UNAUTHORIZED {
+                    "The saved session expired. Sign in again.".into()
+                } else {
+                    status_error(response.status())
+                });
+            }
+            let auth: AuthResponse = json(response, 16 * 1024).await?;
+            if !canonical_uuid(&auth.user.id)
+                || auth.user.username.is_empty()
+                || auth.user.username.len() > 32
+                || auth.user.username.chars().any(char::is_control)
+                || !lower_hex64(&auth.csrf_token)
+            {
+                return Err(INVALID_RESPONSE.into());
+            }
+            let mut csrf = header::HeaderValue::from_str(&auth.csrf_token)
+                .map_err(|_| INVALID_RESPONSE.to_owned())?;
+            csrf.set_sensitive(true);
+            Ok((Session { cookie, csrf }, auth))
+        })
+        .await?;
+        Ok((
+            Self {
+                inner: Arc::new(Inner {
+                    http,
+                    origin,
+                    session: Mutex::new(Some(session)),
+                    token: token.to_owned(),
+                    lifetime,
+                    preparing: Arc::new(Semaphore::new(1)),
+                    #[cfg(test)]
+                    temporary_directory: None,
+                }),
+            },
+            auth,
+        ))
+    }
     pub async fn connect(
         origin: &str,
         username: String,
@@ -64,23 +145,10 @@ impl VelaClient {
         {
             return Err("Enter a valid Vela username and password.".into());
         }
-        let http = Client::builder()
-            .no_proxy()
-            .no_gzip()
-            .no_brotli()
-            .no_deflate()
-            .no_zstd()
-            .redirect(reqwest::redirect::Policy::none())
-            .connect_timeout(Duration::from_secs(10))
-            .read_timeout(Duration::from_secs(30))
-            .timeout(Duration::from_secs(300))
-            .dns_resolver(Arc::new(NativeResolver))
-            .user_agent(concat!("VelaNative/", env!("CARGO_PKG_VERSION")))
-            .build()
-            .map_err(|_| NETWORK_ERROR.to_owned())?;
+        let http = http_client()?;
         let lifetime = CancellationToken::new();
         let credentials = Credentials { username, password };
-        let (session, auth) = bounded(&cancel, &lifetime, Duration::from_secs(20), async {
+        let (session, auth, token) = bounded(&cancel, &lifetime, Duration::from_secs(20), async {
             let response = http
                 .post(endpoint(&origin, "/api/login"))
                 .header(header::ORIGIN, origin.origin().ascii_serialization())
@@ -97,6 +165,12 @@ impl VelaClient {
                 });
             }
             let cookie = session_cookie(response.headers())?;
+            let token = cookie
+                .to_str()
+                .ok()
+                .and_then(|value| value.strip_prefix("vela_session="))
+                .map(str::to_owned)
+                .ok_or_else(|| INVALID_RESPONSE.to_owned())?;
             let auth: AuthResponse = json(response, 16 * 1024).await?;
             if !canonical_uuid(&auth.user.id)
                 || auth.user.username.is_empty()
@@ -109,7 +183,7 @@ impl VelaClient {
             let mut csrf = header::HeaderValue::from_str(&auth.csrf_token)
                 .map_err(|_| INVALID_RESPONSE.to_owned())?;
             csrf.set_sensitive(true);
-            Ok((Session { cookie, csrf }, auth))
+            Ok((Session { cookie, csrf }, auth, token))
         })
         .await?;
         // Password and username are not retained in the client. There is no
@@ -121,6 +195,7 @@ impl VelaClient {
                     http,
                     origin,
                     session: Mutex::new(Some(session)),
+                    token,
                     lifetime,
                     preparing: Arc::new(Semaphore::new(1)),
                     #[cfg(test)]

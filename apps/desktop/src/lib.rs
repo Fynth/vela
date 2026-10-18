@@ -7,6 +7,7 @@ pub mod peers;
 #[path = "../../web/src/playback.rs"]
 pub mod playback;
 pub mod remote;
+pub mod session_store;
 pub mod ui;
 
 /// A private temporary original. Its lease, not a public DTO, owns file cleanup.

@@ -116,6 +116,9 @@ struct Ui {
     username: Signal<String>,
     password: Signal<String>,
     connecting: Signal<bool>,
+    resuming: Signal<bool>,
+    remember: Signal<bool>,
+    saved_session: Signal<Option<crate::session_store::SavedSession>>,
     login_error: Signal<String>,
     view: Signal<&'static str>,
     theme: Signal<&'static str>,
@@ -426,6 +429,7 @@ fn login(mut ui: Ui) {
     let origin = ui.origin.peek().trim().to_string();
     let username = ui.username.peek().trim().to_string();
     let password = ui.password.peek().clone();
+    let remember = *ui.remember.peek();
     if origin.is_empty() || username.is_empty() || password.is_empty() {
         ui.login_error
             .set("Enter your server origin, username and password.".into());
@@ -451,47 +455,112 @@ fn login(mut ui: Ui) {
         ui.connecting.set(false);
         match result {
             Ok((client, auth)) => {
-                let account_id = auth.user.id.clone();
-                ui.account.set(Some(Account {
-                    epoch: ticket.epoch,
-                    client,
-                    user: auth.user,
-                    origin,
-                }));
-                ui.offline.set(Vec::new());
-                let mut offline_ui = ui.clone();
-                spawn(async move {
-                    let loaded = tokio::task::spawn_blocking({
-                        let account_id = account_id.clone();
-                        move || crate::offline::load(&account_id)
+                let token = client.session_token();
+                if remember {
+                    let origin = origin.clone();
+                    let stored = tokio::task::spawn_blocking(move || {
+                        crate::session_store::save(&origin, &token)
                     })
                     .await;
-                    if offline_ui
-                        .account
-                        .peek()
-                        .as_ref()
-                        .map(|account| account.user.id.as_str())
-                        != Some(account_id.as_str())
-                    {
-                        return;
+                    match stored {
+                        Ok(Ok(())) => ui.notice.set("Session saved on this device.".into()),
+                        Ok(Err(error)) => ui.notice.set(error),
+                        Err(_) => ui
+                            .notice
+                            .set("The session could not be saved on this device.".into()),
                     }
-                    match loaded {
-                        Ok(Ok(tracks)) => offline_ui.offline.set(tracks),
-                        Ok(Err(error)) => offline_ui.offline_error.set(error),
-                        Err(_) => offline_ui
-                            .offline_error
-                            .set("Saved offline music could not be read.".into()),
-                    }
-                });
-                load_catalog(ui, String::new(), None, false);
+                }
+                adopt_account(ui, client, auth, origin, ticket.epoch);
             }
             Err(error) => ui.login_error.set(error),
         }
     });
 }
 
+fn adopt_account(
+    mut ui: Ui,
+    client: crate::client::VelaClient,
+    auth: vela_domain::AuthResponse,
+    origin: String,
+    epoch: u64,
+) {
+    let account_id = auth.user.id.clone();
+    ui.account.set(Some(Account {
+        epoch,
+        client,
+        user: auth.user,
+        origin,
+    }));
+    ui.offline.set(Vec::new());
+    let mut offline_ui = ui.clone();
+    spawn(async move {
+        let loaded = tokio::task::spawn_blocking({
+            let account_id = account_id.clone();
+            move || crate::offline::load(&account_id)
+        })
+        .await;
+        if offline_ui
+            .account
+            .peek()
+            .as_ref()
+            .map(|account| account.user.id.as_str())
+            != Some(account_id.as_str())
+        {
+            return;
+        }
+        match loaded {
+            Ok(Ok(tracks)) => offline_ui.offline.set(tracks),
+            Ok(Err(error)) => offline_ui.offline_error.set(error),
+            Err(_) => offline_ui
+                .offline_error
+                .set("Saved offline music could not be read.".into()),
+        }
+    });
+    load_catalog(ui, String::new(), None, false);
+}
+
+fn resume_saved(mut ui: Ui) {
+    if !ui.alive.get()
+        || ui.signed_in()
+        || *ui.connecting.peek()
+        || *ui.resuming.peek()
+        || (ui.audio.peek().is_none() && ui.audio_error.peek().is_empty())
+    {
+        return;
+    }
+    let Some(saved) = ui.saved_session.peek().clone() else {
+        return;
+    };
+    let ticket = ui.login_gate.begin(*ui.epoch.peek());
+    ui.resuming.set(true);
+    ui.login_error.set(String::new());
+    ui.notice.set(String::new());
+    spawn(async move {
+        let result =
+            crate::client::VelaClient::resume(&saved.origin, &saved.token, ticket.cancel.clone())
+                .await;
+        if !ticket.current(&ui) {
+            return;
+        }
+        ui.resuming.set(false);
+        match result {
+            Ok((client, auth)) => {
+                adopt_account(ui, client, auth, saved.origin, ticket.epoch);
+            }
+            Err(error) => {
+                let _ = tokio::task::spawn_blocking(crate::session_store::clear).await;
+                if !expired(ui.clone(), &error) {
+                    ui.saved_session.set(None);
+                    ui.login_error.set(error);
+                }
+            }
+        }
+    });
+}
+
 fn sign_out(mut ui: Ui) {
     let old = ui.account.peek().clone();
+    std::mem::drop(tokio::task::spawn_blocking(crate::session_store::clear));
     ui.clear_account();
     ui.login_error.set(String::new());
     ui.notice
@@ -1813,6 +1882,10 @@ fn sign_in(ui: Ui) -> Element {
     let output_pending = !ui.audio_ready() && output_error.is_empty();
     let error = ui.login_error.read().clone();
     let notice = ui.notice.read().clone();
+    let saved_session = ui.saved_session.read().clone();
+    let resuming = *ui.resuming.read();
+    let mut remember = ui.remember;
+    let resume = ui.clone();
     let mut origin_signal = ui.origin;
     let mut username_signal = ui.username;
     let mut password_signal = ui.password;
@@ -1827,6 +1900,13 @@ fn sign_in(ui: Ui) -> Element {
         section {class:"signin-form",span {class:"eyebrow","WELCOME TO YOUR LISTENING SPACE"} h2 {"Connect to your Vela"} p {"Use an existing account. Your administrator creates accounts on your Vela server."}
             if !error.is_empty() {div {class:"alert error",role:"alert","{error}"}}
             if !notice.is_empty() {p {class:"signin-notice",role:"status","{notice}"}}
+            if let Some(saved) = saved_session {
+                div { class: "signin-notice", role: "group", "aria-label": "Saved session",
+                    p { "Saved session for {saved.origin}" }
+                    button { class: "button secondary", disabled: connecting || resuming || output_pending, onclick: move |_| resume_saved(resume.clone()), if resuming { "Resuming…" } else { "Continue saved session" } }
+                    small { "The keyring stores only this session token, not your password or CSRF token." }
+                }
+            }
             if output_pending {p {class:"signin-notice",role:"status","data-testid":"native-output-status","Preparing native audio output…"}}
             if !output_error.is_empty() {div {class:"alert error",role:"alert","{output_error} You can browse your library; playback needs an available audio output."}}
             form {onsubmit:move |event|{event.prevent_default();login(submit.clone());},
@@ -1837,10 +1917,11 @@ fn sign_in(ui: Ui) -> Element {
                 input {id:"native-username",required:true,maxlength:32,value:"{username}",disabled:connecting,autocomplete:"username",oninput:move |event|username_signal.set(event.value())}
                 label {r#for:"native-password","Password"}
                 input {id:"native-password",r#type:"password",required:true,value:"{password}",disabled:connecting,autocomplete:"off",oninput:move |event|password_signal.set(event.value())}
+                label { class: "checkbox-label", r#for: "native-remember", input { id: "native-remember", r#type: "checkbox", checked: remember(), disabled: connecting, onchange: move |event| remember.set(event.checked()) } span { "Remember this session on this device" } }
                 button {class:"button primary",r#type:"submit",disabled:connecting||output_pending,if connecting {"Connecting…"} else if output_pending {"Preparing native output…"} else {"Sign in"}}
                 if connecting {button {class:"button secondary",r#type:"button",onclick:move |_|{let mut ui=cancel.clone();ui.login_gate.cancel();ui.connecting.set(false);ui.login_error.set("Connection canceled. Enter your password to try again.".into());},"Cancel connection"}}
             }
-            small {class:"signin-limit","Audio is prepared in a private temporary file before playback. This client does not keep an offline library or send listening history."}
+            small {class:"signin-limit","Opt-in session saving uses the system Secret Service and stores only the opaque session token; the password and CSRF token are never stored. Signing out deletes the saved session. No listening history is sent."}
         }
     } }
 }
@@ -3218,6 +3299,9 @@ pub fn App() -> Element {
         username: use_signal(String::new),
         password: use_signal(String::new),
         connecting: use_signal(|| false),
+        resuming: use_signal(|| false),
+        remember: use_signal(|| false),
+        saved_session: use_signal(|| None),
         login_error: use_signal(String::new),
         view: use_signal(|| "library"),
         theme: use_signal(|| "dark"),
@@ -3407,6 +3491,24 @@ pub fn App() -> Element {
     let compact_playlists = ui.clone();
     let compact_public = ui.clone();
     let css = include_str!("../style.css");
+    let saved_loader = ui.clone();
+    use_future(move || {
+        let mut ui = saved_loader.clone();
+        async move {
+            let loaded = tokio::task::spawn_blocking(crate::session_store::load).await;
+            if !ui.alive.get() {
+                return;
+            }
+            match loaded {
+                Ok(Ok(Some(saved))) => ui.saved_session.set(Some(saved)),
+                Ok(Ok(None)) => {}
+                Ok(Err(error)) => ui.login_error.set(error),
+                Err(_) => ui
+                    .login_error
+                    .set("Saved-session storage is unavailable on this device.".into()),
+            }
+        }
+    });
     rsx! {
         document::Style {"{css}"}
         div {class:"native-app","data-theme":theme,

@@ -42,6 +42,17 @@ const resizeCompact = async () => {
   }
   window.__velaResizeTrace = trace;
 };
+if (config.sessionPhase === 'resume') {
+  try {
+    await wait(() => button('Continue saved session') && !button('Continue saved session').disabled, 'Saved session option');
+    await click('Continue saved session');
+    await wait(() => document.querySelectorAll('[data-native-track-id]').length === 3, 'Saved session resume');
+    assert(button('Sign out'), 'Saved session resumes the private account without a password');
+    await click('Sign out'); await wait(() => button('Sign in'), 'Resume sign-out');
+    assert(!el('.native-player') && !document.querySelector('[data-native-track-id]'), 'Resume sign-out clears private state');
+    dioxus.send({ok:true, checks});
+  } catch(error) { dioxus.send({ok:false, checks, failure:String(error.message)}); }
+} else {
 try {
   await wait(() => button('Sign in') && !button('Sign in').disabled, 'Native output initialization');
   fill('#native-origin', config.origin); fill('#native-username', config.username); fill('#native-password', config.password);
@@ -301,8 +312,15 @@ try {
     await click('Sign out'); await wait(() => button('Sign in'), 'Native sign-out clears account');
     assert(!el('.native-player') && document.querySelectorAll('[data-native-track-id]').length === 0, 'Sign-out removes private catalog and player');
     fill('#native-origin', config.origin); fill('#native-username', config.username); fill('#native-password', config.password);
-    el('.signin-form form').requestSubmit();
-    await wait(() => document.querySelectorAll('[data-native-track-id]').length === 3, 'Library after offline sign-in');
+    if (config.testSession) {
+      if (!el('#native-remember').checked) el('#native-remember').click();
+      el('.signin-form form').requestSubmit();
+      await wait(() => document.querySelectorAll('[data-native-track-id]').length === 3, 'Library after offline sign-in');
+      await wait(() => (el('.alert.notice')?.textContent || '').includes('Session saved on this device.'), 'Opt-in session persistence');
+    } else {
+      el('.signin-form form').requestSubmit();
+      await wait(() => document.querySelectorAll('[data-native-track-id]').length === 3, 'Library after offline sign-in');
+    }
     const offlineTitles = [...document.querySelectorAll('[data-native-track-id] .native-track-name strong')].slice(0, 2).map(node => node.textContent);
     assert(offlineTitles.length === 2, 'Offline fixtures are listed');
     for (const title of offlineTitles) {
@@ -331,3 +349,4 @@ try {
     dioxus.send({ok:true, checks});
   }
 } catch(error) { dioxus.send({ok:false, checks, failure:String(error.message)}); }
+}

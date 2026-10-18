@@ -21,6 +21,25 @@ correctly shows "Not established"). No schema, server HTTP, native or original-d
 runtime change. The live runtime was subsequently upgraded to0.12.1; existing
 analysis rows remain spectral-1 until explicitly reanalyzed.
 
+## Native opt-in Secret Service session — source verified (2026-10-18)
+
+Native sign-in now offers an explicit Remember-this-session checkbox (default off). When
+enabled, only the opaque64-hex session token and canonical origin are written through
+stdin to the freedesktop Secret Service; password, username, CSRF token and history are
+never stored. The sign-in screen shows Continue saved session only when an item exists;
+resume calls `/api/me` with the stored cookie and rebuilds CSRF from that response. No
+automatic passwordless login occurs. Sign-out deletes the item; expired/invalid saved
+sessions are deleted with a visible error. Release uses a fixed service name; QA
+overrides it only in debug.
+
+Two-process QA: the full journey opts in at its final sign-in, Python verifies the
+Secret Service envelope contains origin+64-hex token and no password/username/CSRF; a
+second native process resumes via the explicit button, loads the private library,
+signs out and Python confirms the item is gone. Evidence:
+`target/checks/native-session/`;28/30 desktop tests with both opt-ins, strict
+Clippy/fmt. Source postdates the preserved0.12.5 desktop archive; Windows/macOS/mobile
+secure stores and biometrics remain absent.
+
 ## Native TLS federation — source verified (2026-10-18, `e605c83`)
 
 Native peer transport now supports a debug-only HTTPS loopback override with a test CA,

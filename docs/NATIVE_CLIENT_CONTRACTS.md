@@ -106,8 +106,8 @@ metadata is never treated as a current grant, and there is no background refresh
 ## Explicit non-goals / limitations
 
 This first adapter downloads the whole authorized original before decoding. It is
-not progressive streaming, gapless, background mobile playback, secure credential
-persistence, device handoff, signed/packaged install, album/artist editing, Internet
+not progressive streaming, gapless, background mobile playback, Windows/macOS/mobile
+secure credential stores, device handoff, signed/packaged install, album/artist editing, Internet
 TLS/two-host validation or a general federated source resolver. Offline copies are an
 explicit private cache with a local queue, not a server entitlement or background sync.
 Peer catalogs support saved canonical origins, concurrent search, browse-only cached
@@ -131,6 +131,23 @@ BUILD commit `3eedf1b`); prior0.12.0–0.12.4 archives are preserved. It include
 peers, cached browse-only metadata and preview/per-peer search pagination. Evidence:
 `target/checks/desktop-0.12.5-verify.log`,
 `desktop-package-screens/vela-desktop-0.12.5-package-launch.png`.
+
+## Opt-in saved session
+
+Sign-in offers an explicit **Remember this session on this device** checkbox (default
+off). When checked, only the opaque 64-hex `vela_session` token plus its canonical
+origin is written through stdin to the freedesktop Secret Service via `secret-tool`;
+the password, username, CSRF token, media paths and history are never stored. The
+sign-in screen shows a **Continue saved session** action only when an item exists; it
+resumes by calling `/api/me` with the stored cookie and reconstructs the CSRF token
+from that authenticated response. No automatic passwordless login occurs.
+
+Explicit sign-out clears the Secret Service item; an expired/invalid saved session is
+cleared with a visible sign-in error. The fixed release service name is
+`org.vela.music.desktop.session`; QA may override it only in debug builds. This is Linux
+freedesktop Secret Service only — no Windows Credential Manager/macOS Keychain, Android
+Keystore or biometric unlock is claimed. The token is a bearer credential protected by
+the user's unlocked keyring collection.
 
 ## Offline device copies
 
@@ -157,8 +174,8 @@ audio/manifest exist at0600.
 ## Verification
 
 - `cargo fmt --all -- --check`; strict Clippy `-p vela-desktop --all-targets
-  --features native-qa`; `cargo test --locked -p vela-desktop`: 27 passed,
-  2 ignored (opt-in audio/MPRIS) from29 listed tests (8 audio,6 client,3 MPRIS,
+  --features native-qa`; `cargo test --locked -p vela-desktop`: 28 passed,
+  2 ignored (opt-in audio/MPRIS) from30 listed tests (8 audio,6 client,3 MPRIS,
   8 shared playback). Logs: `target/checks/native-0.12b-{fmt,clippy,tests}.log`.
 - Ignored `audio::tests::native_owned_null_sink_play_pause_seek_eof_replace_stop_and_cleanup`
   executed under an owned Pulse null sink: passed.
