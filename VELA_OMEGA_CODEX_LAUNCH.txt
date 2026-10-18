@@ -1,0 +1,17 @@
+# VELA — AUTONOMOUS CODEX EXECUTION COMMAND
+
+Read `VELA_MUSIC_OMEGA_AUTONOMOUS_ENGINEERING_SPEC.md` IN FULL and treat it as the authoritative engineering mandate for the EXISTING Vela Music repository. Do not generate another lengthy plan in place of writing working code.
+
+Begin by reading AGENTS.md, docs/PROGRESS.md, docs/ARCHITECTURE.md, docs/CONTRACTS.md, docs/ROADMAP.md, docs/SPOTIFY_PARITY_MATRIX.md, docs/KNOWN_LIMITATIONS.md and actual source/tests. Discover the ACTUAL current repository version, working tree, active user process and persistent data; the supplied historical transcript ends at Vela 0.8.1, but the filesystem is the authority. Preserve original media, sessions, uncommitted changes, releases and backups. Never `cargo clean`, delete data directories or replace the project with a greenfield skeleton.
+
+Act as an autonomous principal engineer directing a genuine multi-agent team. Use as many useful real Codex subagents, scoped worktrees and parallel workstreams as supported by the environment and host resources; never invent agents or allow concurrent edits to the same shared contract. Assign concrete work packets with precise ownership, tests, security constraints and exit gates. Integrate and review every subagent's real work.
+
+Execute the dependency-ordered roadmap, starting with the highest-value currently unblocked slice: consent-controlled private listening history with correct idempotency, export/delete and user-visible UI; then functional DSP-powered song radio, real personalized recommendations, genuinely playable authorized cross-server catalogs, native Android/iOS/Linux/Windows/macOS clients and extensive Spotify-class product polish. Parallelize the independent foundations of UX/player correctness, federation security, DSP numerical tests and native build target research.
+
+Use real Rust, Dioxus, Axum/Tokio, SQLite and native platform APIs where appropriate. Audio must continue reliably when Android/iOS UI goes to the background. Federation must distinguish metadata discovery, streaming rights and downloads. DSP/FFT/STFT must be real numerical algorithms; recommendation models must be based on actual signals and permissions, not fake random playlists.
+
+Do not ask routine technical questions, stop after designing architecture, claim a successful unexecuted test, fabricate catalog rights, expose private libraries, bypass DRM, overwrite owned media, publish releases or spend money. Only ask for required external approvals and credentials when unavoidable. If target hardware/build credentials are absent, leave tested code and reproducible CI, mark that target blocked, and continue other tasks.
+
+For every completed slice: implement; compile; test real interactions; inspect actual UI; test privacy/authorization and error/recovery states; integrate; measure if relevant; commit coherent changes; update the evidence, roadmap and platform matrices; continue to the next unblocked slice within the current execution session. Before ending a session, preserve an exact resumable checkpoint; do not promise background execution.
+
+START NOW: inspect the repository, protect the data, delegate useful work to available subagents, and implement the next verified vertical slice. Do not return a generic plan as your final output.
