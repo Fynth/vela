@@ -1,3 +1,11 @@
+# 0.12.2 — spectral-3 chroma + source pagination checkpoint
+
+Patch release for the frozen local runtime: local DSP spectral-3 adds nearest-semitone
+chroma and the Radio measurements now show the top pitch classes. The native desktop
+source also includes saved public origins, browse-only cached metadata, and preview/
+per-peer search cursor pagination. No schema migration, HTTP contract change or
+original-data rewrite is part of this patch.
+
 # 0.12.1 — bounded spectral-2 tempo patch release
 
 Local DSP spectral-2 adds a bounded onset-interval tempo estimate with honest
