@@ -1,5 +1,22 @@
 # Verified progress
 
+## Web sleep timer0.12 — verified browser increment (2026-10-18)
+
+A root-owned sleep timer is available from the playback queue: 5/15/30/60 minutes,
+a visible countdown, and explicit cancel. It uses a generation-guarded one-second
+task and the existing single `HTMLMediaElement`; at zero it pauses through
+`BrowserPlayer`, disables itself and reports the pause. Navigation does not cancel
+it, account sign-out clears it, and an old task cannot pause a replaced timer.
+
+Real-browser evidence: Chromium41/41 and Firefox41/41 passed with the licensed live
+import. The new scenario uploads a real60s PCM WAV, starts playback, sets5 minutes,
+fast-forwards4 minutes (still playing), then past expiry (paused plus status), then
+restarts, sets15 minutes, cancels, advances20 minutes and remains playing. The
+Firefox run produced `test-results/sleep-timer.png`, preserved at
+`target/checks/sleep-timer-firefox-screens/`. Logs:
+`sleep-timer-{chromium-final,firefox}.log`; strict native/WASM Clippy, fmt and233
+workspace tests pass. No schema, server HTTP, storage or original-data change.
+
 ## Queue truthfulness and owner playlist lifecycle0.12 — verified source (2026-10-18)
 
 Application/source checkpoint `6421f3d` (native hardening `05951fd`). Continued the

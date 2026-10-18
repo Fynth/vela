@@ -20,6 +20,11 @@ queues, dead-worker retry and QA sink assertions were fixed and re-verified. A f
 compact run exposed queue rows overflowing the viewport; the assertion was
 strengthened and the layout fixed.
 
+The web player adds a root-owned sleep timer (5/15/30/60 minutes) with a visible
+countdown and cancel; at zero it pauses the one shared audio element and reports it.
+A real-browser clock scenario verifies pre-expiry playback, expiry pause, and
+cancel/restart behavior in Chromium and Firefox.
+
 The same source increment improves the web listener surface. Queue rows support
 move-down; Clear upcoming keeps the current occurrence and played prefix; remove-
 current explains its disabled state; first-page controls are disabled from the

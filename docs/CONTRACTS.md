@@ -20,6 +20,10 @@ Web queue structural edits: move-up/move-down call the shared `PlaybackOrder::sw
 
 Playlist detail exposes owner-only rename input/Save and inline Delete → Confirm/Cancel, plus move-down; success refreshes the same view under object/session/generation guards and the list; failures remain actionable and claim no success. Playlist `mutate` now supports PATCH. Acceptance: real-TCP owner/editor/outsider/CSRF/unknown-field/stale/replay/share-revocation/track-preservation test; Chromium and Firefox40-scenario suites including the new lifecycle and queue assertions.
 
+# Sleep timer0.12 (verified web increment)
+
+Main owns the root player signals, countdown task, UI, browser test and evidence. No schema/server/API/storage change. A root `sleep_minutes`/`sleep_remaining`/`sleep_generation` state and a monotonic deadline (JS clock) drive a cancellable timer from the shared queue panel; a new selection increments the generation so an old task cannot pause a newer session. At zero the timer pauses the one existing `HTMLMediaElement` through `BrowserPlayer`, turns itself off and shows a status message; Cancel invalidates the generation and clears the countdown. Sign-out clears all sleep state. Options are5/15/30/60 minutes; the timer survives navigation because it is root-owned. Acceptance: Chromium/Firefox real-browser clock test starts real audio, verifies still playing before expiry, paused plus status at expiry, then restart/cancel and stays playing after a further fast-forward; no new audio element or autoplay.
+
 # Explicit publications and read-only public catalog0.11 (implementation, not full federation)
 
 Public media reserves max8 of16 total stream slots; both permits live until body completion/drop. Global DNS resolution admits4 actual blocking tasks; caller timeout cannot release a running resolver permit. Preview is2 concurrent/5s and rejects unsorted/foreign cursor pages.

@@ -469,6 +469,58 @@ fn change_volume(value: f64, mut volume: Signal<f64>) {
         }
     }
 }
+fn set_sleep_timer(
+    value: String,
+    mut minutes: Signal<String>,
+    mut remaining: Signal<u64>,
+    mut generation: Signal<u64>,
+    playback: PlaybackUi,
+    mut notice: Signal<String>,
+) {
+    let next_generation = generation.peek().wrapping_add(1);
+    generation.set(next_generation);
+    minutes.set(value.clone());
+    let parsed = value.parse::<u64>().unwrap_or(0);
+    if parsed == 0 || parsed > 120 {
+        remaining.set(0);
+        return;
+    }
+    let deadline = js_sys::Date::now() + parsed as f64 * 60_000.0;
+    remaining.set(parsed * 60);
+    let session = playback
+        .auth
+        .peek()
+        .as_ref()
+        .map(|auth| auth.user.id.clone())
+        .unwrap_or_default();
+    spawn(async move {
+        loop {
+            gloo_timers::future::TimeoutFuture::new(1000).await;
+            if *generation.peek() != next_generation {
+                return;
+            }
+            if playback
+                .auth
+                .peek()
+                .as_ref()
+                .map(|auth| auth.user.id.clone())
+                .unwrap_or_default()
+                != session
+            {
+                return;
+            }
+            let left = ((deadline - js_sys::Date::now()) / 1000.0).max(0.0) as u64;
+            remaining.set(left);
+            if left == 0 {
+                playback.engine.peek().pause();
+                minutes.set("0".into());
+                notice.set("Sleep timer reached zero and paused playback.".into());
+                return;
+            }
+        }
+    });
+}
+
 #[derive(Clone, Copy)]
 struct PlaylistView {
     auth: Signal<Option<AuthResponse>>,
@@ -1059,6 +1111,9 @@ fn App() -> Element {
     let mut volume = use_signal(|| 0.8);
     let mut shuffle = use_signal(|| false);
     let mut repeat = use_signal(|| "off".to_string());
+    let mut sleep_minutes = use_signal(|| "0".to_string());
+    let mut sleep_remaining = use_signal(|| 0_u64);
+    let mut sleep_generation = use_signal(|| 0_u64);
     let mut playback_order = use_signal(PlaybackOrder::default);
     let playback_status = use_signal(String::new);
     let mut playback_expired = use_signal(|| false);
@@ -1973,7 +2028,7 @@ fn App() -> Element {
                     if page() == "settings" {
                         section { class: "settings-grid", div { class: "panel", h2 { "A space that is yours" } p { "Your library is private. Music files stay on this server, and your session credentials stay in a secure browser cookie." }
                                 dl { dt { "Server version" } dd { "{version}" } dt { "Collection storage" } dd { {stats.read().as_ref().map(|s| bytes(s.size_bytes)).unwrap_or_else(|| "—".into())} } dt { "Playback" } dd { "Original audio · Browser native" } dt { "Signed federation" } dd { "Not implemented" } }
-                                button { class: "button secondary", onclick: move |_| { spawn_authorized(auth, async move { match mutate("POST", "/api/logout", None, &token(auth)).await { Ok(()) => { engine.peek().bind(String::new(),None); auth.set(None); invalidate_library(library); clear_catalog(catalog); tracks.set(Vec::new()); queue.set(Vec::new()); playlists.set(Vec::new()); selected_playlist.set(None); stats.set(None); jobs.set(Vec::new()); share_url.set(String::new()); page.set("home".into());  error.set(String::new()); username.set(String::new()); } Err(message) => error.set(message) } }); }, "Sign out" }
+                                button { class: "button secondary", onclick: move |_| { spawn_authorized(auth, async move { match mutate("POST", "/api/logout", None, &token(auth)).await { Ok(()) => { engine.peek().bind(String::new(),None); auth.set(None); invalidate_library(library); clear_catalog(catalog); tracks.set(Vec::new()); queue.set(Vec::new()); playlists.set(Vec::new()); selected_playlist.set(None); stats.set(None); jobs.set(Vec::new()); share_url.set(String::new()); let next_sleep = sleep_generation.peek().wrapping_add(1); sleep_generation.set(next_sleep); sleep_minutes.set("0".into()); sleep_remaining.set(0); page.set("home".into());  error.set(String::new()); username.set(String::new()); } Err(message) => error.set(message) } }); }, "Sign out" }
                             }
                             div { class: "panel", h2 { "Listening controls" } p { "Press Space to play or pause, and the arrow keys to seek 10 seconds. Use your device’s media controls when your browser supports them." } button { class: "button secondary", onclick: move |_| theme.set(if theme() == "dark" { "light".into() } else { "dark".into() }), if theme() == "dark" { "Switch to light theme" } else { "Switch to dark theme" } } small { "Codec support depends on your browser. Files are streamed directly without transcoding." } }
                             listening::PrivacySettings {auth,view:listening_view,collector:engine.peek().listening(),onhistory:move |_| actions.navigate.call("history".into())}
@@ -2040,6 +2095,20 @@ fn App() -> Element {
                             } }
                         } }
                         if !queue.read().is_empty() { button { class: "button secondary", disabled: !has_upcoming(queue.read().len(), index()), title: if !has_upcoming(queue.read().len(), index()) { "No upcoming tracks: everything queued is at or before the current occurrence." } else { "Remove only the queued occurrences after the current one. The playing track and earlier rows stay." }, onclick: move |_| clear_upcoming(playback), "Clear upcoming tracks" } }
+                        div { class: "inline-form sleep-timer",
+                            label { r#for: "sleep-timer", "Sleep timer" }
+                            select { id: "sleep-timer", value: "{sleep_minutes}", onchange: move |event| set_sleep_timer(event.value(), sleep_minutes, sleep_remaining, sleep_generation, playback, notice),
+                                option { value: "0", "Off" }
+                                option { value: "5", "5 minutes" }
+                                option { value: "15", "15 minutes" }
+                                option { value: "30", "30 minutes" }
+                                option { value: "60", "60 minutes" }
+                            }
+                            if sleep_remaining() > 0 {
+                                small { role: "status", "Pauses in {seconds(sleep_remaining() as f64)}" }
+                                button { class: "text-button", onclick: move |_| { let next = sleep_generation.peek().wrapping_add(1); sleep_generation.set(next); sleep_minutes.set("0".into()); sleep_remaining.set(0); notice.set("Sleep timer canceled.".into()); }, "Cancel sleep timer" }
+                            }
+                        }
                     } }
                 if *now.open.read() {
                     if let Some(track)=current.clone(){now_playing::NowPlaying {

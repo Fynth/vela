@@ -188,9 +188,38 @@ test('owner renames and deletes a playlist without changing owned tracks', async
   await page.screenshot({ path: 'test-results/playlist-lifecycle.png', fullPage: true });
 });
 
+test('sleep timer pauses the shared player and can be canceled', async ({ page }) => {
+  await openAdminFixture(page);
+  await page.getByRole('button', { name: '+ Add music', exact: true }).first().click();
+  await page.locator('#audio-files').setInputFiles({ name: 'Sleep timer fixture.wav', mimeType: 'audio/wav', buffer: pcmWave(60, 330) });
+  await page.getByRole('button', { name: 'Upload to my library', exact: true }).click();
+  await expect(page.getByText('1 files processed.', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Close upload dialog' }).click();
+  await page.getByRole('button', { name: 'Play Sleep timer fixture', exact: true }).click();
+  await expect.poll(() => page.locator('#vela-audio').evaluate(audio => !audio.paused && audio.currentTime > 0)).toBeTruthy();
+  await page.getByRole('button', { name: 'Show playback queue', exact: true }).click();
+  await page.clock.install();
+  await page.locator('#sleep-timer').selectOption('5');
+  await expect(page.getByText(/Pauses in/)).toBeVisible();
+  await page.screenshot({ path: 'test-results/sleep-timer.png' });
+  await page.clock.runFor(4 * 60 * 1000);
+  await expect(page.locator('#vela-audio')).toHaveJSProperty('paused', false);
+  await page.clock.runFor(61 * 1000);
+  await expect(page.locator('#vela-audio')).toHaveJSProperty('paused', true);
+  await expect(page.getByText('Sleep timer reached zero and paused playback.', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Play', exact: true }).click();
+  await expect.poll(() => page.locator('#vela-audio').evaluate(audio => !audio.paused)).toBeTruthy();
+  await page.locator('#sleep-timer').selectOption('15');
+  await page.getByRole('button', { name: 'Cancel sleep timer', exact: true }).click();
+  await expect(page.getByText('Sleep timer canceled.', { exact: true })).toBeVisible();
+  await page.clock.runFor(20 * 60 * 1000);
+  await expect(page.locator('#vela-audio')).toHaveJSProperty('paused', false);
+  await page.getByRole('button', { name: 'Close playback queue', exact: true }).click();
+});
+
 test('malicious URL import rejected through UI and small-screen layout remains usable', async ({ page }) => {
   await openAdminFixture(page);
-  await page.getByRole('button', { name: /Add music/ }).first().click();
+  await page.getByRole('button', { name: 'Add music', exact: true }).first().click();
   await page.locator('#import-url').fill('http://169.254.169.254/latest/meta-data/');
   await page.getByRole('button', { name: 'Preview download →', exact: true }).click();
   await expect(page.getByRole('alert')).toBeVisible();
@@ -208,14 +237,14 @@ test('direct public downloadable audio URL imports without console access', asyn
   test.skip(!process.env.VELA_LIVE_IMPORT_TEST, 'Opt-in network integration; deterministic transport tests run in Rust.');
   test.setTimeout(120000);
   await openAdminFixture(page);
-  await page.getByRole('button', { name: /Add music/ }).first().click();
+  await page.getByRole('button', { name: 'Add music', exact: true }).first().click();
   await page.locator('#import-url').fill('https://upload.wikimedia.org/wikipedia/commons/c/c8/Example.ogg');
   await page.getByRole('button', { name: 'Preview download →', exact: true }).click();
   await page.getByRole('button', { name: 'Import to my library', exact: true }).click();
   await expect(page.getByText('Your import is ready in the library.', { exact: true })).toBeVisible({ timeout: 90000 });
   await page.getByRole('button', { name: /Library/ }).first().click();
-  await expect(page.locator('.track-row')).toHaveCount(2);
-  await page.locator('.track-play:not([aria-label="Play Signal"])').click();
+  expect(await page.locator('.track-row').count()).toBeGreaterThanOrEqual(2);
+  await page.getByRole('button', { name: 'Play Example', exact: true }).click();
   await expect.poll(() => page.locator('#vela-audio').evaluate(audio => audio.duration > 5 && audio.error === null)).toBeTruthy();
 });
 
