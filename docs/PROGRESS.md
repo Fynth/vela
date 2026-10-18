@@ -21,6 +21,23 @@ correctly shows "Not established"). No schema, server HTTP, native or original-d
 runtime change. The live runtime was subsequently upgraded to0.12.1; existing
 analysis rows remain spectral-1 until explicitly reanalyzed.
 
+## Native cached-peer age + Retry live0.12.2 — verified (2026-10-18)
+
+Cached public metadata now carries its fetch time into the search result. The
+browse-only label discloses a bounded age (`just now`/minutes/hours/days) and each
+cached peer offers an explicit Retry live action. A retry re-queries only that
+canonical origin with the current query; a successful answer replaces the cached
+result with live metadata, while failure keeps the browse-only cached rows and never
+reenables playback. There is no background refresh.
+
+The real WebKitGTK journey seeds a one-hour-old cache for an unreachable saved origin,
+asserts the age and Retry live control, runs the retry, and verifies it remains
+browse-only when the origin is still unreachable; live peers, pagination, cached
+fallback and remote queue still pass. Evidence:`target/checks/native-cache-retry/`;
+26/28 desktop tests plus both opt-ins, strict Clippy/fmt. Source postdates the
+preserved0.12.2 desktop archive; next native package will include it. No schema,
+server HTTP, web or original-data/runtime change.
+
 ## 0.12.2 spectral-3 + pagination runtime handover — verified (2026-10-18, `12a1f76`)
 
 `target/releases/vela-0.12.2-{x86_64-unknown-linux-gnu,source}.tar.gz` and

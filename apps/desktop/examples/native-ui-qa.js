@@ -259,6 +259,12 @@ try {
     assert(!button(`Load more from ${config.peerOrigin}/`), 'Exhausted search peer removes its Load more');
     const cachedRow = [...document.querySelectorAll('[data-public-track-id][data-public-origin]')].find(row => row.dataset.publicOrigin.startsWith(config.cachedOrigin));
     assert(cachedRow && cachedRow.dataset.publicCached === 'true' && !cachedRow.querySelector('button'), 'Unreachable saved peer falls back to browse-only cached metadata');
+    const cachedSummary = document.querySelector(`[data-public-peer-summary][data-public-origin="${config.cachedOrigin}/"]`);
+    assert(cachedSummary && (cachedSummary.textContent || '').includes('1h old'), 'Cached results disclose their age');
+    assert(button(`Retry live for ${config.cachedOrigin}/`), 'Cached results offer an explicit live retry');
+    await click(`Retry live for ${config.cachedOrigin}/`);
+    await wait(() => button(`Retry live for ${config.cachedOrigin}/`) && !document.body.textContent.includes('Retrying…'), 'Cached peer live retry');
+    assert(document.querySelector(`[data-public-peer-summary][data-public-origin="${config.cachedOrigin}/"]`)?.dataset.publicPeerCached === 'true', 'Failed live retry remains browse-only cached metadata');
     await capture('public-search-dark');
     const peer2Row = [...document.querySelectorAll('[data-public-track-id][data-public-origin]')].find(row => row.dataset.publicOrigin.startsWith(config.peer2Origin));
     assert(peer2Row, 'Second saved origin is represented in unified results');

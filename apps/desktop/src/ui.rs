@@ -157,6 +157,8 @@ struct Ui {
     remote_more_error: Signal<String>,
     remote_peer_more_busy: Signal<String>,
     remote_peer_more_error: Signal<String>,
+    remote_retry_busy: Signal<String>,
+    remote_retry_error: Signal<String>,
     saved_peers: Signal<Vec<String>>,
     queue: Signal<Vec<Track>>,
     order: Signal<PlaybackOrder>,
@@ -283,6 +285,8 @@ impl Ui {
         self.remote_more_error.set(String::new());
         self.remote_peer_more_busy.set(String::new());
         self.remote_peer_more_error.set(String::new());
+        self.remote_retry_busy.set(String::new());
+        self.remote_retry_error.set(String::new());
         self.queue.set(Vec::new());
         self.order.set(PlaybackOrder::default());
         self.shuffle.set(false);
@@ -1499,6 +1503,23 @@ fn clear_queue(mut ui: Ui) {
         .set("Queue cleared. Temporary audio released.".into());
 }
 
+fn cached_age_label(fetched_at: u64) -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(fetched_at);
+    let age = now.saturating_sub(fetched_at);
+    if age < 60 {
+        "just now".into()
+    } else if age < 3_600 {
+        format!("{}m old", age / 60)
+    } else if age < 86_400 {
+        format!("{}h old", age / 3_600)
+    } else {
+        format!("{}d old", age / 86_400)
+    }
+}
+
 fn time_label(milliseconds: u64) -> String {
     let seconds = milliseconds / 1000;
     format!("{}:{:02}", seconds / 60, seconds % 60)
@@ -2189,6 +2210,55 @@ fn load_more_peer(mut ui: Ui, origin: String) {
     });
 }
 
+fn retry_peer(mut ui: Ui, origin: String) {
+    if !ui.remote_retry_busy.peek().is_empty() || *ui.view.peek() != "public" {
+        return;
+    }
+    let query = ui.remote_query.peek().trim().to_string();
+    if query.is_empty() {
+        return;
+    }
+    let Some(account) = ui.account.peek().clone().filter(|_| ui.signed_in()) else {
+        return;
+    };
+    let ticket = ui.remote_gate.begin(account.epoch);
+    ui.remote_retry_busy.set(origin.clone());
+    ui.remote_retry_error.set(String::new());
+    spawn(async move {
+        let result = crate::remote::search_peers(
+            std::slice::from_ref(&origin),
+            &query,
+            ticket.cancel.clone(),
+        )
+        .await;
+        if !ticket.current(&ui)
+            || *ui.view.peek() != "public"
+            || ui.remote_query.peek().trim() != query
+        {
+            return;
+        }
+        let mut results = ui.remote_results.peek().clone();
+        let Some(index) = results.iter().position(|peer| peer.origin == origin) else {
+            return;
+        };
+        ui.remote_retry_busy.set(String::new());
+        match result {
+            Ok(peers) if peers.len() == 1 && peers[0].origin == origin => {
+                results[index] = peers[0].clone();
+                ui.remote_results.set(results);
+            }
+            Ok(_) => ui
+                .remote_retry_error
+                .set("The public server returned an unexpected result.".into()),
+            Err(error) => {
+                if !expired(ui.clone(), &error) {
+                    ui.remote_retry_error.set(error);
+                }
+            }
+        }
+    });
+}
+
 fn save_public_peer(mut ui: Ui) {
     let Some(preview) = ui.remote_preview.peek().clone() else {
         return;
@@ -2241,6 +2311,8 @@ fn public_view(ui: Ui) -> Element {
     let more_error = ui.remote_more_error.read().clone();
     let peer_more_busy = ui.remote_peer_more_busy.read().clone();
     let peer_more_error = ui.remote_peer_more_error.read().clone();
+    let retry_busy = ui.remote_retry_busy.read().clone();
+    let retry_error = ui.remote_retry_error.read().clone();
     let mut query = ui.remote_query;
     let mut origin = ui.remote_origin;
     rsx! {section {class:"native-library","aria-label":"Public catalogs",
@@ -2268,6 +2340,9 @@ fn public_view(ui: Ui) -> Element {
                         let peer_cached = peer.cached;
                         let peer_has_more = peer.next_cursor.is_some();
                         let peer_more_origin = peer.origin.clone();
+                        let peer_cached_age = peer.cached_at.map(cached_age_label).unwrap_or_default();
+                        let retry_origin = peer.origin.clone();
+                        let retry_ui = ui.clone();
                         let more_ui = ui.clone();
                         rsx! {
                             article { class: "native-queue-row", key: "search-{peer.origin}", "data-public-origin": "{peer.origin}", "data-public-peer-summary": "true", "data-public-peer-error": "{peer_error_text}", "data-public-peer-cached": "{peer.cached}",
@@ -2275,7 +2350,7 @@ fn public_view(ui: Ui) -> Element {
                                 div { class: "native-queue-select",
                                     div { strong { "Public origin" } small { "{peer_label}" } }
                                 }
-                                if peer_cached { small { "Cached metadata · stream unverified" } } else if peer_error.is_some() { small { "Unavailable" } } else { span { class: "queue-current", "{peer.items.len()} results" } }
+                                if peer_cached { small { "Cached metadata · {peer_cached_age} · stream unverified" } button { class: "button secondary small", "aria-label": "Retry live for {peer.origin}", disabled: retry_busy == peer.origin, onclick: move |_| retry_peer(retry_ui.clone(), retry_origin.clone()), if retry_busy == retry_origin { "Retrying…" } else { "Retry live" } } } else if peer_error.is_some() { small { "Unavailable" } } else { span { class: "queue-current", "{peer.items.len()} results" } }
                             }
                             if let Some(error) = peer_error { p { class: "muted", "{error}" } }
                             div { class: "native-queue-list",
@@ -2304,6 +2379,7 @@ fn public_view(ui: Ui) -> Element {
                 }
             }
             if !peer_more_error.is_empty() { p { class: "alert error", role: "alert", "{peer_more_error}" } }
+            if !retry_error.is_empty() { p { class: "alert error", role: "alert", "{retry_error}" } }
             div { class: "catalog-caption", p { "Saved public servers" } span { "NO SECRETS" } }
             div { class: "native-queue-list",
                 for peer in saved.iter().cloned() {
@@ -2591,6 +2667,8 @@ pub fn App() -> Element {
         remote_more_error: use_signal(String::new),
         remote_peer_more_busy: use_signal(String::new),
         remote_peer_more_error: use_signal(String::new),
+        remote_retry_busy: use_signal(String::new),
+        remote_retry_error: use_signal(String::new),
         saved_peers: use_signal(|| crate::peers::load().unwrap_or_default()),
         queue: use_signal(Vec::new),
         order: use_signal(PlaybackOrder::default),

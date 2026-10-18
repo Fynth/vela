@@ -226,7 +226,7 @@ def main():
                     cache_file.write_text(json.dumps({
                         'version': 1,
                         'origin': cached_origin + '/',
-                        'fetched_at': int(time.time()),
+                        'fetched_at': int(time.time()) - 3700,
                         'items': [{
                             'id': str(uuid.uuid4()), 'revision': 1, 'title': 'Cached Beacon',
                             'artist': 'Vela Test', 'album': 'Cached Album', 'genre': '',

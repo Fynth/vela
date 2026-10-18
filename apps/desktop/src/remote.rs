@@ -43,6 +43,7 @@ pub struct PeerSearch {
     pub items: Vec<PublicTrack>,
     pub error: Option<String>,
     pub cached: bool,
+    pub cached_at: Option<u64>,
     pub next_cursor: Option<String>,
 }
 
@@ -241,12 +242,13 @@ pub(crate) fn queue_target(current: usize, length: usize, delta: i32) -> Option<
 
 fn cached_or_error(origin: String, error: String) -> PeerSearch {
     match load_cached(&origin) {
-        Some(items) if !items.is_empty() => PeerSearch {
+        Some(entry) if !entry.items.is_empty() => PeerSearch {
             origin,
             server_id: None,
-            items,
+            items: entry.items,
             error: None,
             cached: true,
+            cached_at: Some(entry.fetched_at),
             next_cursor: None,
         },
         _ => PeerSearch {
@@ -255,6 +257,7 @@ fn cached_or_error(origin: String, error: String) -> PeerSearch {
             items: Vec::new(),
             error: Some(error),
             cached: false,
+            cached_at: None,
             next_cursor: None,
         },
     }
@@ -290,11 +293,16 @@ struct CachedCatalog {
     items: Vec<PublicTrack>,
 }
 
-fn load_cached(origin: &str) -> Option<Vec<PublicTrack>> {
+struct CachedEntry {
+    fetched_at: u64,
+    items: Vec<PublicTrack>,
+}
+
+fn load_cached(origin: &str) -> Option<CachedEntry> {
     load_cached_from(&cache_root()?, origin)
 }
 
-fn load_cached_from(root: &std::path::Path, origin: &str) -> Option<Vec<PublicTrack>> {
+fn load_cached_from(root: &std::path::Path, origin: &str) -> Option<CachedEntry> {
     let path = root.join(format!("{}.json", cache_key(origin)));
     let metadata = fs::metadata(&path).ok()?;
     if !metadata.is_file() || metadata.len() > MAX_CATALOG_BYTES as u64 {
@@ -304,6 +312,7 @@ fn load_cached_from(root: &std::path::Path, origin: &str) -> Option<Vec<PublicTr
     let cached: CachedCatalog = serde_json::from_slice(&bytes).ok()?;
     if cached.version != 1
         || cached.origin != origin
+        || cached.fetched_at == 0
         || cached.items.is_empty()
         || cached.items.len() > 50
         || cached
@@ -313,7 +322,10 @@ fn load_cached_from(root: &std::path::Path, origin: &str) -> Option<Vec<PublicTr
     {
         return None;
     }
-    Some(cached.items)
+    Some(CachedEntry {
+        fetched_at: cached.fetched_at,
+        items: cached.items,
+    })
 }
 
 fn save_cached(origin: &str, items: &[PublicTrack]) {
@@ -417,6 +429,7 @@ pub async fn search_peers(
                     items: preview.items,
                     error: None,
                     cached: false,
+                    cached_at: None,
                     next_cursor: preview.next_cursor,
                 },
                 Ok(Err(error)) => cached_or_error(origin, error),
@@ -596,8 +609,9 @@ mod cache_tests {
         let items = vec![track(uuid::Uuid::new_v4())];
         save_cached_to(&root, "https://offline.example.org/", &items);
         let loaded = load_cached_from(&root, "https://offline.example.org/").unwrap();
-        assert_eq!(loaded.len(), 1);
-        assert_eq!(loaded[0].id, items[0].id);
+        assert!(loaded.fetched_at > 0);
+        assert_eq!(loaded.items.len(), 1);
+        assert_eq!(loaded.items[0].id, items[0].id);
         assert!(load_cached_from(&root, "https://other.example.org/").is_none());
         #[cfg(unix)]
         {

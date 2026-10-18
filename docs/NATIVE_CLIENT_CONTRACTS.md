@@ -85,8 +85,10 @@ clear the control when exhausted. There is no merged global cursor or automatic
 cache refresh. A successful catalog response
 is cached as public metadata under the user cache directory (atomic private0600,
 versioned, at most64 files/128KiB each); when a saved peer is unreachable, search
-returns its cached rows as **browse-only** (`Cached metadata · stream unverified`)
-with no play action. Cached metadata is never treated as a current grant.
+returns its cached rows as **browse-only** (`Cached metadata · <age> · stream
+unverified`) with no play action and an explicit Retry live action. A failed retry
+stays cached; a successful retry replaces that origin with live metadata. Cached
+metadata is never treated as a current grant, and there is no background refresh.
 - `playback.rs` (reused by path from the web crate): bounded occurrence indices,
   fair shuffle deck/history, explicit next priority, repeat semantics. Structural
   queue edits synchronize the order model; metadata does not reset traversal.
