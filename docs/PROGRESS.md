@@ -21,7 +21,7 @@ correctly shows "Not established"). No schema, server HTTP, native or original-d
 runtime change. The live runtime was subsequently upgraded to0.12.1; existing
 analysis rows remain spectral-1 until explicitly reanalyzed.
 
-## Native explicit offline copies0.12.2 — verified (2026-10-18)
+## Native explicit offline copies0.12.2 — verified (2026-10-18, `46bd390`)
 
 The native Library now offers an explicit per-track Save offline action. It downloads
 through the existing validated authorized-original path (exact size/BLAKE3 ETag,
