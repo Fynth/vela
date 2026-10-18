@@ -21,7 +21,7 @@ correctly shows "Not established"). No schema, server HTTP, native or original-d
 runtime change. The live runtime was subsequently upgraded to0.12.1; existing
 analysis rows remain spectral-1 until explicitly reanalyzed.
 
-## Native public preview cursor pagination0.12.1 — verified (2026-10-18)
+## Native public preview cursor pagination0.12.1 — verified (2026-10-18, `2bf1936`)
 
 The native Public preview now follows a peer's validated public-catalog `next_cursor`
 through a bounded Load more control (20 records/page). Each page revalidates the
