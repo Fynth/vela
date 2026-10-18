@@ -85,9 +85,15 @@ def main():
                 raise RuntimeError('Packaged desktop window did not appear')
             screenshot = Path('/tmp') / 'vela-desktop-package-launch.png'
             subprocess.run(['import', '-window', window, str(screenshot)], check=True)
-            process.send_signal(signal.SIGTERM)
-            if process.wait(timeout=20) != 0:
-                raise RuntimeError('Packaged desktop did not exit cleanly on SIGTERM')
+            subprocess.run(['xdotool', 'windowclose', window], check=True)
+            try:
+                exit_code = process.wait(timeout=20)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+                raise RuntimeError('Packaged desktop did not exit after a normal window close')
+            if exit_code != 0:
+                raise RuntimeError('Packaged desktop did not exit cleanly after a normal window close')
             report['launched'] = True
             report['window_title'] = 'Vela Music'
             report['screenshot'] = str(screenshot)
