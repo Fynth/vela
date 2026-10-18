@@ -3,6 +3,12 @@
 //! Client progress is a personal journal, not proof of physical sound or a
 //! public popularity signal. Every write serializes consent and ownership with
 //! the progress mutation; a privacy change invalidates all prior revisions.
+//!
+//! Owner reads (`history`, `export`) run in one deferred read snapshot: they
+//! take no writer reservation and perform no physical deletion. Retention is
+//! applied to the read as a cutoff only, so expired rows stay invisible even
+//! though they may outlive the read until the scheduled retention worker calls
+//! [`ListeningService::prune`].
 use crate::{Error, Result, now};
 use sqlx::{Row, Sqlite, SqlitePool, Transaction, sqlite::SqliteRow};
 use vela_domain::*;
@@ -195,8 +201,11 @@ impl ListeningService {
         }
         let cursor = query.cursor.as_deref().map(parse_cursor).transpose()?;
         let timestamp = now();
-        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        prune_owner(&mut tx, &user.id, timestamp).await?;
+        // One read snapshot, never a writer reservation: a concurrent record,
+        // clear or retention prune must not wait behind this read, and an open
+        // write must not make this read wait for the busy timeout. The cutoff
+        // below is what hides expired rows; a read never deletes them.
+        let mut tx = self.read_snapshot().await?;
         let retention = retention(&mut tx, &user.id).await?;
         let cutoff = timestamp - i64::from(retention) * DAY;
         let totals = sqlx::query("SELECT COUNT(*) total_listens,COALESCE(SUM(s.listened_ms),0) total_listened_ms FROM listening_sessions s JOIN tracks t ON t.id=s.track_id AND t.owner_id=s.user_id WHERE s.user_id=? AND s.qualified=1 AND s.started_at>=?")
@@ -253,10 +262,13 @@ impl ListeningService {
         Ok(page)
     }
 
+    /// Bounded private export of the caller's own retained sessions. Consent
+    /// state and retention are read from the same snapshot as the events, so a
+    /// concurrent privacy change can never produce a mixed `enabled`/events
+    /// answer. The export is a read: it neither reserves a writer nor prunes.
     pub async fn export(&self, user: &User) -> Result<ListeningExport> {
         let timestamp = now();
-        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        prune_owner(&mut tx, &user.id, timestamp).await?;
+        let mut tx = self.read_snapshot().await?;
         let row =
             sqlx::query("SELECT enabled,retention_days FROM listening_preferences WHERE user_id=?")
                 .bind(&user.id)
@@ -373,6 +385,20 @@ impl ListeningService {
         Ok(result)
     }
 
+    /// The only entry point for owner history/export reads. SQLite `BEGIN` is
+    /// deferred, so this transaction reserves no writer slot: it runs
+    /// concurrently with records, erasure and retention while still seeing one
+    /// consistent snapshot of consent, retention and events. `BEGIN IMMEDIATE`
+    /// and every `DELETE` are forbidden inside it; the query_only regression
+    /// test rejects those statement classes.
+    async fn read_snapshot(&self) -> Result<Transaction<'_, Sqlite>> {
+        Ok(self.pool.begin().await?)
+    }
+
+    /// Physical retention deletion for every owner; the supervised retention
+    /// worker calls it hourly. User-facing reads never call it: they apply the
+    /// same retention cutoff instead, so the rows this removes were already
+    /// invisible to their owners and no visible value changes here.
     pub async fn prune(&self) -> Result<u64> {
         let result = sqlx::query("DELETE FROM listening_sessions WHERE started_at < ? - COALESCE((SELECT retention_days FROM listening_preferences p WHERE p.user_id=listening_sessions.user_id),90)*86400")
             .bind(now()).execute(&self.pool).await?;
@@ -547,6 +573,7 @@ mod tests {
 
     struct Fixture {
         _directory: tempfile::TempDir,
+        path: std::path::PathBuf,
         pool: SqlitePool,
         service: ListeningService,
         alice: User,
@@ -558,6 +585,7 @@ mod tests {
     impl Fixture {
         async fn new() -> Self {
             let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("vela.db");
             let pool = crate::database::open(directory.path()).await.unwrap();
             let alice = user(&pool, "alice", true).await;
             let bob = user(&pool, "bob", false).await;
@@ -565,6 +593,7 @@ mod tests {
             let foreign_track = seed_track(&pool, &bob, 120_000).await;
             Self {
                 _directory: directory,
+                path,
                 service: ListeningService::new(pool.clone()),
                 pool,
                 alice,
@@ -1344,5 +1373,266 @@ mod tests {
                 .unwrap()
                 .device_enabled
         );
+    }
+
+    // AUD-13: owner history/export read one snapshot and reserve no writer, so
+    // a concurrent writer is never serialized behind a read (and vice versa).
+    #[tokio::test]
+    async fn history_and_export_read_a_snapshot_without_waiting_for_an_open_writer() {
+        let fixture = Fixture::new().await;
+        let prefs = fixture.enable().await;
+        fixture
+            .service
+            .record(
+                &fixture.alice,
+                fixture.batch(prefs.revision, vec![fixture.event(30_000)]),
+            )
+            .await
+            .unwrap();
+        // An independent pooled connection holds the single SQLite write
+        // transaction open with an uncommitted row. `BEGIN IMMEDIATE` on the
+        // read connection would wait for the whole 10s busy_timeout and then
+        // fail; a deferred read snapshot must complete against the last
+        // committed snapshot instead.
+        let mut writer = fixture.pool.begin_with("BEGIN IMMEDIATE").await.unwrap();
+        sqlx::query("INSERT INTO listening_sessions(user_id,session_id,device_id,track_id,sequence,listened_ms,position_ms,started_at,updated_at,qualified,ended) VALUES(?,?,?,?,1,30000,30000,?,?,1,1)")
+            .bind(&fixture.alice.id)
+            .bind(uuid::Uuid::new_v4().to_string())
+            .bind(&fixture.device)
+            .bind(&fixture.track)
+            .bind(now() - 60)
+            .bind(now())
+            .execute(&mut *writer)
+            .await
+            .unwrap();
+        let started = std::time::Instant::now();
+        let page = fixture
+            .service
+            .history(&fixture.alice, &ListeningHistoryQuery::default())
+            .await
+            .expect("history must not require a writer reservation");
+        let exported = fixture
+            .service
+            .export(&fixture.alice)
+            .await
+            .expect("export must not require a writer reservation");
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed < std::time::Duration::from_secs(2),
+            "history/export serialized behind an open writer for {elapsed:?}"
+        );
+        assert_eq!((page.total_listens, page.items.len()), (1, 1));
+        assert_eq!(exported.events.len(), 1);
+        // The uncommitted row stays invisible until its writer commits, then
+        // both reads observe it: one snapshot per call, no stale reuse.
+        writer.commit().await.unwrap();
+        let committed = fixture
+            .service
+            .history(&fixture.alice, &ListeningHistoryQuery::default())
+            .await
+            .unwrap();
+        assert_eq!((committed.total_listens, committed.items.len()), (2, 2));
+        assert_eq!(
+            fixture
+                .service
+                .export(&fixture.alice)
+                .await
+                .unwrap()
+                .events
+                .len(),
+            2
+        );
+    }
+
+    // AUD-13: physical retention deletion belongs to the supervised retention
+    // worker, never to a user-facing read.
+    #[tokio::test]
+    async fn history_and_export_hide_expired_rows_without_deleting_them() {
+        let fixture = Fixture::new().await;
+        let prefs = fixture.enable().await;
+        fixture
+            .service
+            .record(
+                &fixture.alice,
+                fixture.batch(prefs.revision, vec![fixture.event(30_000)]),
+            )
+            .await
+            .unwrap();
+        sqlx::query("UPDATE listening_sessions SET started_at=? WHERE user_id=?")
+            .bind(now() - 91 * DAY)
+            .bind(&fixture.alice.id)
+            .execute(&fixture.pool)
+            .await
+            .unwrap();
+        let page = fixture
+            .service
+            .history(&fixture.alice, &ListeningHistoryQuery::default())
+            .await
+            .unwrap();
+        let exported = fixture.service.export(&fixture.alice).await.unwrap();
+        assert!(page.items.is_empty() && page.next_cursor.is_none());
+        assert_eq!((page.total_listens, page.total_listened_ms), (0, 0));
+        assert!(exported.events.is_empty());
+        assert!(exported.enabled);
+        assert_eq!(exported.retention_days, 90);
+        assert_eq!(
+            fixture.count(&fixture.alice).await,
+            1,
+            "owner reads must not prune retained rows"
+        );
+        // The worker path still deletes the expired row and changes nothing a
+        // user can read: the cutoff already hid it before the deletion.
+        assert_eq!(fixture.service.prune().await.unwrap(), 1);
+        assert_eq!(fixture.count(&fixture.alice).await, 0);
+        let pruned_page = fixture
+            .service
+            .history(&fixture.alice, &ListeningHistoryQuery::default())
+            .await
+            .unwrap();
+        assert!(pruned_page.items.is_empty() && pruned_page.next_cursor.is_none());
+        assert_eq!(
+            (pruned_page.total_listens, pruned_page.total_listened_ms),
+            (0, 0)
+        );
+        let pruned = fixture.service.export(&fixture.alice).await.unwrap();
+        assert!(pruned.events.is_empty());
+        assert!(pruned.enabled);
+        assert_eq!(pruned.retention_days, 90);
+    }
+
+    // AUD-13 statement-level assertion: PRAGMA query_only rejects every write
+    // statement and `BEGIN IMMEDIATE` with SQLITE_READONLY, so a read-only
+    // connection accepts the history/export path only if it issues no writer
+    // statement at all.
+    #[tokio::test]
+    async fn history_and_export_issue_only_statements_a_query_only_connection_accepts() {
+        let fixture = Fixture::new().await;
+        let prefs = fixture.enable().await;
+        let event = fixture.event(30_000);
+        fixture
+            .service
+            .record(
+                &fixture.alice,
+                fixture.batch(prefs.revision, vec![event.clone()]),
+            )
+            .await
+            .unwrap();
+        let pool = sqlx::SqlitePool::connect_with(
+            sqlx::sqlite::SqliteConnectOptions::new()
+                .filename(&fixture.path)
+                .pragma("query_only", "true"),
+        )
+        .await
+        .unwrap();
+        let reader = ListeningService::new(pool.clone());
+        let page = reader
+            .history(&fixture.alice, &ListeningHistoryQuery::default())
+            .await
+            .expect("history must issue no writer statement");
+        assert_eq!((page.total_listens, page.items.len()), (1, 1));
+        assert_eq!(page.items[0].session_id, event.session_id);
+        let exported = reader
+            .export(&fixture.alice)
+            .await
+            .expect("export must issue no writer statement");
+        assert_eq!(exported.events.len(), 1);
+        assert_eq!(exported.events[0].progress, event);
+        // The probe is meaningful: the same connection rejects the writer path.
+        assert!(
+            reader
+                .record(
+                    &fixture.alice,
+                    fixture.batch(prefs.revision, vec![fixture.event(30_000)])
+                )
+                .await
+                .is_err()
+        );
+        pool.close().await;
+    }
+
+    // A snapshot read never weakens revocation: erasure still deletes retained
+    // rows, late batches still fail closed, and the export still reports the
+    // post-erasure consent state.
+    #[tokio::test]
+    async fn revocation_still_deletes_history_and_fails_late_writes_and_exports_closed() {
+        let fixture = Fixture::new().await;
+        let prefs = fixture.enable().await;
+        fixture
+            .service
+            .record(
+                &fixture.alice,
+                fixture.batch(prefs.revision, vec![fixture.event(30_000)]),
+            )
+            .await
+            .unwrap();
+        let disabled = fixture
+            .service
+            .update_preferences(
+                &fixture.alice,
+                UpdateListeningPreferences {
+                    revision: prefs.revision,
+                    enabled: false,
+                    retention_days: 90,
+                    device_id: fixture.device.clone(),
+                    device_enabled: false,
+                },
+            )
+            .await
+            .unwrap();
+        assert!(!disabled.enabled && !disabled.device_enabled);
+        // Retained-but-disabled history stays readable by its owner: disabling
+        // collection hides nothing from the account that owns the rows.
+        assert_eq!(
+            fixture
+                .service
+                .history(&fixture.alice, &ListeningHistoryQuery::default())
+                .await
+                .unwrap()
+                .total_listens,
+            1
+        );
+        let exported = fixture.service.export(&fixture.alice).await.unwrap();
+        assert!(!exported.enabled);
+        assert_eq!(exported.events.len(), 1);
+        assert!(matches!(
+            fixture
+                .service
+                .record(
+                    &fixture.alice,
+                    fixture.batch(prefs.revision, vec![fixture.event(30_000)])
+                )
+                .await,
+            Err(Error::Conflict(_))
+        ));
+        let cleared = fixture
+            .service
+            .clear(&fixture.alice, &fixture.device)
+            .await
+            .unwrap();
+        assert!(!cleared.enabled && !cleared.device_enabled);
+        assert!(cleared.revision > disabled.revision);
+        assert_eq!(fixture.count(&fixture.alice).await, 0);
+        let page = fixture
+            .service
+            .history(&fixture.alice, &ListeningHistoryQuery::default())
+            .await
+            .unwrap();
+        assert!(page.items.is_empty());
+        assert_eq!((page.total_listens, page.total_listened_ms), (0, 0));
+        let exported = fixture.service.export(&fixture.alice).await.unwrap();
+        assert!(!exported.enabled);
+        assert!(exported.events.is_empty());
+        assert_eq!(exported.retention_days, 90);
+        assert!(matches!(
+            fixture
+                .service
+                .record(
+                    &fixture.alice,
+                    fixture.batch(cleared.revision, vec![fixture.event(30_000)])
+                )
+                .await,
+            Err(Error::Forbidden)
+        ));
+        assert_eq!(fixture.count(&fixture.alice).await, 0);
     }
 }
