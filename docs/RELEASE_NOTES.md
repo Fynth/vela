@@ -1,3 +1,10 @@
+# 0.12.6 — native session persistence + offline integrity
+
+Patch release: opt-in Linux Secret Service session resume (opaque token only, explicit
+continue, sign-out deletion), v2 BLAKE3 offline manifests with verified same-fd
+playback, trusted-keyring/transactional hardening, and a bounded startup offline
+integrity sweep. No schema migration, HTTP contract change or original-data rewrite.
+
 # 0.12.5 — spectral-4 key + native folders
 
 Patch release: DSP spectral-4 adds a heuristic Krumhansl key with profile margin; web
