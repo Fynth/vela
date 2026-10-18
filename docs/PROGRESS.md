@@ -21,7 +21,7 @@ correctly shows "Not established"). No schema, server HTTP, native or original-d
 runtime change. The live runtime was subsequently upgraded to0.12.1; existing
 analysis rows remain spectral-1 until explicitly reanalyzed.
 
-## 0.12.2 spectral-3 + pagination runtime handover — verified (2026-10-18)
+## 0.12.2 spectral-3 + pagination runtime handover — verified (2026-10-18, `12a1f76`)
 
 `target/releases/vela-0.12.2-{x86_64-unknown-linux-gnu,source}.tar.gz` and
 `vela-0.12.2-SHA256SUMS` were built from commit `e9d1954` (native
