@@ -74,6 +74,9 @@ npm ci --prefix tests/browser
 cargo build --locked -p vela-server
 cargo build --locked -p vela-desktop --example native-ui-qa --features native-qa
 python3 scripts/verify_native_client.py --evidence target/checks/native-window --test-audio-engine
+# Portable local desktop package (no external publication):
+scripts/package-desktop-linux.sh
+python3 scripts/verify_desktop_package.py target/desktop-releases/vela-desktop-*.tar.gz --launch
 ```
 
 See [experience parity](docs/SPOTIFY_PARITY_MATRIX.md), [product flows](docs/PRODUCT_SPEC.md), [design system](docs/DESIGN_SYSTEM.md), [progress](docs/PROGRESS.md), [architecture](docs/ARCHITECTURE.md), [roadmap](docs/ROADMAP.md), [security](docs/SECURITY.md), [performance](docs/PERFORMANCE.md), [known limitations](docs/KNOWN_LIMITATIONS.md), [native client contract](docs/NATIVE_CLIENT_CONTRACTS.md), and [research](docs/RESEARCH.md). CI configuration does not mean CI has run. The0.12 Linux x86_64 desktop client is a real native Dioxus/Rodio/MPRIS application with a verified private library/queue/playback slice; packaged installers, secure credential persistence, mobile background audio, Windows/macOS builds, offline downloads, unified multi-server playback, OpenSubsonic and standards-based social federation remain roadmap work. Persistent same-build Linux user supervision is available through the validated [user-service installer](docs/USER_SERVICE.md).

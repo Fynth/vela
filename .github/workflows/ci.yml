@@ -19,7 +19,7 @@ jobs:
       - run: cargo clippy --locked --workspace --all-targets -- -D warnings
       - run: cargo test --locked --workspace -- --test-threads=2
       - run: cargo clippy --locked -p vela-desktop --all-targets --features native-qa -- -D warnings
-      - run: cargo build --locked -p vela-desktop
+      - run: cargo build --locked --release -p vela-desktop
       - run: cargo build --locked --release -p vela-server
       - run: python3 scripts/verify_shutdown.py --runs 10 --worker-failure
       - run: cargo clippy --locked -p vela-web --target wasm32-unknown-unknown -- -D warnings

@@ -96,6 +96,18 @@ native listening events. Only Linux x86_64 is built/tested on this host; Windows
 macOS, Android and iOS remain separate targets. Hardware output, screen readers and
 physical media keys are not certified.
 
+## Portable package
+
+`scripts/package-desktop-linux.sh` builds a portable x86_64 tar archive containing the
+release binary, `vela-desktop.desktop`, scalable icon, README, LICENSE and BUILD.txt.
+`scripts/verify_desktop_package.py --launch` validates the exact manifest/modes,
+`--version`, missing-library check, a real GUI launch/screenshot and normal window
+close with zero temporary originals. This is not a `.deb`/AppImage/Flatpak, signature,
+app-store or physical-audio certification. Evidence:
+`target/desktop-releases/vela-desktop-0.12.0-linux-x86_64-unknown-linux-gnu.tar.gz`
+(SHA256 `4d6c67bb154aa566cf7f19bf9f65de477c86512685fc891a324abc711b85cbad`),
+`target/checks/desktop-package-verify.log` and `desktop-package-screens/`.
+
 ## Verification
 
 - `cargo fmt --all -- --check`; strict Clippy `-p vela-desktop --all-targets

@@ -1,5 +1,27 @@
 # Verified progress
 
+## Portable Linux desktop package0.12 — verified launch smoke (2026-10-18)
+
+`scripts/package-desktop-linux.sh` built a portable x86_64 Linux desktop archive from
+the verified native client (app source commit `692c083d0d64f641cbcd65dd08de0ab9b5a96232`):
+`target/desktop-releases/vela-desktop-0.12.0-linux-x86_64-unknown-linux-gnu.tar.gz`
+SHA256 `4d6c67bb154aa566cf7f19bf9f65de477c86512685fc891a324abc711b85cbad`
+(4.77MB). It contains the release binary, desktop entry, scalable icon, README,
+LICENSE and BUILD.txt; no external publication or installation occurred.
+
+`scripts/verify_desktop_package.py --launch` extracted the archive to a disposable
+directory, checked the exact file manifest/modes, ran the packaged binary's
+`--version` (`vela-desktop 0.12.0`), verified no missing shared libraries with `ldd`,
+launched the real packaged GUI against an unreachable origin so only the sign-in view
+appears, waited for styles, captured `target/checks/desktop-package-screens/vela-desktop-package-launch.png`,
+closed the window normally and observed exit0 with **zero temporary originals**.
+The package is a portable tar archive, not a `.deb`/AppImage/Flatpak, signed artifact
+or app-store build; the smoke does not play audio, access user data or certify
+physical sound/screen readers. Release build is now covered by the CI build step
+(remote CI still unexecuted). Evidence:
+`target/checks/desktop-package-{2,verify}.log` and the preserved pre-fix archive under
+`target/checks/desktop-package-warning-artifact/`.
+
 ## Verified0.12.0 package and preserved original-data runtime upgrade (2026-10-18)
 
 Package source `d3bde0c8e1c93324cf8628d8def8ba02e824bac4`. Local review artifacts

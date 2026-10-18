@@ -92,8 +92,9 @@ handoff and Apple/Android hardware validation remain unfinished.
 
 The0.12 Linux x86_64 desktop application is a real Dioxus/WebKitGTK window with a
 Rodio/CPAL output thread and MPRIS2 observer, verified against an isolated fixture
-server/account/media. It is not an installer, AppImage/deb/rpm/Flatpak, signed
-artifact, auto-updated client or release-ready desktop distribution. The window was
+server/account/media. A portable x86_64 tar package now has an exact-manifest/ldd/version check and a real
+styled-window launch/close smoke. It is not an installer, AppImage/deb/rpm/Flatpak,
+signed artifact, auto-updated client or release-ready desktop distribution. The window was
 created only on this Hyprland/X11 host; GNOME/KDE/Wayland variants, screen readers,
 physical audio output, headphone buttons and system sleep/resume are not certified.
 
