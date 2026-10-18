@@ -153,6 +153,8 @@ struct Ui {
     remote_results: Signal<Vec<crate::remote::PeerSearch>>,
     remote_searching: Signal<bool>,
     remote_search_error: Signal<String>,
+    remote_more_busy: Signal<bool>,
+    remote_more_error: Signal<String>,
     saved_peers: Signal<Vec<String>>,
     queue: Signal<Vec<Track>>,
     order: Signal<PlaybackOrder>,
@@ -275,6 +277,8 @@ impl Ui {
         self.remote_results.set(Vec::new());
         self.remote_searching.set(false);
         self.remote_search_error.set(String::new());
+        self.remote_more_busy.set(false);
+        self.remote_more_error.set(String::new());
         self.queue.set(Vec::new());
         self.order.set(PlaybackOrder::default());
         self.shuffle.set(false);
@@ -2026,6 +2030,63 @@ fn player_next(ui: Ui) {
     }
 }
 
+fn load_more_public(mut ui: Ui) {
+    let Some(preview) = ui.remote_preview.peek().clone() else {
+        return;
+    };
+    let Some(cursor) = preview.next_cursor.clone() else {
+        return;
+    };
+    if *ui.remote_more_busy.peek() || !ui.signed_in() || *ui.view.peek() != "public" {
+        return;
+    }
+    let Some(account) = ui.account.peek().clone() else {
+        return;
+    };
+    let origin = preview.origin;
+    let ticket = ui.remote_gate.begin(account.epoch);
+    ui.remote_more_busy.set(true);
+    ui.remote_more_error.set(String::new());
+    spawn(async move {
+        let result = crate::remote::more(&origin, &cursor, ticket.cancel.clone()).await;
+        if !ticket.current(&ui) || *ui.view.peek() != "public" {
+            return;
+        }
+        let current = ui.remote_preview.peek().clone();
+        if current.as_ref().is_none_or(|preview| {
+            preview.origin != origin || preview.next_cursor.as_deref() != Some(cursor.as_str())
+        }) {
+            return;
+        }
+        ui.remote_more_busy.set(false);
+        match result {
+            Ok(page) if page.origin == origin => {
+                let mut current = current.expect("preview checked above");
+                let mut seen = current
+                    .items
+                    .iter()
+                    .map(|track| track.id.clone())
+                    .collect::<std::collections::HashSet<_>>();
+                for track in page.items {
+                    if seen.insert(track.id.clone()) {
+                        current.items.push(track);
+                    }
+                }
+                current.next_cursor = page.next_cursor;
+                ui.remote_preview.set(Some(current));
+            }
+            Ok(_) => ui
+                .remote_more_error
+                .set("The public server changed origin; the page was ignored.".into()),
+            Err(error) => {
+                if !expired(ui.clone(), &error) {
+                    ui.remote_more_error.set(error);
+                }
+            }
+        }
+    });
+}
+
 fn search_saved_peers(mut ui: Ui) {
     let query = ui.remote_query.peek().trim().to_string();
     if query.is_empty() {
@@ -2110,6 +2171,9 @@ fn public_view(ui: Ui) -> Element {
     let explore = ui.clone();
     let save_current = ui.clone();
     let search = ui.clone();
+    let more = ui.clone();
+    let more_busy = *ui.remote_more_busy.read();
+    let more_error = ui.remote_more_error.read().clone();
     let mut query = ui.remote_query;
     let mut origin = ui.remote_origin;
     rsx! {section {class:"native-library","aria-label":"Public catalogs",
@@ -2219,6 +2283,12 @@ fn public_view(ui: Ui) -> Element {
                         }
                     }
                 }
+            }
+            if preview.next_cursor.is_some() {
+                div { class: "inline-form",
+                    button { class: "button secondary", disabled: more_busy, onclick: move |_| load_more_public(more.clone()), if more_busy { "Loading more…" } else { "Load more public records" } }
+                }
+                if !more_error.is_empty() { p { class: "alert error", role: "alert", "{more_error}" } }
             }
         }
     } }
@@ -2443,6 +2513,8 @@ pub fn App() -> Element {
         remote_results: use_signal(Vec::new),
         remote_searching: use_signal(|| false),
         remote_search_error: use_signal(String::new),
+        remote_more_busy: use_signal(|| false),
+        remote_more_error: use_signal(String::new),
         saved_peers: use_signal(|| crate::peers::load().unwrap_or_default()),
         queue: use_signal(Vec::new),
         order: use_signal(PlaybackOrder::default),

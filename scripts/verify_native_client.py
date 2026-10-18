@@ -137,10 +137,31 @@ def main():
                     publication_request = urllib.request.Request(peer_transport + '/api/publications', data=json.dumps({'track_id': peer_track['id'], 'license': 'CC-BY-4.0', 'attribution': 'Peer QA signal fixture', 'rights_evidence': 'https://peer.invalid/rights', 'allow_stream': True, 'allow_download': False, 'rights_confirmed': True}).encode(), headers={'Content-Type': 'application/json', 'X-CSRF-Token': peer_auth['csrf_token'], 'Origin': peer_transport})
                     with peer_opener.open(publication_request, timeout=15) as response:
                         json.load(response)
+                    for index in range(20):
+                        samples = 44_100 * 2
+                        tone = io.BytesIO()
+                        with wave.open(tone, 'wb') as output:
+                            output.setnchannels(1)
+                            output.setsampwidth(2)
+                            output.setframerate(44_100)
+                            frequency = 300 + index * 15
+                            output.writeframes(b''.join(
+                                struct.pack('<h', round(1800 * math.sin(2 * math.pi * frequency * sample / 44_100)))
+                                for sample in range(samples)
+                            ))
+                        data = tone.getvalue()
+                        boundary_n = 'VelaPeerN' + secrets.token_hex(16)
+                        body_n = f'--{boundary_n}\r\nContent-Disposition: form-data; name="file"; filename="Peer Window {index + 1:02}.wav"\r\nContent-Type: audio/wav\r\n\r\n'.encode() + data + f'\r\n--{boundary_n}--\r\n'.encode()
+                        request_n = urllib.request.Request(peer_transport + '/api/upload', data=body_n, headers={'Content-Type': f'multipart/form-data; boundary={boundary_n}', 'X-CSRF-Token': peer_auth['csrf_token'], 'Origin': peer_transport})
+                        with peer_opener.open(request_n, timeout=20) as response:
+                            track_n = json.load(response)['track']
+                        publication_n = urllib.request.Request(peer_transport + '/api/publications', data=json.dumps({'track_id': track_n['id'], 'license': 'CC0-1.0', 'attribution': f'Peer QA window {index + 1}', 'rights_evidence': f'https://peer.invalid/rights/{index + 1}', 'allow_stream': True, 'allow_download': False, 'rights_confirmed': True}).encode(), headers={'Content-Type': 'application/json', 'X-CSRF-Token': peer_auth['csrf_token'], 'Origin': peer_transport})
+                        with peer_opener.open(publication_n, timeout=15) as response:
+                            json.load(response)
                     with urllib.request.urlopen(peer_transport + '/api/public/catalog?limit=20', timeout=5) as response:
                         peer_catalog = json.load(response)
-                    if not peer_catalog.get('items') or not peer_catalog['items'][0].get('can_stream'):
-                        raise RuntimeError('Isolated peer public catalog did not expose the streaming fixture')
+                    if not peer_catalog.get('items') or not peer_catalog['items'][0].get('can_stream') or not peer_catalog.get('next_cursor'):
+                        raise RuntimeError('Isolated peer public catalog did not expose paginated streaming fixtures')
                     with urllib.request.urlopen(peer_transport + '/api/public/catalog?q=Vela&limit=20', timeout=5) as response:
                         if not json.load(response).get('items'):
                             raise RuntimeError('Isolated peer public search did not match its fixture')

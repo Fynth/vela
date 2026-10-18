@@ -207,7 +207,12 @@ try {
     await click('Explore public catalog');
     try { await wait(() => document.querySelectorAll('[data-public-track-id]').length >= 1, 'Second-server public catalog'); }
     catch { throw new Error(`Second-server public catalog failed (error=${el('.alert.error')?.textContent?.trim() || '-'} input=${el('#native-peer-origin')?.value || '-'} rows=${document.querySelectorAll('[data-public-track-id]').length})`); }
-    assert(document.querySelectorAll('[data-public-track-id]').length >= 1, 'Second-server public catalog exposes an explicitly published track');
+    await wait(() => document.querySelectorAll('[data-public-track-id]').length === 20, 'Paginated public catalog first page');
+    assert(document.querySelectorAll('[data-public-track-id]').length === 20 && button('Load more public records'), 'First public page exposes a cursor');
+    await click('Load more public records');
+    await wait(() => document.querySelectorAll('[data-public-track-id]').length === 21, 'Public catalog next page');
+    assert(document.querySelectorAll('[data-public-track-id]').length === 21, 'Public catalog cursor appends the remaining record without duplicates');
+    assert(!button('Load more public records'), 'Exhausted public catalog removes Load more');
     await click('Save this server');
     await wait(() => (el('.alert.notice')?.textContent || '').includes('Public server saved.'), 'Save public server');
     assert(document.querySelector('[aria-label^="Remove saved server"]'), 'Saved public server is listed');

@@ -21,6 +21,24 @@ correctly shows "Not established"). No schema, server HTTP, native or original-d
 runtime change. The live runtime was subsequently upgraded to0.12.1; existing
 analysis rows remain spectral-1 until explicitly reanalyzed.
 
+## Native public preview cursor pagination0.12.1 — verified (2026-10-18)
+
+The native Public preview now follows a peer's validated public-catalog `next_cursor`
+through a bounded Load more control (20 records/page). Each page revalidates the
+canonical origin, server identity, per-track IDs/text/duration and `next_cursor`
+equality with the last item; appended rows are deduplicated by ID and the control
+disappears when the cursor is exhausted. Unified saved-peer search remains capped at
+its first20 results per peer.
+
+The isolated peer now publishes21 distinct lawful stream fixtures. The real WebKitGTK
+journey sees exactly20 rows plus Load more, requests the next page, appends exactly
+one remaining row with no duplicates, and verifies Load more disappears; saved/cached
+peer behavior, public playback and remote Previous/Next still pass. Evidence:
+`target/checks/native-public-pagination/`;26/28 desktop tests plus both opt-ins,
+strict Clippy/fmt. This source slice is newer than the preserved0.12.1 desktop archive
+and will ship in the next native package. No schema, server HTTP, web or original-data
+runtime change.
+
 ## Native browse-only public metadata cache0.12.1 — verified (2026-10-18, `a3cb52c`; package `d7c0efb`)
 
 A successful native public catalog fetch is now cached as bounded public metadata

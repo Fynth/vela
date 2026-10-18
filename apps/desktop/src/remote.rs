@@ -56,6 +56,7 @@ pub struct RemotePreview {
     pub origin: String,
     pub server_id: String,
     pub items: Vec<PublicTrack>,
+    pub next_cursor: Option<String>,
 }
 
 struct Peer {
@@ -118,16 +119,29 @@ fn client() -> Result<Client, String> {
 }
 
 pub async fn preview(input: &str, cancel: CancellationToken) -> Result<RemotePreview, String> {
-    catalog(input, None, 20, cancel).await
+    catalog(input, None, 20, None, cancel).await
+}
+
+pub async fn more(
+    input: &str,
+    cursor: &str,
+    cancel: CancellationToken,
+) -> Result<RemotePreview, String> {
+    if cursor.parse::<uuid::Uuid>().is_err() {
+        return Err("The public catalog cursor is invalid.".into());
+    }
+    catalog(input, None, 20, Some(cursor), cancel).await
 }
 
 async fn catalog(
     input: &str,
     query: Option<&str>,
     limit: u32,
+    cursor: Option<&str>,
     cancel: CancellationToken,
 ) -> Result<RemotePreview, String> {
     if !(1..=20).contains(&limit)
+        || cursor.is_some_and(|cursor| cursor.parse::<uuid::Uuid>().is_err())
         || query.is_some_and(|query| {
             query.trim().is_empty() || query.len() > 128 || query.chars().any(char::is_control)
         })
@@ -140,6 +154,9 @@ async fn catalog(
         .append_pair("limit", &limit.to_string());
     if let Some(query) = query {
         url.query_pairs_mut().append_pair("q", query.trim());
+    }
+    if let Some(cursor) = cursor {
+        url.query_pairs_mut().append_pair("cursor", cursor);
     }
     let request = client()?
         .get(url)
@@ -174,6 +191,10 @@ async fn catalog(
     if advertised.as_str() != peer.canonical.as_str()
         || catalog.server_id.parse::<uuid::Uuid>().is_err()
         || catalog.items.len() > 20
+        || catalog.next_cursor.as_ref().is_some_and(|cursor| {
+            cursor.parse::<uuid::Uuid>().is_err()
+                || catalog.items.last().is_none_or(|track| track.id != *cursor)
+        })
         || catalog.items.iter().any(|track| {
             track.id.parse::<uuid::Uuid>().is_err()
                 || track.duration_ms <= 0
@@ -193,11 +214,14 @@ async fn catalog(
     {
         return Err(INVALID_RESPONSE.into());
     }
-    save_cached(peer.canonical.as_str(), &catalog.items);
+    if cursor.is_none() {
+        save_cached(peer.canonical.as_str(), &catalog.items);
+    }
     Ok(RemotePreview {
         origin: peer.canonical.as_str().to_owned(),
         server_id: catalog.server_id,
         items: catalog.items,
+        next_cursor: catalog.next_cursor,
     })
 }
 
@@ -380,7 +404,7 @@ pub async fn search_peers(
         async move {
             let result = tokio::time::timeout(
                 Duration::from_secs(5),
-                catalog(&origin, Some(&query), 20, cancel),
+                catalog(&origin, Some(&query), 20, None, cancel),
             )
             .await;
             match result {
