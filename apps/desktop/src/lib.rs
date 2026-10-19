@@ -13,6 +13,10 @@ pub mod offline;
 pub mod peers;
 #[path = "../../web/src/playback.rs"]
 pub mod playback;
+/// Device-only presentation preferences (app size + theme): one private versioned
+/// config document. It owns no credentials, session, media path or queue state and
+/// no renderer/audio authority.
+pub mod presentation;
 pub mod remote;
 pub mod session_store;
 pub mod ui;

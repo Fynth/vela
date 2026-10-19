@@ -203,7 +203,7 @@ try {
   await wait(() => position() >= 5900 && position() <= 6300 && phase() === 'Paused', 'Native seek remains paused');
   await click('Play'); await wait(() => phase() === 'Playing' && position() > 6400, 'Native resume after seek');
   await click('Pause'); await wait(() => phase() === 'Paused', 'Pause before queue edits');
-  await click('Change color theme');
+  await click('Use the light theme');
   assert(el('.native-app').dataset.theme === 'light', 'Functional light theme');
   await capture('queue-light');
   await click('Library');

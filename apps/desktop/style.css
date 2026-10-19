@@ -200,3 +200,106 @@ img.neutral-cover {
   display:block; padding:0; overflow:hidden;
   object-fit:cover; object-position:center; background:var(--raised);
 }
+
+/* ---------------------------------------------------------------------------
+   Device app size + theme (PRODUCT_EXPANSION 04_APPLICATION_SCALE.md, EX261).
+
+   Exactly one scale exists: the inline `zoom`/`--app-zoom` pair the presentation
+   adapter writes on the existing root `.native-app` wrapper from the validated
+   device preference. Nothing here stacks a second zoom, a `transform` scale or a
+   monitor-DPI multiplier, and 100% is an explicit no-op. Viewport units do not
+   follow `zoom`, so the shell divides them back out to stay exactly one zoomed
+   viewport tall; every use keeps the `1` fallback for an absent attribute.
+   --------------------------------------------------------------------------- */
+.native-app { --app-zoom: 1; }
+.native-app:has(>.native-sidebar) {
+  height: calc(100dvh / var(--app-zoom));
+  min-height: 0;
+}
+.native-app:not(:has(>.native-sidebar)) { min-height: calc(100vh / var(--app-zoom)); }
+.native-signin { min-height: calc(100vh / var(--app-zoom)); }
+.native-content>.alert.notice { max-width: min(420px, calc(100vw / var(--app-zoom) - 40px)); }
+.native-player:has(.preparation-progress),
+.native-player:has(.player-error) { max-height: calc(45vh / var(--app-zoom)); }
+
+/* System is a real desktop signal, not a heuristic: WebKitGTK resolves
+   `prefers-color-scheme` from the OS/GTK appearance setting. No readback of the
+   resolved value into Rust is claimed, so the stored choice stays "System". */
+.native-app[data-theme=system] { color-scheme: light dark; }
+@media(prefers-color-scheme:light) {
+  .native-app[data-theme=system] {
+    --bg:#f4f7f3; --surface:#fff; --raised:#e4ece6; --hover:#d7e9de;
+    --text:#14271c; --muted:#40594a; --quiet:#4c6555; --line:#c1d1c5;
+    --control-line:#668572; --accent:#08754c; --accent-text:#fff;
+    --disabled-text:#607368; --disabled-surface:#e5ebe6;
+  }
+}
+
+/* Settings → Appearance. Rows reflow instead of clipping when the app is enlarged. */
+.native-settings { max-width: 880px; }
+.native-settings>.library-intro p { max-width: 66ch; }
+.settings-panel { border-top: 1px solid var(--line); padding-top: 22px; }
+.settings-panel>h2 { font-size: 26px; margin-bottom: 6px; }
+.settings-panel>p { font-size: 13px; line-height: 1.7; max-width: 70ch; }
+.setting-row {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 20px; flex-wrap: wrap; padding: 18px 0; border-top: 1px solid var(--line);
+}
+.setting-text { flex: 1 1 260px; min-width: 0; }
+.setting-text h3 { font-size: 15px; letter-spacing: -.2px; margin: 0 0 6px; }
+.setting-text p { font-size: 13px; line-height: 1.65; margin: 0; max-width: 62ch; }
+.setting-value { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.app-scale-step {
+  min-width: 44px; width: 44px; height: 44px; font-size: 20px; line-height: 1;
+  background: var(--raised); border: 1px solid var(--control-line);
+  border-radius: 9px; color: var(--text);
+}
+.app-scale-step:hover:not(:disabled) { background: var(--hover); }
+.app-scale-step:disabled { opacity: 1; background: var(--disabled-surface); color: var(--disabled-text); }
+.app-scale-value {
+  min-width: 64px; text-align: center; font-size: 18px; font-weight: 650;
+  font-variant-numeric: tabular-nums; color: var(--accent);
+}
+.app-scale-control { margin-top: 12px; }
+.app-scale-control>label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+.app-scale-control>input { width: 100%; min-height: 44px; }
+.app-scale-legend { display: flex; justify-content: space-between; font-size: 11px; color: var(--quiet); margin-top: 2px; }
+.appearance-actions { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-top: 6px; }
+.appearance-actions .settings-note { margin: 0; flex: 1 1 220px; }
+.settings-note { font-size: 12px; line-height: 1.7; color: var(--muted); margin: 12px 0 0; overflow-wrap: anywhere; }
+.settings-note.warning { color: var(--danger); }
+.setting-divider { height: 1px; background: var(--line); margin: 22px 0; }
+.theme-choices { display: flex; gap: 8px; flex-wrap: wrap; }
+.theme-choice {
+  display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 9px 15px;
+  border: 1px solid var(--control-line); border-radius: 9px; background: var(--bg);
+  font-size: 13px; color: var(--text); cursor: pointer;
+}
+.theme-choice:hover { background: var(--hover); }
+.theme-choice:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.theme-choice input[type=radio] { min-height: 0; width: 16px; height: 16px; accent-color: var(--accent); }
+
+/* At a narrow window with an enlarged app size the fixed 280px player column no
+   longer fits the content box, so the transport column is allowed to shrink. */
+@media(max-width:900px) {
+  .native-app[data-app-scale]:not([data-app-scale="100"]) .native-player {
+    grid-template-columns: minmax(0,1fr) minmax(0,1.2fr);
+  }
+}
+@media(max-width:560px) {
+  .setting-row { gap: 12px; }
+  .setting-value { width: 100%; justify-content: flex-start; }
+  .appearance-actions { flex-direction: column; align-items: flex-start; }
+  .theme-choice { flex: 1 1 120px; justify-content: center; }
+}
+
+/* Appearance is reachable before sign-in: the same device panel, opened from the
+   sign-in screen, with a visible way back and no server contact. */
+.native-signed-out-settings {
+  padding: 32px max(24px, 7vw) 48px;
+  min-height: calc(100vh / var(--app-zoom));
+  overflow: auto;
+}
+.signed-out-back { margin-bottom: 20px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.signed-out-back .button { gap: 8px; }
+.signin-form .button.signin-appearance { width: 100%; margin-top: 10px; }

@@ -6,6 +6,7 @@ use crate::{
     client::VelaClient,
     mpris::{self, Mpris, RepeatKind as SystemRepeat},
     playback::{Command, MAX_QUEUE, PlaybackOrder, Repeat, Transition},
+    presentation::{PresentationAttributes, Repair, SaveStatus, Theme},
 };
 use dioxus::prelude::*;
 use std::{
@@ -131,6 +132,15 @@ struct Catalog {
     page: Arc<TrackPage>,
 }
 
+/// Serialised device-document writer. Only the newest pending value is written, so
+/// dragging a slider or clicking a stepper cannot queue an unbounded number of
+/// blocking writes or publish an older value over a newer one.
+#[derive(Default)]
+struct DeviceWrite {
+    busy: bool,
+    dirty: Option<crate::presentation::Preferences>,
+}
+
 #[derive(Clone)]
 struct Ui {
     alive: Lifetime,
@@ -172,7 +182,15 @@ struct Ui {
     saved_session: Signal<Option<crate::session_store::SavedSession>>,
     login_error: Signal<String>,
     view: Signal<&'static str>,
-    theme: Signal<&'static str>,
+    /// Device-only appearance preferences for this installation. They survive
+    /// sign-in/sign-out, carry no account data and never trigger a request.
+    device: Signal<crate::presentation::Preferences>,
+    device_save: Signal<SaveStatus>,
+    /// Set when the stored document had to be repaired; explained once in Settings.
+    device_repair: Signal<Option<Repair>>,
+    device_write: Rc<RefCell<DeviceWrite>>,
+    /// Abbreviated config path of the device document, or empty when unavailable.
+    device_store: Rc<String>,
     query_draft: Signal<String>,
     query: Signal<String>,
     cursor: Signal<Option<String>>,
@@ -519,6 +537,15 @@ impl Ui {
         account.as_ref().is_some_and(|account| {
             key.belongs_to(&account.origin, &account.user.id, *self.epoch.peek())
         })
+    }
+    /// Root wrapper attributes for the validated device preference.
+    ///
+    /// `read` (not `peek`) subscribes this render to size/theme changes; the change
+    /// rewrites one `style` and one `data-theme` attribute on the existing wrapper,
+    /// so the audio engine, prepared source, queue, selection and position are never
+    /// remounted and no request is made.
+    fn device_attributes(&self) -> PresentationAttributes {
+        crate::presentation::attributes(*self.device.read())
     }
 }
 /// Component props only need identity: every native surface shares this one live state
@@ -2347,6 +2374,117 @@ fn time_label(milliseconds: u64) -> String {
     format!("{}:{:02}", seconds / 60, seconds % 60)
 }
 
+/// Apply a validated device size live without writing (slider drag).
+///
+/// Persistence is coalesced: the caller saves on pointer release/blur.
+fn preview_app_scale(mut ui: Ui, percent: u16) {
+    if !crate::presentation::scale_is_valid(percent) {
+        return;
+    }
+    let mut next = *ui.device.peek();
+    if next.app_scale_percent == percent {
+        return;
+    }
+    next.app_scale_percent = percent;
+    ui.device.set(next);
+}
+
+/// Apply a validated device size live and persist it on this device only.
+///
+/// An explicit choice is also the recovery path for an unreadable document: the
+/// value is applied even when it equals the effective default, so Reset to 100%
+/// always rewrites a usable document.
+fn set_app_scale(mut ui: Ui, percent: u16) {
+    if !crate::presentation::scale_is_valid(percent) {
+        return;
+    }
+    let mut next = *ui.device.peek();
+    let unchanged = next.app_scale_percent == percent;
+    if unchanged && ui.device_repair.peek().is_none() {
+        return;
+    }
+    next.app_scale_percent = percent;
+    ui.device.set(next);
+    persist_device(ui);
+}
+
+/// One stepper step, clamped to the documented range.
+fn step_app_scale(ui: Ui, delta: i32) {
+    let percent = crate::presentation::stepped(ui.device.peek().app_scale_percent, delta);
+    set_app_scale(ui, percent);
+}
+
+/// Reset this device's app size to 100%, even when the stored file was unreadable.
+fn reset_app_scale(ui: Ui) {
+    set_app_scale(ui, crate::presentation::SCALE_DEFAULT);
+}
+
+/// Choose System/Dark/Light and persist it for this device.
+fn set_device_theme(mut ui: Ui, theme: Theme) {
+    let mut next = *ui.device.peek();
+    if next.theme == theme && ui.device_repair.peek().is_none() {
+        return;
+    }
+    next.theme = theme;
+    ui.device.set(next);
+    persist_device(ui);
+}
+
+/// One-click topbar toggle between the two explicit themes.
+fn toggle_device_theme(ui: Ui) {
+    let theme = match ui.device.peek().theme {
+        Theme::Light => Theme::Dark,
+        _ => Theme::Light,
+    };
+    set_device_theme(ui, theme);
+}
+
+/// Persist the current device preference document off the UI thread.
+///
+/// One writer at a time and only the newest pending value: repeated clicks coalesce
+/// instead of racing, and status is published only for the final value. A failure
+/// keeps the live value and says it is temporary; it never resets playback.
+fn persist_device(mut ui: Ui) {
+    let preferences = *ui.device.peek();
+    ui.device_save.set(SaveStatus::Pending);
+    let start = {
+        let mut write = ui.device_write.borrow_mut();
+        write.dirty = Some(preferences);
+        if write.busy {
+            false
+        } else {
+            write.busy = true;
+            true
+        }
+    };
+    if !start {
+        return;
+    }
+    spawn(async move {
+        loop {
+            let pending = ui.device_write.borrow_mut().dirty.take();
+            let Some(preferences) = pending else { break };
+            let result =
+                tokio::task::spawn_blocking(move || crate::presentation::save(preferences)).await;
+            if !ui.alive.get() {
+                ui.device_write.borrow_mut().busy = false;
+                return;
+            }
+            if ui.device_write.borrow().dirty.is_none() {
+                match result {
+                    Ok(Ok(())) => {
+                        ui.device_save.set(SaveStatus::Saved);
+                        // The device copy is now authoritative and readable.
+                        ui.device_repair.set(None);
+                    }
+                    _ => ui.device_save.set(SaveStatus::SessionOnly),
+                }
+            }
+        }
+        ui.device_write.borrow_mut().busy = false;
+    });
+}
+
 fn sign_in(ui: Ui) -> Element {
     let origin = ui.origin.read().clone();
     let username = ui.username.read().clone();
@@ -2359,6 +2497,7 @@ fn sign_in(ui: Ui) -> Element {
     let saved_session = ui.saved_session.read().clone();
     let resuming = *ui.resuming.read();
     let mut remember = ui.remember;
+    let mut appearance_signal = ui.view;
     let resume = ui.clone();
     let mut origin_signal = ui.origin;
     let mut username_signal = ui.username;
@@ -2396,6 +2535,7 @@ fn sign_in(ui: Ui) -> Element {
                 if connecting {button {class:"button secondary",r#type:"button",onclick:move |_|{let mut ui=cancel.clone();ui.login_gate.cancel();ui.connecting.set(false);ui.login_error.set("Connection canceled. Enter your password to try again.".into());},"Cancel connection"}}
             }
             small {class:"signin-limit","Opt-in session saving uses the system Secret Service and stores only the opaque session token; the password and CSRF token are never stored. Signing out deletes the saved session. No listening history is sent."}
+            button {class:"button secondary small signin-appearance",onclick:move |_|appearance_signal.set("settings"),Icon {name:"settings"}"Appearance and this device"}
         }
     } }
 }
@@ -3990,6 +4130,94 @@ fn queue_view(ui: Ui) -> Element {
     } }
 }
 
+/// Settings → Appearance for this device only.
+///
+/// Only settings this build actually implements are exposed: app size (applied
+/// exactly once on the root `.native-app` wrapper) and theme. There is no server or
+/// account setting in this slice and no disabled switch standing in for an absent
+/// engine feature. Every control is a native focusable button/range/radio with an
+/// accessible name, and the percentage is announced through `aria-valuetext` rather
+/// than a live region that would announce on every drag step.
+fn settings_view(ui: Ui) -> Element {
+    use crate::presentation::{SCALE_DEFAULT, SCALE_MAX, SCALE_MIN, SCALE_STEP};
+    let preferences = *ui.device.read();
+    let percent = preferences.app_scale_percent;
+    let theme = preferences.theme;
+    let save = *ui.device_save.read();
+    let repair = *ui.device_repair.read();
+    let store = ui.device_store.as_str().to_owned();
+    let at_min = percent <= SCALE_MIN;
+    let at_max = percent >= SCALE_MAX;
+    let at_default = percent == SCALE_DEFAULT;
+    let down = ui.clone();
+    let up = ui.clone();
+    let preview = ui.clone();
+    let persist = ui.clone();
+    let reset = ui.clone();
+    let save_role = if save == SaveStatus::SessionOnly {
+        "alert"
+    } else {
+        "status"
+    };
+    let save_message = save.message().unwrap_or_default();
+    rsx! {section {class:"native-library native-settings","aria-label":"Settings",
+        div {class:"library-intro",div {span {class:"eyebrow","THIS DEVICE"} h1 {"Settings"} p {"Appearance belongs to this computer. It is stored in one private file here, never sent to your server, and it is applied before you sign in."}}}
+        section {class:"settings-panel","aria-labelledby":"appearance-title","data-testid":"native-settings-appearance",
+            h2 {id:"appearance-title","Appearance"}
+            if let Some(reason)=repair {
+                p {class:"settings-note warning",role:"status","data-testid":"native-appearance-recovery","{reason.message()}"}
+            }
+            div {class:"setting-row",
+                div {class:"setting-text",
+                    h3 {id:"app-size-title","App size"}
+                    p {id:"app-size-help","Changes this device only. Vela enlarges its own layout without reloading playback, and your desktop's monitor scaling is left alone."}
+                }
+                div {class:"setting-value",
+                    button {class:"icon-button app-scale-step","aria-label":"Decrease app size",title:"Decrease app size",disabled:at_min,onclick:move |_|step_app_scale(down.clone(),-i32::from(SCALE_STEP)),"−"}
+                    span {class:"app-scale-value","data-testid":"native-app-scale-value","{percent}%"}
+                    button {class:"icon-button app-scale-step","aria-label":"Increase app size",title:"Increase app size",disabled:at_max,onclick:move |_|step_app_scale(up.clone(),i32::from(SCALE_STEP)),"+"}
+                }
+            }
+            div {class:"app-scale-control",
+                label {r#for:"native-app-scale","App size slider"}
+                input {id:"native-app-scale",r#type:"range",min:"{SCALE_MIN}",max:"{SCALE_MAX}",step:"{SCALE_STEP}",value:"{percent}",
+                    "aria-label":"App size","aria-valuemin":"{SCALE_MIN}","aria-valuemax":"{SCALE_MAX}","aria-valuenow":"{percent}","aria-valuetext":"{percent} percent","aria-describedby":"app-size-help",
+                    oninput:move |event|{if let Ok(value)=event.value().parse::<u16>(){preview_app_scale(preview.clone(),value);}},
+                    onchange:move |_|persist_device(persist.clone())}
+                div {class:"app-scale-legend",span {"{SCALE_MIN}%"} span {"{SCALE_DEFAULT}%"} span {"{SCALE_MAX}%"}}
+            }
+            div {class:"appearance-actions",
+                button {class:"button secondary small",disabled:at_default&&repair.is_none(),onclick:move |_|reset_app_scale(reset.clone()),"Reset to 100%"}
+                if !save_message.is_empty(){
+                    p {class:"settings-note",role:"{save_role}","data-testid":"native-appearance-save-state","{save_message}"}
+                }
+            }
+            div {class:"setting-divider"}
+            div {class:"setting-row",
+                div {class:"setting-text",
+                    h3 {id:"theme-title","Theme"}
+                    p {id:"theme-help","System follows this desktop's own light or dark appearance signal. Dark and Light apply immediately and keep readable contrast and focus."}
+                }
+                div {class:"theme-choices",role:"radiogroup","aria-labelledby":"theme-title",
+                    for (value,label) in [(Theme::System,"System"),(Theme::Dark,"Dark"),(Theme::Light,"Light")] {
+                        {
+                            let choose = ui.clone();
+                            rsx! {label {class:"theme-choice",key:"{label}",
+                                input {r#type:"radio",name:"native-theme",value:"{value.as_str()}",checked:theme==value,onchange:move |_|set_device_theme(choose.clone(),value)}
+                                span {"{label}"}
+                            }}
+                        }
+                    }
+                }
+            }
+            if !store.is_empty(){
+                p {class:"settings-note","data-testid":"native-appearance-store","Stored for this computer only at {store} (owner-only file permissions). Removing that file restores the defaults."}
+            }
+            p {class:"settings-note","Account, playback, download and network preferences are not available in this version."}
+        }
+    }}
+}
+
 fn player(ui: Ui) -> Element {
     let track = ui.current_track();
     let remote = ui.remote_now.read().clone();
@@ -4081,6 +4309,11 @@ fn player(ui: Ui) -> Element {
 
 #[allow(non_snake_case)]
 pub fn App() -> Element {
+    // Read the private device document on the first render, before any content is
+    // painted, so a saved app size and theme are in place for the first frame. The
+    // read is a bounded local file with no server contact; a bad document resolves
+    // to the defaults and is explained in Settings.
+    let device_load = use_hook(crate::presentation::load);
     let ui = Ui {
         alive: use_hook(|| Lifetime(Arc::new(AtomicBool::new(true)))),
         audio: use_signal(|| None),
@@ -4114,7 +4347,11 @@ pub fn App() -> Element {
         saved_session: use_signal(|| None),
         login_error: use_signal(String::new),
         view: use_signal(|| "library"),
-        theme: use_signal(|| "dark"),
+        device: use_signal(|| device_load.preferences),
+        device_save: use_signal(|| SaveStatus::Unchanged),
+        device_repair: use_signal(|| device_load.repair),
+        device_write: use_hook(|| Rc::new(RefCell::new(DeviceWrite::default()))),
+        device_store: use_hook(|| Rc::new(crate::presentation::store_note())),
         query_draft: use_signal(String::new),
         query: use_signal(String::new),
         cursor: use_signal(|| None),
@@ -4186,7 +4423,13 @@ pub fn App() -> Element {
         progress: use_signal(DownloadProgress::default),
         prepared: use_signal(|| None),
         source_error: use_signal(String::new),
-        notice: use_signal(String::new),
+        notice: use_signal(|| {
+            device_load
+                .repair
+                .map(Repair::message)
+                .unwrap_or_default()
+                .to_owned()
+        }),
         ended: use_hook(|| Rc::new(Cell::new(None))),
         mpris: use_hook(mpris::spawn),
         mpris_note: use_signal(|| "System media controls starting…"),
@@ -4289,11 +4532,13 @@ pub fn App() -> Element {
         }
     });
     let _account = ui.account.read();
-    let theme = *ui.theme.read();
+    // One wrapper attribute pair for the validated device size/theme. Reapplying it
+    // rewrites the inline zoom and `data-theme` only: the audio engine, prepared
+    // source, queue, cursor and position are untouched and no request is made.
+    let device = ui.device_attributes();
     let view = *ui.view.read();
     let notice = ui.notice.read().clone();
     let mut notice_signal = ui.notice;
-    let mut theme_signal = ui.theme;
     let mut view_signal = ui.view;
     let logout = ui.clone();
     let nav_library = ui.clone();
@@ -4308,6 +4553,7 @@ pub fn App() -> Element {
     let compact_artists = ui.clone();
     let compact_playlists = ui.clone();
     let compact_public = ui.clone();
+    let theme_toggle = ui.clone();
     let css = include_str!("../style.css");
     let saved_loader = ui.clone();
     use_future(move || {
@@ -4348,21 +4594,29 @@ pub fn App() -> Element {
     });
     rsx! {
         document::Style {"{css}"}
-        div {class:"native-app","data-theme":theme,
+        div {class:"native-app","data-theme":"{device.theme}","data-app-scale":"{device.app_scale}",style:"{device.style}",
             if ui.signed_in(){
                 aside {class:"native-sidebar",div {class:"native-brand",Icon {name:"music"} span {"vela"} small {"NATIVE"}}
-                    nav {"aria-label":"Main navigation",button {class:if view=="library"{"native-nav active"}else{"native-nav"},"aria-label":"Library",onclick:move |_|{view_signal.set("library");load_catalog(nav_library.clone(),String::new(),None,false);},Icon {name:"library"}"Library"} button {class:if view=="albums"{"native-nav active"}else{"native-nav"},"aria-label":"Albums",onclick:move |_|{load_groups(nav_albums.clone(),"albums",None);},Icon {name:"albums"}"Albums"} button {class:if view=="artists"{"native-nav active"}else{"native-nav"},"aria-label":"Artists",onclick:move |_|{load_groups(nav_artists.clone(),"artists",None);},Icon {name:"artists"}"Artists"} button {class:if view=="favorites"{"native-nav active"}else{"native-nav"},"aria-label":"Favorites",onclick:move |_|{view_signal.set("favorites");load_catalog(nav_favorites.clone(),String::new(),None,true);},Icon {name:"heart"}"Favorites"} button {class:if view=="playlists"{"native-nav active"}else{"native-nav"},"aria-label":"Playlists",onclick:move |_|{load_playlists(nav_playlists.clone());},Icon {name:"playlists"}"Playlists"} button {class:if view=="public"{"native-nav active"}else{"native-nav"},"aria-label":"Public",onclick:move |_|{view_signal.set("public");explore_public(nav_public.clone());},Icon {name:"network"}"Public"} button {class:if view=="queue"{"native-nav active"}else{"native-nav"},"aria-label":"Queue",onclick:move |_|view_signal.set("queue"),Icon {name:"queue"}"Queue"}}
+                    nav {"aria-label":"Main navigation",button {class:if view=="library"{"native-nav active"}else{"native-nav"},"aria-label":"Library",onclick:move |_|{view_signal.set("library");load_catalog(nav_library.clone(),String::new(),None,false);},Icon {name:"library"}"Library"} button {class:if view=="albums"{"native-nav active"}else{"native-nav"},"aria-label":"Albums",onclick:move |_|{load_groups(nav_albums.clone(),"albums",None);},Icon {name:"albums"}"Albums"} button {class:if view=="artists"{"native-nav active"}else{"native-nav"},"aria-label":"Artists",onclick:move |_|{load_groups(nav_artists.clone(),"artists",None);},Icon {name:"artists"}"Artists"} button {class:if view=="favorites"{"native-nav active"}else{"native-nav"},"aria-label":"Favorites",onclick:move |_|{view_signal.set("favorites");load_catalog(nav_favorites.clone(),String::new(),None,true);},Icon {name:"heart"}"Favorites"} button {class:if view=="playlists"{"native-nav active"}else{"native-nav"},"aria-label":"Playlists",onclick:move |_|{load_playlists(nav_playlists.clone());},Icon {name:"playlists"}"Playlists"} button {class:if view=="public"{"native-nav active"}else{"native-nav"},"aria-label":"Public",onclick:move |_|{view_signal.set("public");explore_public(nav_public.clone());},Icon {name:"network"}"Public"} button {class:if view=="queue"{"native-nav active"}else{"native-nav"},"aria-label":"Queue",onclick:move |_|view_signal.set("queue"),Icon {name:"queue"}"Queue"} button {class:if view=="settings"{"native-nav active"}else{"native-nav"},"aria-label":"Settings",onclick:move |_|view_signal.set("settings"),Icon {name:"settings"}"Settings"}}
                     div {class:"native-private-note",Icon {name:"check"} strong {"Private by default"} p {"Share only what you choose."} p {class:"native-mpris-note",role:"status","data-testid":"native-mpris-status","{ui.mpris_note}"}}
                 }
                 main {class:"native-content",header {class:"native-topbar",div {class:"native-window-drag",onmousedown:move |event|{if event.trigger_button()==Some(dioxus::html::input_data::MouseButton::Primary){dioxus::desktop::window().drag();}},ondoubleclick:move |_|dioxus::desktop::window().toggle_maximized(),span {class:"eyebrow","YOUR PERSONAL MUSIC SPACE"} if let Some(account)=ui.account.read().as_ref(){strong {"{account.user.username}"} small {"{account.origin}"}}}
-                    div {class:"topbar-actions",button {class:"icon-button","aria-label":"Change color theme",onclick:move |_|theme_signal.set(if theme=="dark"{"light"}else{"dark"}),if theme=="dark"{Icon {name:"sun"}}else{Icon {name:"moon"}}} button {class:"button secondary small",onclick:move |_|sign_out(logout.clone()),"Sign out"} WindowControls {}}
+                    div {class:"topbar-actions",button {class:"icon-button","aria-label":if device.theme!="light"{"Use the light theme"}else{"Use the dark theme"},title:if device.theme!="light"{"Switch to the light theme"}else{"Switch to the dark theme"},onclick:move |_|toggle_device_theme(theme_toggle.clone()),if device.theme!="light"{Icon {name:"sun"}}else{Icon {name:"moon"}}} button {class:"button secondary small",onclick:move |_|sign_out(logout.clone()),"Sign out"} WindowControls {}}
                 }
-                    nav {class:"native-compact-nav","aria-label":"Compact navigation",button {class:if view=="library"{"active"}else{""},onclick:move |_|{view_signal.set("library");load_catalog(compact_library.clone(),String::new(),None,false);},"Library"} button {class:if view=="albums"{"active"}else{""},onclick:move |_|{load_groups(compact_albums.clone(),"albums",None);},"Albums"} button {class:if view=="artists"{"active"}else{""},onclick:move |_|{load_groups(compact_artists.clone(),"artists",None);},"Artists"} button {class:if view=="favorites"{"active"}else{""},onclick:move |_|{view_signal.set("favorites");load_catalog(compact_favorites.clone(),String::new(),None,true);},"Favorites"} button {class:if view=="playlists"{"active"}else{""},onclick:move |_|{load_playlists(compact_playlists.clone());},"Playlists"} button {class:if view=="public"{"active"}else{""},onclick:move |_|{view_signal.set("public");explore_public(compact_public.clone());},"Public"} button {class:if view=="queue"{"active"}else{""},onclick:move |_|view_signal.set("queue"),"Queue"}}
+                    nav {class:"native-compact-nav","aria-label":"Compact navigation",button {class:if view=="library"{"active"}else{""},onclick:move |_|{view_signal.set("library");load_catalog(compact_library.clone(),String::new(),None,false);},"Library"} button {class:if view=="albums"{"active"}else{""},onclick:move |_|{load_groups(compact_albums.clone(),"albums",None);},"Albums"} button {class:if view=="artists"{"active"}else{""},onclick:move |_|{load_groups(compact_artists.clone(),"artists",None);},"Artists"} button {class:if view=="favorites"{"active"}else{""},onclick:move |_|{view_signal.set("favorites");load_catalog(compact_favorites.clone(),String::new(),None,true);},"Favorites"} button {class:if view=="playlists"{"active"}else{""},onclick:move |_|{load_playlists(compact_playlists.clone());},"Playlists"} button {class:if view=="public"{"active"}else{""},onclick:move |_|{view_signal.set("public");explore_public(compact_public.clone());},"Public"} button {class:if view=="queue"{"active"}else{""},onclick:move |_|view_signal.set("queue"),"Queue"} button {class:if view=="settings"{"active"}else{""},"aria-label":"Settings",onclick:move |_|view_signal.set("settings"),"Settings"}}
                     if !notice.is_empty(){div {class:"alert notice",role:"status",span {"{notice}"} button {class:"icon-button","aria-label":"Dismiss notification",onclick:move |_|notice_signal.set(String::new()),Icon {name:"close"}}}}
-                    if view=="queue"{{queue_view(ui.clone())}}else if view=="playlists"{{playlists_view(ui.clone())}}else if view=="albums"||view=="artists"{{browse_view(ui.clone())}}else if view=="public"{{public_view(ui.clone())}}else{{library(ui.clone())}}
+                    if view=="queue"{{queue_view(ui.clone())}}else if view=="playlists"{{playlists_view(ui.clone())}}else if view=="albums"||view=="artists"{{browse_view(ui.clone())}}else if view=="public"{{public_view(ui.clone())}}else if view=="settings"{{settings_view(ui.clone())}}else{{library(ui.clone())}}
                 }
                 {player(ui.clone())}
-            }else{div {class:"signin-window-controls",WindowControls {}} {sign_in(ui.clone())}}
+            }else{
+                div {class:"signin-window-controls",WindowControls {}}
+                if view=="settings"{
+                    main {class:"native-signed-out-settings",
+                        div {class:"signed-out-back",button {class:"button secondary small",onclick:move |_|view_signal.set("library"),Icon {name:"back"}"Back to sign in"}}
+                        {settings_view(ui.clone())}
+                    }
+                }else{{sign_in(ui.clone())}}
+            }
         }
     }
 }

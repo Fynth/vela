@@ -1663,6 +1663,21 @@ cards; exact `background-color` transitions on track rows; neutral 1px pure-blac
 Web rebuilt; Chromium41 passed/1 live-import skip (2.1m). Native CSS was not opened in
 a real window in this pass.
 
+## Native Settings + application scale — source+native QA (2026-10-19)
+
+New `apps/desktop/src/presentation.rs` device store at
+`$XDG_CONFIG_HOME/vela/desktop.presentation.json` (0700/0600, versioned
+`{app_scale_percent,theme,version}`); 80–150 step5, malformed/oversized/future
+documents recover to 100/Dark without deleting the unreadable text, atomic staged
+write keeps the previous file on failure. The `.native-app` wrapper receives
+`--app-zoom`/`zoom` and `data-theme` on the first render, before sign-in; live
+changes never touch the AudioEngine/queue/selection/position. A real Settings
+destination (sidebar + compact nav + signed-out entry) exposes −/+/slider/reset,
+System/Dark/Light and truthful save/repair state. Desktop108 passed/3 ignored;
+full native peer/session/offline QA passed (`target/checks/native-settings-qa2/`).
+NOT_RUN: real visual/HiDPI/640px/short-height review, audio-preservation observation,
+disk-full, Orca. Range deviation 80–150 vs plan 75–200 documented.
+
 ## Product expansion first slices — artwork + device scale (2026-10-19)
 
 - `0f9f12b` native authorized artwork: authenticated HEAD+GET, 8MiB/MIME/magic
