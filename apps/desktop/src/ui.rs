@@ -4256,6 +4256,15 @@ fn queue_view(ui: Ui) -> Element {
     let queue_empty = queue.is_empty();
     let queue_len = queue.len();
     let current = ui.order.read().current();
+    let projection = ui.order.read().projection();
+    let explicit_next = projection.explicit_next.first().copied();
+    let next_at = explicit_next.or_else(|| projection.pending.first().copied());
+    let next_track = next_at.and_then(|at| queue.get(at).cloned());
+    let next_label = if explicit_next.is_some() {
+        "Explicit Play next"
+    } else {
+        "From the active shuffle order"
+    };
     let clear = ui.clone();
     let clear_upcoming = ui.clone();
     let has_upcoming = current.is_some_and(|current| current + 1 < queue_len);
@@ -4263,16 +4272,20 @@ fn queue_view(ui: Ui) -> Element {
         div {class:"library-intro",div {span {class:"eyebrow","ROOM FOR YOUR NEXT LISTEN"} h1 {"Your listening queue"} p {"{queue_len} of 1,000 places · Duplicate tracks keep their own place."}}
             div {class:"inline-form",button {class:"button secondary",disabled:!has_upcoming,title:if has_upcoming {"Remove only the queued occurrences after the current one."} else {"Nothing is queued after the current occurrence."},onclick:move |_|queue_clear_upcoming(clear_upcoming.clone()),"Clear upcoming"} button {class:"button secondary",disabled:queue_empty,onclick:move |_|clear_queue(clear.clone()),"Clear queue"}}
         }
-        if queue_empty {div {class:"native-empty",Icon {name:"queue"} h2 {"A little room for what comes next"} p {"Play a library result, use Play next, or add tracks to your queue."}}}
-        else {div {class:"native-queue-list",for (at,track) in queue.into_iter().enumerate() { {
-            let select=ui.clone();let up=ui.clone();let down=ui.clone();let remove=ui.clone();
-            rsx! {article {class:if current==Some(at){"native-queue-row current"}else{"native-queue-row"},key:"{at}-{track.id}","data-native-queue-index":"{at}",
-                button {class:"native-queue-select",disabled:!ui.audio_ready(),"aria-label":format!("{} queue occurrence {at}: {}",if current==Some(at) && *ui.wants_play.read(){"Pause"}else{"Play"},track.title),onclick:move |_|select_queue(select.clone(),at),span {class:"queue-number","{at+1}"} ArtworkCover {ui:ui.clone(),artwork_id:track.artwork_id.clone(),class:"neutral-cover",icon:"music"} div {strong {"{track.title}"} small {"{track.artist}"}} if current==Some(at){span {class:"queue-current","Current"}}}
-                button {class:"icon-button",disabled:at==0,"aria-label":"Move queue occurrence {at} up",title:"Move up",onclick:move |_|queue_edit(up.clone(),at,false),Icon {name:"up"}}
-                button {class:"icon-button",disabled:at+1>=queue_len,"aria-label":"Move queue occurrence {at} down",title:if at+1>=queue_len {"Already the last queued occurrence."} else {"Move down"},onclick:move |_|queue_move_down(down.clone(),at),Icon {name:"down"}}
-                button {class:"icon-button",disabled:current==Some(at),"aria-label":"Remove queue occurrence {at}",title:if current==Some(at){"Current occurrence cannot be removed; clear the queue to stop it"}else{"Remove from queue"},onclick:move |_|queue_edit(remove.clone(),at,true),Icon {name:"close"}}
-            } }
-        } } } }
+        if let Some(track) = next_track {div {class:"native-next-up","data-testid":"native-next-up",div {small {"NEXT UP · {next_label}"} strong {"{track.title}"} small {"{track.artist}"}} p {"Read-only projection: the queue is not reordered or consumed."}}}
+        if queue_empty {
+            div {class:"native-empty",Icon {name:"queue"} h2 {"A little room for what comes next"} p {"Play a library result, use Play next, or add tracks to your queue."}}
+        } else {
+            div {class:"native-queue-list",for (at,track) in queue.into_iter().enumerate() { {
+                let select=ui.clone();let up=ui.clone();let down=ui.clone();let remove=ui.clone();
+                rsx! {article {class:if current==Some(at){"native-queue-row current"}else{"native-queue-row"},key:"{at}-{track.id}","data-native-queue-index":"{at}",
+                    button {class:"native-queue-select",disabled:!ui.audio_ready(),"aria-label":format!("{} queue occurrence {at}: {}",if current==Some(at) && *ui.wants_play.read(){"Pause"}else{"Play"},track.title),onclick:move |_|select_queue(select.clone(),at),span {class:"queue-number","{at+1}"} ArtworkCover {ui:ui.clone(),artwork_id:track.artwork_id.clone(),class:"neutral-cover",icon:"music"} div {strong {"{track.title}"} small {"{track.artist}"}} if current==Some(at){span {class:"queue-current","Current"}}}
+                    button {class:"icon-button",disabled:at==0,"aria-label":"Move queue occurrence {at} up",title:"Move up",onclick:move |_|queue_edit(up.clone(),at,false),Icon {name:"up"}}
+                    button {class:"icon-button",disabled:at+1>=queue_len,"aria-label":"Move queue occurrence {at} down",title:if at+1>=queue_len {"Already the last queued occurrence."} else {"Move down"},onclick:move |_|queue_move_down(down.clone(),at),Icon {name:"down"}}
+                    button {class:"icon-button",disabled:current==Some(at),"aria-label":"Remove queue occurrence {at}",title:if current==Some(at){"Current occurrence cannot be removed; clear the queue to stop it"}else{"Remove from queue"},onclick:move |_|queue_edit(remove.clone(),at,true),Icon {name:"close"}}
+                } }
+            } } }
+        }
         p {class:"queue-explanation",if *ui.offline_active.read() {"Saved tracks play in order. You can repeat one track."} else {"Shuffle follows a temporary fair deck and playback history. The visible list is saved queue order, not a prediction of shuffled playback."}}
     } }
 }

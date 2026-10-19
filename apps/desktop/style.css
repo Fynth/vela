@@ -595,3 +595,6 @@ img.neutral-cover {
   .native-player .native-play-toggle:active:not(:disabled) { transform: none; }
   .native-player input[type=range]::-webkit-slider-thumb { transition: none; }
 }
+.native-next-up{display:flex;align-items:center;gap:16px;padding:12px 16px;margin:0 0 14px;border:1px solid var(--vela-border,#2a2f2a);border-radius:9px;background:var(--vela-secondary,#272c27);min-width:0}
+.native-next-up>div{display:grid;min-width:0;gap:2px}.native-next-up small{font-size:10px;color:var(--vela-muted-text,#9aa296);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.native-next-up strong{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.native-next-up>p{margin:0 0 0 auto;font-size:10px;color:var(--vela-quiet-text,#798372);max-width:240px}
+@media(max-width:670px){.native-next-up{flex-wrap:wrap;gap:4px}.native-next-up>p{margin:4px 0 0;max-width:none}}
