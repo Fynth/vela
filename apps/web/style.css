@@ -1346,3 +1346,6 @@ input[type="range"]:focus { outline:2px solid var(--accent); outline-offset:3px;
 .playlist-detail-cover { width:168px; max-width:38%; margin-bottom:18px; }
 .playlist-detail-cover .catalog-cover { border-radius:9px; }
 @media(max-width:620px){.playlist-detail-cover{width:120px;max-width:50%;margin-bottom:14px}}
+
+.playlist-target input[type="search"] { width:130px; min-height:30px; padding:4px 9px; font-size:10px; }
+@media(max-width:620px){.playlist-target{flex-wrap:wrap}.playlist-target input[type="search"]{width:100%}}

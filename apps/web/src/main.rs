@@ -1219,6 +1219,7 @@ fn App() -> Element {
     let mut share_days = use_signal(|| "7".to_string());
     let mut collaborator_edit = use_signal(|| false);
     let mut selected_add_playlist = use_signal(String::new);
+    let mut playlist_filter = use_signal(String::new);
     let mut new_user = use_signal(String::new);
     let mut new_password = use_signal(String::new);
     let mut queue = use_signal(Vec::<Track>::new);
@@ -1521,6 +1522,7 @@ fn App() -> Element {
         radio_seed.set(None);
         collaborator.set(String::new());
         selected_add_playlist.set(String::new());
+        playlist_filter.set(String::new());
         show_queue.set(false);
         playback_order.write().reset(0, 0);
         shuffle.set(false);
@@ -1918,7 +1920,16 @@ fn App() -> Element {
                                     button { class: "button secondary small", onclick: move |_| { query.set(String::new()); search_library(String::new(), library); }, "Clear search" }
                                 }
                             }
-                            if !playlists.read().is_empty() { div { class: "playlist-target", label { r#for: "playlist-target", "Add tracks to" } select { id: "playlist-target", value: "{selected_add_playlist}", onchange: move |e| selected_add_playlist.set(e.value()), option { value: "", "Choose a playlist" } for list in playlists.read().iter().filter(|p| p.can_edit) { option { value: "{list.id}", "{list.name}" } } } } }
+                            if !playlists.read().is_empty() { div { class: "playlist-target",
+                                label { r#for: "playlist-filter", "Add tracks to" }
+                                input { id: "playlist-filter", r#type: "search", placeholder: "Find a playlist", value: "{playlist_filter}", maxlength: "120", oninput: move |e| playlist_filter.set(e.value()) }
+                                select { id: "playlist-target", value: "{selected_add_playlist}", onchange: move |e| selected_add_playlist.set(e.value()),
+                                    option { value: "", "Choose a playlist" }
+                                    for list in playlists.read().iter().filter(|p| p.can_edit) {
+                                        if playlist_filter().trim().is_empty() || list.name.to_lowercase().contains(&playlist_filter().trim().to_lowercase()) { option { value: "{list.id}", "{list.name}" } }
+                                    }
+                                }
+                            } }
                             if loading() && tracks.read().is_empty() {
                                 div { class: "track-table skeleton-table", role: "status", "aria-label": "Loading your library", "aria-busy": "true",
                                     for _ in 0..8 { div { class: "track-row skeleton-track-row", "aria-hidden": "true",
