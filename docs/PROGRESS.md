@@ -1504,3 +1504,16 @@ cards; exact `background-color` transitions on track rows; neutral 1px pure-blac
 Web rebuilt; Chromium41 passed/1 live-import skip (2.1m). Native CSS was not opened in
 a real window in this pass.
 
+## Native wide-window layout + inline forms — CSS fixed (2026-10-19)
+
+The 2288×937 native screenshot showed a large empty left band and stacked,
+touching folder/playlist controls. Cause: `.native-content` combined
+`max-width:1600px;margin:auto` with `padding-left:calc(sidebar+40px)`, so the
+centered 1600 box plus the sidebar inset produced a double offset; and native
+`inline-form` had no flex/gap rules at all (web-only), so inputs and buttons
+stacked flush. Fix: content is now left-anchored (`max-width:none;margin:0`) and
+native `.inline-form` mirrors the web flex row with `gap:9px` and 12px bottom
+spacing. `target/release/vela-desktop` rebuilt. Wide-window visual verification is
+NOT_RUN (the existing native QA window is 1280×840 and no credentials were used
+to open the signed-in screen).
+
