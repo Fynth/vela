@@ -16,8 +16,14 @@ async function openAdminFixture(page, cookies = adminCookies) {
 }
 
 async function openAdminSession(page) {
-  // Targeted --grep runs start with an empty fixture directory; the full serial
-  // suite already has the administrator, so accept both entry states.
+  // Full serial runs reuse the first test's administrator session, keeping the
+  // server's real per-IP login limiter untouched; targeted runs still sign in.
+  if (adminCookies) {
+    await page.context().addCookies(adminCookies);
+    await page.goto('/');
+    await expect(page.getByRole('button', { name: 'Library', exact: true }).first()).toBeVisible();
+    return await (await page.request.get('/api/me')).json();
+  }
   await page.goto('/');
   const setup = page.getByRole('button', { name: 'Create your music space →', exact: true });
   if (await setup.isVisible().catch(() => false)) {
