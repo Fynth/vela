@@ -153,6 +153,46 @@ pub(crate) fn account_root(root: &Path, key: &CacheKey) -> PathBuf {
     root.join(origin_hash(&key.origin)).join(&key.account_id)
 }
 
+fn namespace_root(origin: &str, account_id: &str) -> Result<PathBuf, String> {
+    if origin.is_empty()
+        || origin.len() > 2048
+        || origin.chars().any(|c| c.is_control() || c.is_whitespace())
+        || !crate::client::canonical_uuid(account_id)
+    {
+        return Err(UNAVAILABLE.into());
+    }
+    Ok(default_root()?.join(origin_hash(origin)).join(account_id))
+}
+
+/// Real bytes and published entry count of this account+origin playback cache.
+pub(crate) fn usage(origin: &str, account_id: &str) -> Result<(usize, u64), String> {
+    usage_at(&namespace_root(origin, account_id)?)
+}
+
+fn usage_at(root: &Path) -> Result<(usize, u64), String> {
+    let entries = published(root)?;
+    let bytes = entries.iter().map(|entry| entry.bytes).sum();
+    Ok((entries.len(), bytes))
+}
+
+/// Delete only this account+origin published cache pairs. Staging, orphans and
+/// pinned offline copies are deliberately left untouched; an open decoder lease
+/// keeps playing because Unix unlink does not close the descriptor.
+pub(crate) fn clear(origin: &str, account_id: &str) -> Result<(), String> {
+    let root = namespace_root(origin, account_id)?;
+    clear_at(&root, origin, account_id)
+}
+
+fn clear_at(account: &Path, origin: &str, account_id: &str) -> Result<(), String> {
+    for entry in published(account)? {
+        // `entry.track_id` was canonicalised by `published`.
+        let _ = CacheKey::new(origin, account_id, &entry.track_id)?;
+        let _ = fs::remove_file(account.join(format!("{}.audio", entry.track_id)));
+        let _ = fs::remove_file(account.join(format!("{}.json", entry.track_id)));
+    }
+    Ok(())
+}
+
 pub(crate) fn audio_path(root: &Path, key: &CacheKey) -> PathBuf {
     account_root(root, key).join(format!("{}.audio", key.track_id))
 }
@@ -1390,5 +1430,39 @@ mod tests {
         assert!(!audio_path(cache.path(), &key).exists());
         assert!(!sidecar_path(cache.path(), &key).exists());
         assert!(names(cache.path(), &key).is_empty());
+    }
+    #[test]
+    fn usage_and_clear_touch_only_published_pairs() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let key = key(ORIGIN, ACCOUNT, TRACK);
+        let namespace = account_root(root, &key);
+        fs::create_dir_all(&namespace).unwrap();
+        let bytes = b"cached audio bytes";
+        fs::write(audio_path(root, &key), bytes).unwrap();
+        let sidecar = Sidecar {
+            version: VERSION,
+            origin: ORIGIN.into(),
+            account_id: ACCOUNT.into(),
+            track_id: TRACK.into(),
+            size_bytes: bytes.len() as u64,
+            etag: digest(bytes),
+            digest: digest(bytes),
+            saved_at: 7,
+        };
+        fs::write(
+            sidecar_path(root, &key),
+            serde_json::to_vec(&sidecar).unwrap(),
+        )
+        .unwrap();
+        fs::write(namespace.join("foreign.tmp"), b"do not delete").unwrap();
+        let (entries, used) = usage_at(&namespace).unwrap();
+        assert_eq!(entries, 1);
+        assert!(used > bytes.len() as u64);
+        clear_at(&namespace, ORIGIN, ACCOUNT).unwrap();
+        assert!(!audio_path(root, &key).exists());
+        assert!(!sidecar_path(root, &key).exists());
+        assert!(namespace.join("foreign.tmp").exists());
+        assert_eq!(usage_at(&namespace).unwrap(), (0, 0));
     }
 }

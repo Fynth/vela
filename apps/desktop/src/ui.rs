@@ -246,6 +246,9 @@ struct Ui {
     offline_corrupt: Signal<Vec<String>>,
     offline_active: Signal<bool>,
     offline_confirm: Signal<String>,
+    cache_usage: Signal<Option<(usize, u64)>>,
+    cache_busy: Signal<bool>,
+    cache_confirm: Signal<bool>,
     /// The saved copy currently being verified off the UI thread (AUD-03).
     offline_checking: Signal<Option<crate::offline::OfflineTrack>>,
     /// The copy whose removal is in flight; removals are single-flight so an
@@ -434,6 +437,9 @@ impl Ui {
         self.offline_busy.set(String::new());
         self.offline_error.set(String::new());
         self.offline_corrupt.set(Vec::new());
+        self.cache_usage.set(None);
+        self.cache_busy.set(false);
+        self.cache_confirm.set(false);
         self.offline_active.set(false);
         self.offline_confirm.set(String::new());
         self.offline_checking.set(None);
@@ -4206,6 +4212,79 @@ fn queue_view(ui: Ui) -> Element {
 /// engine feature. Every control is a native focusable button/range/radio with an
 /// accessible name, and the percentage is announced through `aria-valuetext` rather
 /// than a live region that would announce on every drag step.
+fn cache_size_label(bytes: u64) -> String {
+    if bytes >= 1024 * 1024 {
+        format!("{:.1} MiB", bytes as f64 / (1024.0 * 1024.0))
+    } else {
+        format!("{} KiB", bytes / 1024)
+    }
+}
+
+fn refresh_cache_usage(mut ui: Ui) {
+    let Some(account) = ui.account.peek().clone() else {
+        return;
+    };
+    let epoch = account.epoch;
+    ui.cache_busy.set(true);
+    spawn(async move {
+        let result = tokio::task::spawn_blocking({
+            let origin = account.origin.clone();
+            let user = account.user.id.clone();
+            move || crate::media_cache::usage(&origin, &user)
+        })
+        .await;
+        if !ui.alive.get() || *ui.epoch.peek() != epoch || !ui.signed_in() {
+            return;
+        }
+        ui.cache_busy.set(false);
+        match result {
+            Ok(Ok((count, bytes))) => ui.cache_usage.set(Some((count, bytes))),
+            Ok(Err(error)) => {
+                ui.cache_usage.set(None);
+                ui.notice.set(error);
+            }
+            Err(_) => ui
+                .notice
+                .set("The playback cache could not be measured.".into()),
+        }
+    });
+}
+
+fn clear_media_cache(mut ui: Ui) {
+    let Some(account) = ui.account.peek().clone() else {
+        return;
+    };
+    let epoch = account.epoch;
+    if *ui.cache_busy.peek() {
+        return;
+    }
+    ui.cache_busy.set(true);
+    ui.cache_confirm.set(false);
+    spawn(async move {
+        let result = tokio::task::spawn_blocking({
+            let origin = account.origin.clone();
+            let user = account.user.id.clone();
+            move || crate::media_cache::clear(&origin, &user)
+        })
+        .await;
+        if !ui.alive.get() || *ui.epoch.peek() != epoch || !ui.signed_in() {
+            return;
+        }
+        ui.cache_busy.set(false);
+        match result {
+            Ok(Ok(())) => {
+                ui.cache_usage.set(Some((0, 0)));
+                ui.notice
+                    .set("Playback cache cleared. Saved offline copies were not touched.".into());
+            }
+            Ok(Err(error)) => ui.notice.set(error),
+            Err(_) => ui
+                .notice
+                .set("The playback cache could not be cleared.".into()),
+        }
+    });
+}
+
 fn settings_view(ui: Ui) -> Element {
     use crate::presentation::{SCALE_DEFAULT, SCALE_MAX, SCALE_MIN, SCALE_STEP};
     let preferences = *ui.device.read();
@@ -4217,6 +4296,15 @@ fn settings_view(ui: Ui) -> Element {
     let at_min = percent <= SCALE_MIN;
     let at_max = percent >= SCALE_MAX;
     let at_default = percent == SCALE_DEFAULT;
+    let usage = *ui.cache_usage.read();
+    let cache_busy = *ui.cache_busy.read();
+    let cache_confirm = *ui.cache_confirm.read();
+    let effect_ui = ui.clone();
+    use_effect(move || refresh_cache_usage(effect_ui.clone()));
+    let refresh_cache = ui.clone();
+    let clear_cache = ui.clone();
+    let confirm_cache = ui.clone();
+    let cancel_cache = ui.clone();
     let down = ui.clone();
     let up = ui.clone();
     let preview = ui.clone();
@@ -4282,6 +4370,28 @@ fn settings_view(ui: Ui) -> Element {
                 p {class:"settings-note","data-testid":"native-appearance-store","Stored for this computer only at {store} (owner-only file permissions). Removing that file restores the defaults."}
             }
             p {class:"settings-note","Account, playback, download and network preferences are not available in this version."}
+        }
+        section {class:"settings-panel","aria-labelledby":"storage-title","data-testid":"native-settings-storage",
+            h2 {id:"storage-title","Storage"}
+            div {class:"setting-row",
+                div {class:"setting-text",
+                    h3 {"Playback cache"}
+                    p {"Reusable complete originals for this account on this server. Clearing it never deletes your library, saved offline copies, queue or current playback."}
+                }
+                div {class:"setting-value",
+                    span {class:"app-scale-value","data-testid":"native-cache-usage",if cache_busy {"Measuring…"} else if let Some((count,bytes))=usage {{format!("{count} · {}",cache_size_label(bytes))}} else {"Unavailable"}}
+                }
+            }
+            div {class:"appearance-actions",
+                button {class:"button secondary small",disabled:cache_busy,onclick:move |_|refresh_cache_usage(refresh_cache.clone()),"Refresh cache size"}
+                if cache_confirm {
+                    button {class:"button danger small",disabled:cache_busy,onclick:move |_|clear_media_cache(clear_cache.clone()),"Confirm clear playback cache"}
+                    button {class:"button secondary small",onclick:move |_|{let mut ui=cancel_cache.clone();ui.cache_confirm.set(false);},"Keep cache"}
+                } else {
+                    button {class:"button secondary small",disabled:cache_busy||usage.is_none(),onclick:move |_|{let mut ui=confirm_cache.clone();ui.cache_confirm.set(true);},"Clear playback cache"}
+                }
+            }
+            p {class:"settings-note","Offline downloads are separate and are removed only from Library/Offline. Clearing the cache keeps an already playing decoder lease alive."}
         }
     }}
 }
@@ -4564,6 +4674,9 @@ pub fn App() -> Element {
         offline_corrupt: use_signal(Vec::new),
         offline_active: use_signal(|| false),
         offline_confirm: use_signal(String::new),
+        cache_usage: use_signal(|| None),
+        cache_busy: use_signal(|| false),
+        cache_confirm: use_signal(|| false),
         offline_checking: use_signal(|| None),
         offline_removing: use_signal(String::new),
         saved_peers: use_signal(|| crate::peers::load().unwrap_or_default()),
