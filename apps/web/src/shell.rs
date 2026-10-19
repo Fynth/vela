@@ -14,7 +14,7 @@ pub fn Sidebar(
     onplaylist: EventHandler<String>,
 ) -> Element {
     rsx! { aside { class: "sidebar",
-        a { class: "brand", href: "#home", "aria-label": "Vela home", onclick: move |e| { e.prevent_default(); onnav.call("home".into()); }, img { src:"/vela.svg", alt:"" } "vela." }
+        a { class: "brand", href: "#home", "aria-label": "Vela home", onclick: move |e| { e.prevent_default(); onnav.call("home".into()); }, img { src:"/vela.svg", alt:"" } span { class:"brand-wordmark", "vela" span { class:"brand-dot", "." } } }
         nav { "aria-label": "Main navigation",
             for (id,label) in [("home","Home"),("search","Search"),("library","Library")] {
                 button { class:if page==id {"nav-item active"} else {"nav-item"}, "aria-label":label, "data-destination":id, "aria-current":if page==id {"page"} else {"false"}, onclick:move |_| onnav.call(id.into()), Icon {name:id} "{label}" }

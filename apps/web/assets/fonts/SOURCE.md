@@ -11,9 +11,10 @@ web assets. They are served only from the exact allowlisted paths
   `https://raw.githubusercontent.com/google/fonts/main/ofl/manrope/Manrope%5Bwght%5D.ttf`
   (retrieved 2026-10-19). SHA256
   `3ae11c49db0455a3cc33e37d380f20fdb8c7f8b41dc07625c177e3d87a9d6ae6`.
-  Variable axis `wght` 200-800; source version "Version 2.000".
-- License: SIL Open Font License 1.1, Copyright 2018 The Manrope Project
-  Authors. `OFL.txt` is the upstream license file, SHA256
+  Variable axis `wght` 200-800; the source font reports version 4.505.
+- License: SIL Open Font License 1.1. The shipped `OFL.txt` carries
+  "Copyright 2018 The Manrope Project Authors"; the font name table carries
+  2019. `OFL.txt` is the upstream license file, SHA256
   `58172e0c0fac2cda8a37b348164bb55e44b0e69051e557e92b1d3f6910141f7b`.
   It matches the license hash recorded in
   `docs/PLANS/2026-10-19/PROTOTYPE_TRANSFER/06_ASSETS_AND_COPY.md`.

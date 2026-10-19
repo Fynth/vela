@@ -8,7 +8,7 @@
  * never replaces the existing playback/queue/privacy suites.
  */
 import { test, expect } from '@playwright/test';
-import { mkdir, mkdtemp, open, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, open, rm, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -135,6 +135,7 @@ test('TR01 self-hosted Manrope subsets load with no runtime font CDN and keep ro
   page.on('request', request => requests.push(request.url()));
   try {
     await setupWithTracks(page, runtime, 4);
+    await page.setViewportSize({ width: 1284, height: 856 });
     await page.goto(runtime.origin);
     await settle(page);
 
@@ -276,13 +277,20 @@ test('TR02 shell reserves one sidebar offset and one player band with one centra
     expect(await page.locator('#vela-audio').evaluate(audio => audio.paused)).toBe(false);
 
     const measurements = [];
-    for (const { width, height, sidebar, gutter, contentTop } of [
-      { width: 1284, height: 856, sidebar: 216, gutter: 33, contentTop: 24 },
-      { width: 1500, height: 900, sidebar: 240, gutter: 48, contentTop: 35 },
-      { width: 1501, height: 900, sidebar: 240, gutter: 48, contentTop: 35 },
-      { width: 3440, height: 1000, sidebar: 240, gutter: 48, contentTop: 35 },
-      { width: 390, height: 844, sidebar: 0, gutter: 20, contentTop: 25 },
-      { width: 320, height: 780, sidebar: 0, gutter: 16, contentTop: 25 },
+    for (const { width, height, sidebar, gutter, contentTop, playerHeight } of [
+      { width: 1284, height: 856, sidebar: 216, gutter: 33, contentTop: 24, playerHeight: 88 },
+      { width: 1500, height: 900, sidebar: 240, gutter: 48, contentTop: 35, playerHeight: 88 },
+      { width: 1501, height: 900, sidebar: 240, gutter: 48, contentTop: 35, playerHeight: 88 },
+      { width: 3440, height: 1000, sidebar: 240, gutter: 48, contentTop: 35, playerHeight: 88 },
+      { width: 1101, height: 900, sidebar: 216, gutter: 33, contentTop: 24, playerHeight: 88 },
+      { width: 1100, height: 900, sidebar: 190, gutter: 25, contentTop: 24, playerHeight: 88 },
+      { width: 900, height: 900, sidebar: 175, gutter: 20, contentTop: 24, playerHeight: 88 },
+      { width: 761, height: 900, sidebar: 175, gutter: 20, contentTop: 24, playerHeight: 88 },
+      { width: 760, height: 900, sidebar: 0, gutter: 20, contentTop: 25, playerHeight: 88 },
+      { width: 621, height: 900, sidebar: 0, gutter: 20, contentTop: 25, playerHeight: 88 },
+      { width: 620, height: 900, sidebar: 0, gutter: 20, contentTop: 25, playerHeight: 120 },
+      { width: 390, height: 844, sidebar: 0, gutter: 20, contentTop: 25, playerHeight: 120 },
+      { width: 320, height: 780, sidebar: 0, gutter: 16, contentTop: 25, playerHeight: 120 },
     ]) {
       await page.setViewportSize({ width, height });
       await settle(page);
@@ -327,6 +335,8 @@ test('TR02 shell reserves one sidebar offset and one player band with one centra
           topbarScroll: { before: box('.topbar').y },
           documentOverflow: document.documentElement.scrollWidth - innerWidth,
           bodyOverflow: document.body.scrollWidth - innerWidth,
+          documentScrollHeight: document.documentElement.scrollHeight,
+          bodyScrollHeight: document.body.scrollHeight,
           sidebarLeftGap: innerRect.left - mainRect.left,
           sidebarRightGap: mainRect.right - innerRect.right,
           roles: {
@@ -356,6 +366,8 @@ test('TR02 shell reserves one sidebar offset and one player band with one centra
       expect.soft(measured.topbarBox.scrollHeight, `${width} topbar content fits`).toBeLessThanOrEqual(measured.topbarBox.clientHeight + 1);
       expect.soft(measured.inner.top, `${width} content starts below topbar`).toBeGreaterThanOrEqual(measured.topbar.bottom - 1);
       expect.soft(measured.bodyOverflow, `${width} body overflow`).toBeLessThanOrEqual(1);
+      expect.soft(measured.documentScrollHeight, `${width} body is not a second scroller`).toBeLessThanOrEqual(height + 1);
+      expect.soft(measured.bodyScrollHeight, `${width} body scroll height`).toBeLessThanOrEqual(height + 1);
       expect.soft(measured.scroller.overflowY, `${width} scroller`).toMatch(/auto|scroll/);
       expect.soft(measured.scroller.scrollWidth, `${width} scroller horizontal overflow`).toBeLessThanOrEqual(measured.scroller.clientWidth + 1);
       expect.soft(measured.scroller.scrollHeight, `${width} content should be scrollable`).toBeGreaterThan(measured.scroller.clientHeight);
@@ -368,7 +380,7 @@ test('TR02 shell reserves one sidebar offset and one player band with one centra
         expect.soft(measured.sidebar.display, `${width} sidebar hidden`).toBe('none');
         near(measured.topbar.height, 63);
         near(measured.main.x, 0);
-        near(measured.player.height, 120);
+        near(measured.player.height, playerHeight);
         near(measured.player.bottom, measured.nav.y);
         near(measured.nav.height, 70);
         near(measured.nav.bottom, height);
@@ -381,7 +393,7 @@ test('TR02 shell reserves one sidebar offset and one player band with one centra
         near(measured.main.x, sidebar);
         near(measured.topbar.height, 75);
         near(measured.topbar.paddingLeft, gutter);
-        near(measured.player.height, 88);
+        near(measured.player.height, playerHeight);
         near(measured.player.bottom, height);
         near(measured.scroller.bottom, measured.player.top);
         expect.soft(measured.nav.display, `${width} no mobile navigation`).toBe('none');
@@ -405,6 +417,46 @@ test('TR02 shell reserves one sidebar offset and one player band with one centra
 
       await page.locator('#main-scroll').evaluate(element => { element.scrollTop = 0; });
       await page.screenshot({ path: `${output}/shell-${width}x${height}.png`, animations: 'disabled' });
+    }
+
+    // Device app size composes with the shell exactly once: the 100dvh shell is
+    // divided by the same --app-zoom the preference adapter writes, so 80% and
+    // 150% still fill one viewport with one player band.
+    await page.setViewportSize({ width: 1284, height: 856 });
+    await settle(page);
+    const zoomChecks = [];
+    for (const zoom of [0.8, 1.5]) {
+      const previous = await page.evaluate(() => document.documentElement.style.getPropertyValue('--app-zoom'));
+      const zoomed = await page.evaluate(async value => {
+        document.documentElement.style.setProperty('--app-zoom', String(value));
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        const shell = document.querySelector('.app-shell').getBoundingClientRect();
+        const player = document.querySelector('.player-bar').getBoundingClientRect();
+        const topbar = document.querySelector('.topbar').getBoundingClientRect();
+        const scroller = document.querySelector('#main-scroll').getBoundingClientRect();
+        return {
+          zoom: value, innerWidth, innerHeight,
+          shellHeight: shell.height, shellWidth: shell.width,
+          topbarHeight: topbar.height, playerHeight: player.height,
+          playerBottom: player.bottom, scrollerBottom: scroller.bottom,
+          overflow: document.documentElement.scrollWidth - innerWidth,
+          computedZoom: getComputedStyle(document.documentElement).zoom,
+        };
+      }, zoom);
+      zoomChecks.push(zoomed);
+      expect.soft(zoomed.computedZoom, `${zoom} only one zoom`).toBe(String(zoom));
+      expect.soft(zoomed.shellHeight, `${zoom} shell fills one viewport`).toBeCloseTo(zoomed.innerHeight, 0);
+      expect.soft(zoomed.shellWidth, `${zoom} shell fills viewport width`).toBeCloseTo(zoomed.innerWidth, 0);
+      expect.soft(zoomed.topbarHeight, `${zoom} topbar scales once`).toBeCloseTo(75 * zoom, 0);
+      expect.soft(zoomed.playerHeight, `${zoom} player scales once`).toBeCloseTo(88 * zoom, 0);
+      expect.soft(zoomed.playerBottom, `${zoom} player ends at viewport`).toBeCloseTo(zoomed.innerHeight, 0);
+      expect.soft(zoomed.scrollerBottom, `${zoom} scroller ends above player`).toBeCloseTo(zoomed.playerBottom - zoomed.playerHeight, 0);
+      expect.soft(zoomed.overflow, `${zoom} no zoom overflow`).toBeLessThanOrEqual(1);
+      await page.evaluate(previousValue => {
+        if (previousValue) document.documentElement.style.setProperty('--app-zoom', previousValue);
+        else document.documentElement.style.removeProperty('--app-zoom');
+      }, previous);
+      await settle(page);
     }
 
     // Every currently shipped destination remains reachable at the reference
@@ -435,6 +487,6 @@ test('TR02 shell reserves one sidebar offset and one player band with one centra
       }
     }
 
-    await writeFile(`${output}/shell-geometry.json`, JSON.stringify(measurements, null, 2));
+    await writeFile(`${output}/shell-geometry.json`, JSON.stringify({ measurements, zoomChecks }, null, 2));
   } finally { await runtime.close(); }
 });
