@@ -249,6 +249,7 @@ struct Ui {
     cache_usage: Signal<Option<(usize, u64)>>,
     cache_busy: Signal<bool>,
     cache_confirm: Signal<bool>,
+    restored_position: Signal<u64>,
     /// The saved copy currently being verified off the UI thread (AUD-03).
     offline_checking: Signal<Option<crate::offline::OfflineTrack>>,
     /// The copy whose removal is in flight; removals are single-flight so an
@@ -440,6 +441,7 @@ impl Ui {
         self.cache_usage.set(None);
         self.cache_busy.set(false);
         self.cache_confirm.set(false);
+        self.restored_position.set(0);
         self.offline_active.set(false);
         self.offline_confirm.set(String::new());
         self.offline_checking.set(None);
@@ -795,6 +797,7 @@ fn restore_queue_snapshot(mut ui: Ui) {
                 _ => Repeat::Off,
             });
             ui.context.set(snapshot.context);
+            ui.restored_position.set(snapshot.position_ms);
         }
     });
 }
@@ -2206,7 +2209,8 @@ fn set_playing(mut ui: Ui, desired: bool) {
         if ui.remote_now.peek().is_some() {
             start_remote(ui);
         } else {
-            start_source(ui, false, true, 0);
+            let position = *ui.restored_position.peek();
+            start_source(ui, false, true, position);
         }
         return;
     } else if desired {
@@ -4746,6 +4750,7 @@ pub fn App() -> Element {
         cache_usage: use_signal(|| None),
         cache_busy: use_signal(|| false),
         cache_confirm: use_signal(|| false),
+        restored_position: use_signal(|| 0),
         offline_checking: use_signal(|| None),
         offline_removing: use_signal(String::new),
         saved_peers: use_signal(|| crate::peers::load().unwrap_or_default()),
