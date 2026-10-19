@@ -15,6 +15,25 @@ async function openAdminFixture(page, cookies = adminCookies) {
   await page.getByRole('button', { name: 'Library', exact: true }).first().click();
 }
 
+async function openAdminSession(page) {
+  // Targeted --grep runs start with an empty fixture directory; the full serial
+  // suite already has the administrator, so accept both entry states.
+  await page.goto('/');
+  const setup = page.getByRole('button', { name: 'Create your music space →', exact: true });
+  if (await setup.isVisible().catch(() => false)) {
+    await page.locator('#username').fill('admin');
+    await page.locator('#password').fill(password);
+    await setup.click();
+    await expect(page.getByRole('heading', { name: 'Make room for your first listen', exact: true })).toBeVisible();
+  } else {
+    await page.locator('#username').fill('admin');
+    await page.locator('#password').fill(password);
+    await page.getByRole('button', { name: 'Sign in →', exact: true }).click();
+  }
+  await expect(page.getByRole('button', { name: 'Library', exact: true }).first()).toBeVisible();
+  return await (await page.request.get('/api/me')).json();
+}
+
 
 async function navigate(page, name) {
   const mobile = page.getByRole('navigation', { name: 'Mobile navigation', exact: true });
@@ -916,6 +935,191 @@ test('Home and global search use real music while navigation preserves the playe
   await page.getByRole('button', { name: 'Show playback queue and controls', exact: true }).click();
   await expect(page.locator('.queue-row .queue-track strong')).toHaveText([track.title, 'Beacon', 'Beacon', 'Signal edited in Vela']);
   await expect(page.locator('.queue-row').first()).toHaveClass(/current/);
+  expect(errors).toEqual([]);
+});
+
+test('IN01 Home and search skeletons keep real geometry without changing playback', async ({ page }) => {
+  test.setTimeout(180000);
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  const auth = await openAdminSession(page);
+  // Long enough that genuine playback cannot end while the held requests resolve.
+  const wave = pcmWave(60, 440);
+  const upload = await page.request.post('/api/upload', { headers: { 'X-CSRF-Token': auth.csrf_token }, multipart: { file: { name: 'IN01 skeleton source.wav', mimeType: 'audio/wav', buffer: wave } } });
+  expect(upload.ok()).toBeTruthy();
+  const track = (await upload.json()).track;
+  // Catalog-only artist metadata makes the real card a complete title/artist row,
+  // the shape the skeleton reserves; the audio file itself is untouched.
+  const metadata = await (await page.request.get(`/api/tracks/${track.id}/metadata`)).json();
+  const cataloged = await page.request.patch(`/api/tracks/${track.id}/metadata`, { headers: { 'X-CSRF-Token': auth.csrf_token }, data: { revision: metadata.revision, title: track.title, artist: 'Vela Test', album: 'IN01 geometry', album_artist: 'Vela Test', genre: '', year: null, track_number: null, disc_number: null } });
+  expect(cataloged.ok()).toBeTruthy();
+
+  await navigate(page, 'Library');
+  const play = page.getByRole('button', { name: `Play ${track.title}`, exact: true }).first();
+  await expect(play).toBeVisible();
+  await play.click();
+  await expect.poll(() => page.locator('#vela-audio').evaluate(audio => audio.currentTime)).toBeGreaterThan(0);
+  await page.evaluate(() => { window.__in01Audio = document.getElementById('vela-audio'); });
+  const playback = await page.locator('#vela-audio').evaluate(audio => ({ src: audio.getAttribute('src'), generation: audio.getAttribute('data-source-generation') }));
+  expect(playback.src).toBeTruthy();
+  expect(playback.generation).toBeTruthy();
+  const playbackUnchanged = async () => {
+    const now = await page.locator('#vela-audio').evaluate(audio => ({ same: audio === window.__in01Audio, src: audio.getAttribute('src'), generation: audio.getAttribute('data-source-generation') }));
+    expect(now.same).toBeTruthy();
+    expect(now.src).toBe(playback.src);
+    expect(now.generation).toBe(playback.generation);
+  };
+  const cardMetrics = selector => page.locator(selector).first().evaluate(card => {
+    const rect = card.getBoundingClientRect();
+    const style = getComputedStyle(card);
+    const art = card.querySelector('.artwork').getBoundingClientRect();
+    const grid = getComputedStyle(card.parentElement);
+    const parts = [...card.children].map(child => ({ tag: child.tagName, cls: String(child.className), height: child.getBoundingClientRect().height, top: child.getBoundingClientRect().top - rect.top }));
+    const small = card.querySelector('small');
+    const shape = element => element && ({ height: element.getBoundingClientRect().height, fontSize: getComputedStyle(element).fontSize, lineHeight: getComputedStyle(element).lineHeight, display: getComputedStyle(element).display });
+    return { height: rect.height, padding: style.padding, columns: grid.gridTemplateColumns, gap: grid.gap, artWidth: art.width, artHeight: art.height, parts, title: card.querySelector('strong')?.textContent, artist: small?.textContent, smallHeight: small ? small.getBoundingClientRect().height : null, strongShape: shape(card.querySelector('strong')), smallShape: shape(small),
+      playShape: shape(card.querySelector('.track-skeleton-play, .listening-card-play')), cardDisplay: style.display };
+  });
+
+  let homeHold = null;
+  let homeFailure = false;
+  await page.route('**/api/tracks?*', async route => {
+    const params = new URL(route.request().url()).searchParams;
+    const recent = params.get('sort') === 'newest' && !params.has('favorites');
+    if (recent && homeFailure) {
+      homeFailure = false;
+      await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'fixture tracks outage' }) });
+      return;
+    }
+    if (recent && homeHold) {
+      const hold = homeHold;
+      hold.seen();
+      await hold.gate;
+      try { const response = await route.fetch(); await route.fulfill({ response }); } catch {}
+      hold.deliver();
+      return;
+    }
+    await route.continue();
+  });
+  const holdHome = () => {
+    let release, seen, delivered;
+    const gate = new Promise(resolve => { release = resolve; });
+    const held = new Promise(resolve => { seen = resolve; });
+    const done = new Promise(resolve => { delivered = resolve; });
+    homeHold = { gate, seen, deliver: delivered };
+    return { held, done, release };
+  };
+
+  const firstHome = holdHome();
+  await navigate(page, 'Home');
+  await firstHome.held;
+  const loadingHome = page.getByRole('status', { name: 'Loading Home', exact: true });
+  await expect(loadingHome).toBeVisible();
+  await expect(loadingHome).toHaveAttribute('aria-busy', 'true');
+  await expect(page.locator('.track-skeleton-card')).toHaveCount(4);
+  await expect(page.locator('.track-skeleton-card').first().locator('.track-skeleton-art')).toBeVisible();
+  await expect(page.locator('.track-skeleton-card').first().locator('.track-skeleton-bar')).toHaveCount(2);
+  const skeleton = await cardMetrics('.track-skeleton-card');
+  expect(Math.abs(skeleton.artWidth - skeleton.artHeight)).toBeLessThanOrEqual(1);
+  expect(await page.locator('.track-skeleton-card .track-skeleton-art').first().evaluate(node => getComputedStyle(node).animationName)).toBe('vela-track-loading');
+  await playbackUnchanged();
+  firstHome.release(); await firstHome.done;
+  homeHold = null;
+  const realCards = page.locator('.home-track-grid .listening-card:not(.track-skeleton-card)');
+  await expect(realCards.first()).toBeVisible();
+  await expect(page.locator('.track-skeleton-card')).toHaveCount(0);
+  const real = await cardMetrics('.home-track-grid .listening-card:not(.track-skeleton-card)');
+  console.log('IN01 metrics', JSON.stringify({ skeleton, real, all: await realCards.evaluateAll(cards => cards.slice(0, 4).map(card => ({ title: card.querySelector('strong')?.textContent, artist: card.querySelector('small')?.textContent, height: card.getBoundingClientRect().height }))) }));
+  expect(real.padding).toBe(skeleton.padding);
+  const skeletonColumns = skeleton.columns.split(' ').map(width => parseFloat(width));
+  const realColumns = real.columns.split(' ').map(width => parseFloat(width));
+  expect(realColumns.length).toBe(skeletonColumns.length);
+  realColumns.forEach((width, at) => expect(Math.abs(width - skeletonColumns[at])).toBeLessThanOrEqual(0.5));
+  expect(real.gap).toBe(skeleton.gap);
+  expect(Math.abs(real.height - skeleton.height)).toBeLessThanOrEqual(2);
+  expect(Math.abs(real.artHeight - skeleton.artHeight)).toBeLessThanOrEqual(2);
+  await playbackUnchanged();
+
+  // Known rows stay while a same-view refresh is pending, and a failed refresh
+  // keeps them instead of falling back to placeholders.
+  const pendingHome = holdHome();
+  await page.getByRole('button', { name: 'Refresh Home', exact: true }).click();
+  await pendingHome.held;
+  await expect(realCards.first()).toBeVisible();
+  await expect(page.locator('.track-skeleton-card')).toHaveCount(0);
+  await playbackUnchanged();
+  pendingHome.release(); await pendingHome.done;
+  homeHold = null;
+  homeFailure = true;
+  await page.getByRole('button', { name: 'Refresh Home', exact: true }).click();
+  await expect(page.locator('.home-page .alert.error')).toBeVisible();
+  await expect(page.locator('.track-skeleton-card')).toHaveCount(0);
+  await expect(realCards.first()).toBeVisible();
+  await playbackUnchanged();
+
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  let searchHold = null;
+  let searchFailure = null;
+  await page.route('**/api/search?*', async route => {
+    const query = new URL(route.request().url()).searchParams.get('q');
+    if (searchFailure === query) {
+      searchFailure = null;
+      await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'fixture search outage' }) });
+      return;
+    }
+    if (searchHold && searchHold.query === query) {
+      const hold = searchHold;
+      hold.seen();
+      await hold.gate;
+      try { const response = await route.fetch(); await route.fulfill({ response }); } catch {}
+      hold.delivered();
+      return;
+    }
+    await route.continue();
+  });
+  const holdSearch = query => {
+    let release, seen, delivered;
+    const gate = new Promise(resolve => { release = resolve; });
+    const held = new Promise(resolve => { seen = resolve; });
+    const done = new Promise(resolve => { delivered = resolve; });
+    searchHold = { query, gate, seen, delivered };
+    return { held, done, release };
+  };
+
+  const firstSearch = holdSearch(track.title);
+  await navigate(page, 'Search');
+  await page.locator('#global-search').fill(track.title);
+  await firstSearch.held;
+  const loadingSearch = page.getByRole('status', { name: 'Searching your library', exact: true });
+  await expect(loadingSearch).toBeVisible();
+  await expect(loadingSearch).toHaveAttribute('aria-busy', 'true');
+  await expect(page.locator('.track-skeleton-row')).toHaveCount(3);
+  expect(await page.locator('.track-skeleton-row .track-skeleton-art').first().evaluate(node => getComputedStyle(node).animationName)).toBe('none');
+  expect(await page.locator('.track-skeleton-row .track-skeleton-bar').first().evaluate(node => getComputedStyle(node).animationName)).toBe('none');
+  await playbackUnchanged();
+  firstSearch.release(); await firstSearch.done;
+  searchHold = null;
+  const realRows = page.locator('.search-track-row:not(.track-skeleton-row)');
+  await expect(realRows.first()).toBeVisible();
+  await expect(page.locator('.track-skeleton-row')).toHaveCount(0);
+  await playbackUnchanged();
+
+  const refreshSearch = holdSearch(track.title);
+  await page.locator('#global-search').press('Enter');
+  await refreshSearch.held;
+  await expect(realRows.first()).toBeVisible();
+  await expect(page.locator('.track-skeleton-row')).toHaveCount(0);
+  await expect(page.getByRole('status', { name: 'Searching your library', exact: true })).toHaveCount(0);
+  await playbackUnchanged();
+  refreshSearch.release(); await refreshSearch.done;
+  searchHold = null;
+
+  searchFailure = 'IN01 missing title';
+  await page.locator('#global-search').fill('IN01 missing title');
+  await expect(page.locator('.search-page .alert.error')).toBeVisible();
+  await expect(page.getByRole('status', { name: 'Searching your library', exact: true })).toHaveCount(0);
+  await expect(page.locator('.track-skeleton-row')).toHaveCount(0);
+  await playbackUnchanged();
   expect(errors).toEqual([]);
 });
 

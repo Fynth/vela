@@ -79,6 +79,51 @@ fn TrackCards(tracks: Vec<Track>, origin: PlaybackContext, actions: Actions) -> 
     } } }
 }
 
+/// IN01: bounded placeholders reuse the real card and row geometry so a pending
+/// request never shifts the page. They invent no track names, percentages or
+/// play actions, and unmount as soon as a request settles or fails.
+const HOME_SKELETON_CARDS: usize = 4;
+const SEARCH_SKELETON_ROWS: usize = 3;
+
+#[component]
+fn TrackSkeletonCards() -> Element {
+    rsx! { div { class: "home-track-grid track-skeletons", role: "status", "aria-busy": "true", "aria-label": "Loading Home",
+        for index in 0..HOME_SKELETON_CARDS {
+            article { key: "{index}", class: "listening-card track-skeleton-card", "aria-hidden": "true",
+                div { class: "track-skeleton-play",
+                    div { class: "listening-cover", span { class: "artwork track-skeleton-art" } }
+                    strong { span { class: "track-skeleton-bar" } }
+                    small { span { class: "track-skeleton-bar artist" } }
+                }
+                div { class: "listening-actions track-skeleton-actions",
+                    span { class: "icon-button track-skeleton-action" }
+                    span { class: "icon-button track-skeleton-action" }
+                    span { class: "icon-button track-skeleton-action" }
+                }
+            }
+        }
+    } }
+}
+
+#[component]
+fn TrackSkeletonRows() -> Element {
+    rsx! { div { class: "search-skeletons track-skeletons", role: "status", "aria-busy": "true", "aria-label": "Searching your library",
+        for index in 0..SEARCH_SKELETON_ROWS {
+            div { key: "{index}", class: "search-track-row track-skeleton-row", "aria-hidden": "true",
+                div { class: "search-track-main",
+                    span { class: "artwork track-skeleton-art" }
+                    div { strong { span { class: "track-skeleton-bar" } } small { span { class: "track-skeleton-bar artist" } } }
+                }
+                div { class: "listening-actions track-skeleton-actions",
+                    span { class: "icon-button track-skeleton-action" }
+                    span { class: "icon-button track-skeleton-action" }
+                    span { class: "icon-button track-skeleton-action" }
+                }
+            }
+        }
+    } }
+}
+
 #[derive(Clone, Default)]
 struct HomeData {
     recent: Vec<Track>,
@@ -116,6 +161,7 @@ pub fn Home(
         let _refresh = *refresh.read();
         let request = generation.peek().wrapping_add(1);
         generation.set(request);
+        error.set(String::new());
         if *owner.peek() != session {
             data.set(HomeData::default());
             owner.set(session.clone());
@@ -145,11 +191,21 @@ pub fn Home(
             }
             let failed =
                 recent.is_err() || favorites.is_err() || albums.is_err() || playlists.is_err();
+            // Known rows stay during a refresh: a failed section keeps its last
+            // confirmed music instead of blanking what the listener already sees.
+            let HomeData {
+                recent: previous_recent,
+                favorites: previous_favorites,
+                albums: previous_albums,
+                playlists: previous_playlists,
+            } = data.peek().clone();
             data.set(HomeData {
-                recent: recent.map(|p| p.items).unwrap_or_default(),
-                favorites: favorites.map(|p| p.items).unwrap_or_default(),
-                albums: albums.map(|p| p.items).unwrap_or_default(),
-                playlists: playlists.unwrap_or_default().into_iter().take(6).collect(),
+                recent: recent.map(|p| p.items).unwrap_or(previous_recent),
+                favorites: favorites.map(|p| p.items).unwrap_or(previous_favorites),
+                albums: albums.map(|p| p.items).unwrap_or(previous_albums),
+                playlists: playlists
+                    .map(|items| items.into_iter().take(6).collect())
+                    .unwrap_or(previous_playlists),
             });
             error.set(if failed {
                 "Some sections could not be loaded. Check your connection and refresh Home.".into()
@@ -176,7 +232,7 @@ pub fn Home(
         }
         div { class: "section-toolbar home-toolbar", p { "Your music. A fresh place to start." } button { class: "button secondary small", disabled: loading(), onclick: move |_| { let next = refresh.peek().wrapping_add(1); refresh.set(next); }, "Refresh Home" } }
         if !error().is_empty() { div { class: "alert error", role: "alert", "{error}" } }
-        if loading() && snapshot.recent.is_empty() { div { class: "loading-skeletons", role: "status", "aria-label": "Loading Home", for _ in 0..4 { div { class: "skeleton-card", "aria-hidden": "true" } } } }
+        if loading() && snapshot.recent.is_empty() && error().is_empty() { TrackSkeletonCards {} }
         {children}
         if !snapshot.recent.is_empty() {
             section { class: "home-section", "aria-labelledby": "home-additions", div { class: "section-toolbar", h2 { id: "home-additions", "New in your library" } button { class: "text-button", onclick: move |_| actions.navigate.call("library".into()), "Open library" } } TrackCards { tracks: snapshot.recent, origin:PlaybackContext::new(ContextKind::Home,"New in your library"), actions } }
@@ -211,6 +267,10 @@ pub fn Search(
     let mut submitted = use_signal(|| 0_u64);
     let mut last_submit = use_signal(|| 0_u64);
     let mut results = use_signal(|| None::<SearchResults>);
+    // Which query and account the visible rows belong to, so a pending refresh of
+    // the same search keeps known rows instead of replacing them with skeletons.
+    let mut shown = use_signal(String::new);
+    let mut shown_session = use_signal(String::new);
     let mut loading = use_signal(|| false);
     let mut error = use_signal(String::new);
     use_effect(move || {
@@ -223,11 +283,16 @@ pub fn Search(
         last_submit.set(submit);
         let request = generation.peek().wrapping_add(1);
         generation.set(request);
-        results.set(None);
-        error.set(String::new());
         let session = token(auth);
+        if *shown.peek() != text || *shown_session.peek() != session {
+            results.set(None);
+        }
+        error.set(String::new());
         if text.trim().is_empty() || session.is_empty() {
             loading.set(false);
+            results.set(None);
+            shown.set(String::new());
+            shown_session.set(String::new());
             return;
         }
         if text.len() > 256 || text.chars().any(char::is_control) {
@@ -263,7 +328,11 @@ pub fn Search(
                 return;
             }
             match response {
-                Ok(value) => results.set(Some(value)),
+                Ok(value) => {
+                    results.set(Some(value));
+                    shown.set(text.clone());
+                    shown_session.set(session.clone());
+                }
                 Err(message) => error.set(message),
             }
             loading.set(false);
@@ -292,7 +361,7 @@ pub fn Search(
             button { class: if selected_category == id { "filter-chip active" } else { "filter-chip" }, "aria-pressed": selected_category == id, onclick: move |_| { category.set(id); }, "{label}" }
         } }
         p { class: "search-scope", "Your library and explicitly shared playlist titles · Up to 8 results per category" }
-        if loading() { div { class: "loading-skeletons", role: "status", "aria-label": "Searching your library", for _ in 0..3 { div { class: "skeleton-row", "aria-hidden": "true" } } } }
+        if loading() && found.is_none() && error().is_empty() { TrackSkeletonRows {} }
         if !error().is_empty() { div { class: "alert error", role: "alert", span { "{error}" } button { class: "button secondary small", onclick: move |_| { let next=submitted.peek().wrapping_add(1); submitted.set(next); }, "Retry search" } } }
         if query().trim().is_empty() { div { class: "empty-state search-empty", Icon { name: "search" } h2 { "Find your next listen" } p { "Search your tracks, albums, artists and playlist names. Only music you can access appears here." } } }
         if let Some(found) = found {

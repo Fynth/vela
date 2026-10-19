@@ -1808,7 +1808,17 @@ fn App() -> Element {
                                 }
                             }
                             if !playlists.read().is_empty() { div { class: "playlist-target", label { r#for: "playlist-target", "Add tracks to" } select { id: "playlist-target", value: "{selected_add_playlist}", onchange: move |e| selected_add_playlist.set(e.value()), option { value: "", "Choose a playlist" } for list in playlists.read().iter().filter(|p| p.can_edit) { option { value: "{list.id}", "{list.name}" } } } } }
-                            if loading() && tracks.read().is_empty() { div { class: "empty-state", div { class: "spinner" } h3 { "Finding your music…" } } }
+                            if loading() && tracks.read().is_empty() {
+                                div { class: "track-table skeleton-table", role: "status", "aria-label": "Loading your library", "aria-busy": "true",
+                                    for _ in 0..8 { div { class: "track-row skeleton-track-row", "aria-hidden": "true",
+                                        span { class: "skeleton-block skeleton-index" }
+                                        div { class: "skeleton-title", div { class: "skeleton-block skeleton-art" } div { class: "skeleton-lines", span { class: "skeleton-block skeleton-line skeleton-line-wide" } span { class: "skeleton-block skeleton-line skeleton-line-short" } } }
+                                        span { class: "skeleton-block skeleton-line skeleton-album" }
+                                        span { class: "skeleton-block skeleton-line skeleton-time" }
+                                        span { class: "skeleton-block skeleton-dot" }
+                                    } }
+                                }
+                            }
                             else if tracks.read().is_empty() { div { class: "empty-state", span { class: "empty-icon", if page() == "favorites" { Icon { name: "heart" } } else { Icon { name: "music" } } }
                                     h3 { if !library_conditions.read().query.is_empty() || filters::has_criteria(&library_conditions.read().filters) { "No matching tracks" } else if page() == "favorites" { "Keep the good ones close" } else { "Your collection starts here" } }
                                     p { if filters::has_criteria(&library_conditions.read().filters) { "No tracks match your applied filters. Broaden the filters or reset them to see more of your music." } else if !library_conditions.read().query.is_empty() { "Try another title, artist, or album, or clear your search." } else if page() == "favorites" { "Tap the heart beside a track to save it here." } else { "Upload your audio files or import a downloadable music link." } }

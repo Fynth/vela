@@ -754,3 +754,46 @@ input::placeholder { color:var(--quiet); opacity:1; }
   .player-bar { grid-template-columns: minmax(0, 1fr) 140px; }
   .mobile-nav button { min-width: 0; flex: 1 1 0; }
 }
+
+/* IN01: geometry-matched library skeleton rows */
+.skeleton-table { margin-top:4px; }
+.skeleton-track-row { pointer-events:none; }
+.skeleton-block { display:block; border-radius:5px; background:linear-gradient(100deg,var(--surface-raised) 20%,var(--surface-hover) 40%,var(--surface-raised) 60%); background-size:200% 100%; animation:vela-skeleton 1.3s ease-in-out infinite; }
+.skeleton-index { width:18px; height:12px; justify-self:start; }
+.skeleton-title { display:flex; align-items:center; gap:12px; min-width:0; }
+.skeleton-art { width:43px; height:43px; min-width:43px; border-radius:7px; }
+.skeleton-lines { display:grid; gap:7px; min-width:0; flex:1; }
+.skeleton-line { height:10px; }
+.skeleton-line-wide { width:min(220px,80%); }
+.skeleton-line-short { width:min(120px,45%); height:8px; }
+.skeleton-album { width:min(130px,80%); height:9px; }
+.skeleton-time { width:30px; height:9px; justify-self:end; }
+.skeleton-dot { width:26px; height:26px; border-radius:50%; justify-self:end; }
+@keyframes vela-skeleton { from { background-position:200% 0; } to { background-position:-200% 0; } }
+@media (prefers-reduced-motion: reduce) { .skeleton-block { animation:none; background:var(--surface-raised); } }
+@media (max-width:850px) { .skeleton-album { display:none; } .skeleton-track-row { grid-template-columns:20px minmax(150px,1fr) 42px 73px; } }
+@media (max-width:620px) { .skeleton-track-row { grid-template-columns:18px minmax(100px,1fr) 35px 53px; padding:9px 0; } .skeleton-art { width:39px; height:39px; min-width:39px; } }
+
+/* IN01: Home and global-search skeletons reuse the real listening card and
+   search row geometry, so a pending request never moves what follows. */
+.track-skeletons { pointer-events:none; }
+.home-track-grid.track-skeletons { margin:0; }
+.search-skeletons { margin:22px 0 32px; }
+.track-skeleton-art,.track-skeleton-bar,.track-skeleton-action {
+  background:linear-gradient(100deg,var(--surface-raised) 20%,var(--surface-hover) 40%,var(--surface-raised) 60%);
+  background-size:200% 100%;
+  animation:vela-track-loading 1.3s ease-in-out infinite;
+}
+.track-skeleton-art { border-radius:6px; }
+.track-skeleton-play { display:inline-block; width:100%; }
+.track-skeleton-bar { display:inline-block; vertical-align:baseline; width:68%; height:10px; border-radius:5px; }
+.track-skeleton-bar.artist { width:44%; height:8px; }
+.track-skeleton-action { border-radius:8px; }
+@keyframes vela-track-loading { from { background-position:200% 0; } to { background-position:-200% 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .track-skeleton-art,.track-skeleton-bar,.track-skeleton-action { animation:none; background:var(--surface-raised); }
+}
+/* IN01: match the real card's text metrics so the settled card keeps its height. */
+.track-skeleton-card strong { height:16px; line-height:16px; }
+.track-skeleton-card small { height:12px; line-height:12px; }
+.track-skeleton-card .track-skeleton-bar { height:100%; }
