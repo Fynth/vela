@@ -982,3 +982,361 @@ test('TR03 persistent player projects the root engine with reference geometry an
     await writeFile(`${output}/player-evidence.json`, JSON.stringify({ playerTrack, before, after, seek, measurements }, null, 2));
   } finally { await runtime.close(); }
 });
+
+test('TR04a Home composes bounded filter views from real DTOs and keeps one root player', async ({ page }) => {
+  test.setTimeout(180000);
+  const output = resolve(root, process.env.VELA_TRANSFER_EVIDENCE || 'target/checks/prototype-transfer-web');
+  await mkdir(output, { recursive: true });
+  const runtime = await signedInFixture(output);
+  try {
+    const setup = await page.request.post(runtime.origin + '/api/setup', {
+      headers: { Origin: runtime.origin },
+      data: { username: 'admin', password: 'private home filter fixture password' },
+    });
+    expect(setup.ok()).toBeTruthy();
+    const me = await setup.json();
+    const headers = { 'X-CSRF-Token': me.csrf_token, Origin: runtime.origin };
+
+    // One covered release plus owner-edited albums: every shelf card below is a
+    // real AlbumSummary. Only the embedded fixture art is a real image; the
+    // untagged copies must fall back to the owned neutral mark, never to art.
+    const addAlbum = async (index, seconds) => {
+      const track = await uploadTrack(page, runtime, me.csrf_token,
+        `Shelf ${String(index).padStart(2, '0')}.wav`, 'audio/wav', pcmWave(seconds, 430 + index * 19));
+      const metadata = await (await page.request.get(`${runtime.origin}/api/tracks/${track.id}/metadata`)).json();
+      const edited = await page.request.patch(`${runtime.origin}/api/tracks/${track.id}/metadata`, {
+        headers,
+        data: {
+          revision: metadata.revision, title: track.title, artist: 'Shelf Artist',
+          album: `Shelf album ${index}`, album_artist: 'Shelf Artist', genre: '',
+          year: null, track_number: index, disc_number: 1,
+        },
+      });
+      expect(edited.ok(), `album ${index}`).toBeTruthy();
+      return track;
+    };
+    const covered = await uploadTrack(page, runtime, me.csrf_token, 'Covered original.flac', 'audio/flac',
+      await readFile(COVERED_FLAC));
+    expect(covered.artwork_id, 'fixture must carry embedded artwork').toBeTruthy();
+    const shelfTracks = [];
+    for (let at = 1; at <= 5; at++) shelfTracks.push(await addAlbum(at, at === 1 ? 60 : 4));
+    const seeded = await (await page.request.get(runtime.origin + '/api/albums?limit=100')).json();
+    expect(seeded.items.length).toBe(6);
+    expect(seeded.items.some(album => album.artwork_id), 'at least one real cover').toBeTruthy();
+
+    const imageRequests = [];
+    const homeRequests = [];
+    page.on('request', request => {
+      imageRequests.push(request.url());
+      const url = new URL(request.url());
+      if (url.pathname === '/api/tracks' || url.pathname === '/api/albums') homeRequests.push(url.searchParams);
+    });
+    await page.setViewportSize({ width: 1284, height: 856 });
+    // Pending Home must never render a no-results view: hold the real request
+    // and open the filter views before it resolves.
+    let releaseHome;
+    const homeGate = new Promise(resolve => { releaseHome = resolve; });
+    let heldHome = false;
+    await page.route('**/api/tracks?*', async route => {
+      const url = new URL(route.request().url());
+      if (!heldHome && url.searchParams.get('sort') === 'newest') {
+        heldHome = true;
+        await homeGate;
+      }
+      await route.continue();
+    });
+    await page.goto(runtime.origin);
+    await expect(page.locator('.app-shell')).toBeVisible();
+    const tab = name => page.getByRole('tab', { name, exact: true });
+    await expect(tab('Playlists')).toBeVisible();
+    await tab('Playlists').click();
+    await expect(page.getByRole('status', { name: 'Loading Home', exact: true })).toBeVisible();
+    await expect(page.locator('.home-playlists-view .empty-state')).toHaveCount(0);
+    await expect(page.locator('.home-playlists-view')).toHaveCount(0);
+    await tab('Albums').click();
+    await expect(page.locator('.track-skeleton-card')).toHaveCount(4);
+    await expect(page.locator('.home-albums')).toHaveCount(0);
+    releaseHome();
+    await expect(page.locator('.home-albums')).toBeVisible();
+    await page.unroute('**/api/tracks?*');
+    await tab('For you').click();
+    await settle(page);
+    const initial = homeRequests.map(params => Object.fromEntries(params.entries()));
+    expect(initial).toEqual(expect.arrayContaining([
+      expect.objectContaining({ sort: 'newest', limit: '8' }),
+      expect.objectContaining({ limit: '6' }),
+    ]));
+    expect(initial.every(params => params.limit && Number(params.limit) <= 8), 'bounded Home requests only').toBe(true);
+    await expect(tab('For you')).toHaveAttribute('aria-selected', 'true');
+
+    // The long real WAV carries the cross-view identity check: filters may not
+    // create a second source, move the position or rebuild the queue.
+    await navigate(page, 'Library');
+    await page.getByRole('button', { name: `Play ${shelfTracks[0].title}`, exact: true }).click();
+    await expect.poll(() => page.locator('#vela-audio').evaluate(audio => audio.currentTime)).toBeGreaterThan(0.2);
+    await page.evaluate(() => {
+      const element = document.querySelector('#vela-audio');
+      element.dataset.tr04 = 'single-root-player';
+      window.__tr04Audio = element;
+    });
+    await page.getByRole('button', { name: 'Show playback queue', exact: true }).click();
+    const queue = page.getByRole('complementary', { name: 'Playback queue', exact: true });
+    await expect(queue.locator('.queue-row')).toHaveCount(6);
+    await page.getByRole('button', { name: 'Close playback queue', exact: true }).click();
+    await navigate(page, 'Home');
+    await expect(page.getByRole('heading', { name: 'New in your library', exact: true })).toBeVisible();
+
+    const readPlayer = () => page.evaluate(() => {
+      const element = document.querySelector('#vela-audio');
+      return {
+        same: element === window.__tr04Audio, marker: element.dataset.tr04,
+        count: document.querySelectorAll('audio').length,
+        src: element.getAttribute('src'), generation: element.getAttribute('data-source-generation'),
+        paused: element.paused, time: element.currentTime,
+        title: document.querySelector('.now-playing strong.player-title')?.textContent,
+      };
+    });
+    const assertPlayerHeld = async (label, before) => {
+      const after = await readPlayer();
+      expect.soft(after.same, `${label} same root element`).toBe(true);
+      expect.soft(after.marker, `${label} root marker`).toBe('single-root-player');
+      expect.soft(after.count, `${label} one audio element`).toBe(1);
+      expect.soft(after.src, `${label} source held`).toBe(before.src);
+      expect.soft(after.generation, `${label} generation held`).toBe(before.generation);
+      expect.soft(after.title, `${label} current occurrence held`).toBe(before.title);
+      expect.soft(after.time, `${label} position not reset`).toBeGreaterThanOrEqual(before.time - 0.35);
+      return after;
+    };
+
+    // --- Approved Home header, one real filter group, honest absent state.
+    await expect(page.locator('h1')).toHaveCount(1);
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('In your own rhythm');
+    await expect(page.locator('.home-heading .eyebrow')).toHaveText('MUSIC. ONLY YOURS.');
+    await expect(page.locator('.home-private')).toContainText('Private space');
+    await expect(page.locator('.home-private .vela-icon')).toHaveCount(1);
+    await expect(page.locator('.home-title-dot')).toHaveCount(1);
+    const absent = page.locator('[data-image-blocked]');
+    await expect(absent).toHaveCount(1);
+    await expect(absent).toHaveAttribute('data-image-blocked', 'IMAGE_BLOCKED');
+    await expect(absent).toContainText('not part of this build');
+    await expect(absent.locator('img')).toHaveCount(0);
+
+    const forYou = page.getByRole('tab', { name: 'For you', exact: true });
+    const albumsTab = page.getByRole('tab', { name: 'Albums', exact: true });
+    const playlistsTab = page.getByRole('tab', { name: 'Playlists', exact: true });
+    await expect(page.getByRole('tablist', { name: 'Home views', exact: true })).toBeVisible();
+    await expect(forYou).toHaveCount(1);
+    await expect(albumsTab).toHaveCount(1);
+    await expect(playlistsTab).toHaveCount(1);
+    await expect(forYou).toHaveAttribute('aria-selected', 'true');
+    await expect(forYou).toHaveAttribute('tabindex', '0');
+    await expect(albumsTab).toHaveAttribute('aria-selected', 'false');
+    await expect(albumsTab).toHaveAttribute('tabindex', '-1');
+    const filter = await page.evaluate(() => {
+      const tabs = [...document.querySelectorAll('.home-filter')];
+      const group = document.querySelector('.home-filter-group');
+      const box = tabs[0].getBoundingClientRect();
+      const style = getComputedStyle(tabs[0]);
+      const inactive = getComputedStyle(tabs[1]);
+      return {
+        role: group.getAttribute('role'), name: group.getAttribute('aria-label'),
+        labels: tabs.map(tab => tab.textContent.trim()),
+        height: box.height, paddingLeft: parseFloat(style.paddingLeft), paddingRight: parseFloat(style.paddingRight),
+        radius: style.borderRadius, gap: parseFloat(getComputedStyle(group).gap),
+        activeBackground: style.backgroundColor, activeColor: style.color,
+        inactiveBackground: inactive.backgroundColor, inactiveColor: inactive.color,
+        panelRole: document.querySelector('#home-view-panel').getAttribute('role'),
+        panelLabelledBy: document.querySelector('#home-view-panel').getAttribute('aria-labelledby'),
+      };
+    });
+    expect(filter.role).toBe('tablist');
+    expect(filter.name).toBe('Home views');
+    expect(filter.labels).toEqual(['For you', 'Albums', 'Playlists']);
+    expect(filter.height).toBeCloseTo(30, 0.75);
+    expect(filter.paddingLeft).toBeCloseTo(14, 0.75);
+    expect(filter.paddingRight).toBeCloseTo(14, 0.75);
+    expect(filter.radius).toBe('5px');
+    expect(filter.gap).toBeCloseTo(7, 0.75);
+    expect(filter.activeBackground).toBe('rgb(211, 233, 165)');
+    expect(filter.activeColor).toBe('rgb(27, 37, 17)');
+    expect(filter.inactiveBackground).toBe('rgb(34, 39, 31)');
+    expect(filter.inactiveColor).toBe('rgb(154, 162, 150)');
+    expect(filter.panelRole).toBe('tabpanel');
+    expect(filter.panelLabelledBy).toBe('home-tab-for-you');
+
+    // --- For you: real additions, a six-cover shelf and no invented art.
+    const shelf = page.locator('.home-album-shelf');
+    await expect(shelf).toBeVisible();
+    await expect(shelf.locator('.home-album-card')).toHaveCount(6);
+    const listed = await (await page.request.get(runtime.origin + '/api/albums?limit=6')).json();
+    expect(listed.items.length).toBe(6);
+    const cards = await shelf.locator('.home-album-card').evaluateAll(nodes => nodes.map(node => {
+      const cover = node.querySelector('.catalog-cover');
+      const image = cover.querySelector('img');
+      const box = cover.getBoundingClientRect();
+      const style = getComputedStyle(node);
+      return {
+        id: node.dataset.albumId, cover: image ? image.getAttribute('src') : null,
+        fallback: Boolean(cover.querySelector('.vela-icon')),
+        coverWidth: box.width, coverHeight: box.height, radius: getComputedStyle(cover).borderRadius,
+        border: ['Top', 'Right', 'Bottom', 'Left'].map(side => parseFloat(style[`border${side}Width`])),
+        background: style.backgroundColor,
+      };
+    }));
+    expect(cards.map(card => card.id)).toEqual(listed.items.map(album => album.id));
+    for (const album of listed.items) {
+      const card = cards.find(item => item.id === album.id);
+      expect(card.cover, `${album.title} real cover`).toBe(album.artwork_id ? `/api/artwork/${album.artwork_id}` : null);
+      expect(card.fallback, `${album.title} owned fallback only without art`).toBe(album.artwork_id === null);
+    }
+    for (const card of cards) {
+      expect.soft(Math.abs(card.coverWidth - card.coverHeight), `${card.id} square art`).toBeLessThanOrEqual(1);
+      expect.soft(card.radius, `${card.id} art radius`).toBe('7px');
+      expect.soft(card.border, `${card.id} borderless`).toEqual([0, 0, 0, 0]);
+      expect.soft(card.background, `${card.id} no raised tile`).toBe('rgba(0, 0, 0, 0)');
+    }
+    expect(cards.some(card => card.cover), 'displayed shelf contains real artwork').toBeTruthy();
+    await expect.poll(() => page.locator('.home-album-card .catalog-cover img').evaluateAll(
+      nodes => nodes.every(image => image.complete && image.naturalWidth > 0))).toBeTruthy();
+    await expect(page.locator('[aria-labelledby="home-additions"]')).toBeVisible();
+    await expect(page.locator('.personal-mixes')).toBeVisible();
+    await page.screenshot({ path: `${output}/home-for-you-1284.png`, animations: 'disabled' });
+
+    // --- Filter switching rearranges existing DTOs only: no catalog request,
+    // no second source, no position reset.
+    const before = await readPlayer();
+    expect(before.paused).toBe(false);
+    const catalogRequests = [];
+    page.on('request', request => {
+      const path = new URL(request.url()).pathname;
+      if (path === '/api/tracks' || path === '/api/albums' || path === '/api/playlists') catalogRequests.push(path);
+    });
+
+    await albumsTab.click();
+    await expect(albumsTab).toHaveAttribute('aria-selected', 'true');
+    await expect(albumsTab).toHaveAttribute('tabindex', '0');
+    await expect(forYou).toHaveAttribute('aria-selected', 'false');
+    await expect(page.locator('#home-view-panel')).toHaveAttribute('aria-labelledby', 'home-tab-albums');
+    await expect(page.locator('.home-albums')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Your albums', exact: true })).toBeVisible();
+    await expect(page.locator('[data-image-blocked]')).toHaveCount(0);
+    await expect(page.locator('[aria-labelledby="home-additions"]')).toBeVisible();
+    await expect(page.locator('.personal-mixes')).toBeHidden();
+    await assertPlayerHeld('albums tab', before);
+    await page.screenshot({ path: `${output}/home-albums-1284.png`, animations: 'disabled' });
+
+    await playlistsTab.click();
+    await expect(playlistsTab).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('#home-view-panel')).toHaveAttribute('aria-labelledby', 'home-tab-playlists');
+    const playlistsView = page.locator('.home-playlists-view');
+    await expect(playlistsView).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'For every mood', exact: true })).toBeVisible();
+    await expect(page.locator('.home-albums')).toHaveCount(0);
+    await expect(page.locator('[aria-labelledby="home-additions"]')).toHaveCount(0);
+    const emptyPlaylists = playlistsView.locator('.empty-state');
+    await expect(emptyPlaylists).toBeVisible();
+    await expect(emptyPlaylists).toContainText('no playlists yet');
+    await expect(page.getByRole('button', { name: 'Create a playlist', exact: true })).toBeVisible();
+    await assertPlayerHeld('playlists tab', before);
+    await page.screenshot({ path: `${output}/home-playlists-empty-1284.png`, animations: 'disabled' });
+
+    // --- Keyboard state: roving tabindex with real focus movement.
+    await forYou.click();
+    await expect(forYou).toBeFocused();
+    await page.keyboard.press('ArrowRight');
+    await expect(albumsTab).toBeFocused();
+    await expect(albumsTab).toHaveAttribute('aria-selected', 'true');
+    await expect(forYou).toHaveAttribute('tabindex', '-1');
+    await expect(page.locator('#home-view-panel')).toHaveAttribute('aria-labelledby', 'home-tab-albums');
+    await page.keyboard.press('ArrowLeft');
+    await expect(forYou).toBeFocused();
+    await expect(forYou).toHaveAttribute('aria-selected', 'true');
+    await page.keyboard.press('End');
+    await expect(playlistsTab).toBeFocused();
+    await expect(playlistsTab).toHaveAttribute('aria-selected', 'true');
+    await page.keyboard.press('Home');
+    await expect(forYou).toBeFocused();
+    await expect(forYou).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('[data-image-blocked]')).toBeVisible();
+    await assertPlayerHeld('keyboard filters', before);
+    expect(catalogRequests, 'view switches reuse loaded DTOs').toEqual([]);
+    await page.getByRole('button', { name: 'Show playback queue', exact: true }).click();
+    const queueAfterFilters = page.getByRole('complementary', { name: 'Playback queue', exact: true });
+    await expect(queueAfterFilters.locator('.queue-row')).toHaveCount(6);
+    await expect(queueAfterFilters.locator('.queue-row.current')).toHaveCount(1);
+    await page.getByRole('button', { name: 'Close playback queue', exact: true }).click();
+
+    // Theme and device scale are presentation only: same element and source.
+    await page.getByRole('button', { name: 'Change color theme', exact: true }).click();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+    const lightFill = await page.evaluate(() => getComputedStyle(
+      document.querySelector('.home-filter[aria-selected="true"]')).backgroundColor);
+    expect(lightFill).toBe('rgb(8, 117, 76)');
+    await page.screenshot({ path: `${output}/home-light-1284.png`, animations: 'disabled' });
+    await page.getByRole('button', { name: 'Change color theme', exact: true }).click();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+    await page.evaluate(() => document.documentElement.style.setProperty('--app-zoom', '0.8'));
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    await assertPlayerHeld('app scale', before);
+    await page.evaluate(() => document.documentElement.style.removeProperty('--app-zoom'));
+    await expect(page.locator('.home-filter[aria-selected="true"]')).toHaveCount(1);
+
+    // --- Real playlist create/open path: the create control opens the real
+    // form, the created playlist appears in Home and opens its real detail.
+    await playlistsTab.click();
+    await expect(emptyPlaylists).toBeVisible();
+    await page.getByRole('button', { name: 'Create a playlist', exact: true }).click();
+    await expect(page.locator('#playlist-name')).toBeVisible();
+    await page.locator('#playlist-name').fill('Evening shelf');
+    await page.getByRole('button', { name: '+ Create', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Evening shelf', exact: true })).toBeVisible();
+    await navigate(page, 'Home');
+    await page.getByRole('tab', { name: 'Playlists', exact: true }).click();
+    const playlistCard = page.locator('[data-playlist-id][aria-label="Open playlist Evening shelf"]');
+    await expect(playlistCard).toBeVisible();
+    await expect(playlistCard).toContainText('0 tracks');
+    await page.screenshot({ path: `${output}/home-playlists-1284.png`, animations: 'disabled' });
+    await playlistCard.click();
+    await expect(page.locator('.playlist-detail')).toBeVisible();
+    await expect(page.locator('.playlist-detail h2')).toHaveText('Evening shelf');
+
+    // --- The shelf stays capped at six even when the library grows past it.
+    await addAlbum(6, 4);
+    await addAlbum(7, 4);
+    const grown = await (await page.request.get(runtime.origin + '/api/albums?limit=100')).json();
+    expect(grown.items.length).toBe(8);
+    await navigate(page, 'Home');
+    await expect(page.locator('.home-album-shelf .home-album-card')).toHaveCount(6);
+    await expect(page.locator('.home-album-shelf')).toBeVisible();
+    expect(await page.locator('.home-album-shelf .home-album-card').count()).toBeLessThanOrEqual(6);
+    expect(imageRequests.some(url => /(coast|your-wave)\.png/i.test(url))).toBe(false);
+    await expect(page.locator('.now-playing strong.player-title')).toHaveText(shelfTracks[0].title);
+    const final = await readPlayer();
+    expect(final.same).toBe(true);
+    expect(final.count).toBe(1);
+    expect(final.src).toBe(before.src);
+    expect(final.title).toBe(before.title);
+    await page.screenshot({ path: `${output}/home-bounded-1284.png`, animations: 'disabled' });
+
+    // Phone composition: the tabs stay reachable and the shelf reflows in pairs.
+    await page.setViewportSize({ width: 390, height: 844 });
+    await settle(page);
+    await expect(page.getByRole('tab', { name: 'For you', exact: true })).toBeVisible();
+    const phone = await page.evaluate(() => {
+      const tabs = [...document.querySelectorAll('.home-filter')];
+      return {
+        overflow: document.documentElement.scrollWidth - innerWidth,
+        tabWidths: tabs.map(tab => tab.getBoundingClientRect().width),
+        columns: getComputedStyle(document.querySelector('.home-album-shelf')).gridTemplateColumns.split(' ').length,
+        caption: getComputedStyle(document.querySelector('.home-filter-caption')).display,
+      };
+    });
+    expect(phone.overflow).toBeLessThanOrEqual(1);
+    expect(phone.tabWidths.every(width => width > 0)).toBe(true);
+    expect(phone.columns).toBe(2);
+    expect(phone.caption).toBe('none');
+    await page.screenshot({ path: `${output}/home-for-you-390.png`, animations: 'disabled' });
+
+    await writeFile(`${output}/home-filter-evidence.json`, JSON.stringify({ filter, cards, phone, absent: 'IMAGE_BLOCKED' }, null, 2));
+  } finally { await runtime.close(); }
+});

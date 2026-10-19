@@ -861,7 +861,7 @@ test('Home and global search use real music while navigation preserves the playe
   await page.getByRole('button', { name: '+ Create', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Vela listening', exact: true })).toBeVisible();
   await navigate(page, 'Home');
-  await expect(page.getByRole('heading', { name: 'Hello, admin.', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'In your own rhythm', exact: true })).toBeVisible();
   const additions = page.locator('[aria-labelledby="home-additions"]');
   await additions.getByRole('button', { name: `Play ${track.title}`, exact: true }).click();
   await expect.poll(() => page.locator('#vela-audio').evaluate(audio => audio.currentTime)).toBeGreaterThan(0);
@@ -1193,7 +1193,11 @@ test('private search replies cannot populate another account after logout', asyn
   await page.locator('#username').fill('admin');
   await page.locator('#password').fill(password);
   await page.getByRole('button', { name: 'Sign in →', exact: true }).click();
-  await page.getByRole('button', { name: 'Play new additions', exact: true }).click();
+  // Home's approved composition has no hero play-all; start the same real
+  // session from the library rows instead.
+  await page.getByRole('button', { name: 'Library', exact: true }).first().click();
+  await page.locator('.track-row .track-play').first().click();
+  await expect.poll(() => page.locator('#vela-audio').evaluate(audio => audio.currentTime)).toBeGreaterThan(0);
   await page.getByRole('button', { name: 'Shuffle', exact: true }).click();
   await page.getByRole('button', { name: 'Repeat: off', exact: true }).click();
   await navigate(page, 'Search');

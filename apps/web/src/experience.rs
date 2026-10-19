@@ -11,6 +11,7 @@ use dioxus::prelude::*;
 use gloo_timers::future::TimeoutFuture;
 use std::{cell::Cell, rc::Rc};
 use vela_domain::*;
+use wasm_bindgen::JsCast;
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct Actions {
@@ -127,9 +128,188 @@ fn TrackSkeletonRows() -> Element {
 #[derive(Clone, Default)]
 struct HomeData {
     recent: Vec<Track>,
-    favorites: Vec<Track>,
     albums: Vec<AlbumSummary>,
     playlists: Vec<PlaylistSummary>,
+}
+
+impl HomeData {
+    fn is_empty(&self) -> bool {
+        self.recent.is_empty() && self.albums.is_empty() && self.playlists.is_empty()
+    }
+}
+
+/// TR04a: the bounded Home filter. Each view recomposes the DTOs Home already
+/// requested; no view asks the server for the whole library and none of them
+/// touches the root player, queue or source.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum HomeView {
+    ForYou,
+    Albums,
+    Playlists,
+}
+
+impl HomeView {
+    const ALL: [Self; 3] = [Self::ForYou, Self::Albums, Self::Playlists];
+
+    fn key(self) -> &'static str {
+        match self {
+            Self::ForYou => "for-you",
+            Self::Albums => "albums",
+            Self::Playlists => "playlists",
+        }
+    }
+    fn label(self) -> &'static str {
+        match self {
+            Self::ForYou => "For you",
+            Self::Albums => "Albums",
+            Self::Playlists => "Playlists",
+        }
+    }
+    fn tab_id(self) -> String {
+        format!("home-tab-{}", self.key())
+    }
+}
+
+/// Roving tabindex: DOM focus has to follow the selection, otherwise the next
+/// Tab press leaves the tab list from the previously focused tab.
+fn select_home_view(mut view: Signal<HomeView>, next: HomeView) {
+    view.set(next);
+    if let Some(tab) = web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| document.get_element_by_id(&next.tab_id()))
+        .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok())
+    {
+        let _ = tab.focus();
+    }
+}
+
+/// §8's editorial/wave pair needs the approved coast/your-wave artwork, which
+/// this increment does not ship. The pair is omitted with an honest absent
+/// state (IMAGE_BLOCKED) instead of substituting unrelated art.
+fn home_editorial_absence() -> Element {
+    rsx! { aside { class: "home-absent", "data-image-blocked": "IMAGE_BLOCKED", "aria-label": "Editorial features not included",
+        span { class: "eyebrow", "EDITORIAL · MY WAVE" }
+        strong { "The featured artwork is not part of this build." }
+        p { "The approved editorial cover and My Wave image are not available yet, so Home shows your real music instead of stand-in art. Your collection and playlists are unchanged." }
+    } }
+}
+
+fn home_additions(tracks: Vec<Track>, actions: Actions) -> Element {
+    let playable = tracks.clone();
+    rsx! { section { class: "home-section", "aria-labelledby": "home-additions",
+        div { class: "section-toolbar",
+            h2 { id: "home-additions", "New in your library" }
+            div { class: "home-section-actions",
+                button { class: "button primary small", onclick: move |_| actions.start.call((playable.clone(), 0, PlaybackContext::new(ContextKind::Home, "New in your library"))), Icon { name: "play" } "Play new additions" }
+                button { class: "text-button", onclick: move |_| actions.navigate.call("library".into()), "Open library" }
+            }
+        }
+        TrackCards { tracks, origin: PlaybackContext::new(ContextKind::Home, "New in your library"), actions }
+    } }
+}
+
+/// At most six real album cards: borderless art, title and artist from the
+/// owner-scoped AlbumSummary. The owned neutral fallback stands in only when
+/// that album has no authorized cover.
+fn home_album_shelf(
+    title: &'static str,
+    subtitle: &'static str,
+    albums: Vec<AlbumSummary>,
+    actions: Actions,
+) -> Element {
+    rsx! { section { class: "home-section home-albums", "aria-labelledby": "home-albums",
+        div { class: "section-toolbar",
+            div { h2 { id: "home-albums", "{title}" } p { "{subtitle}" } }
+            button { class: "text-button", onclick: move |_| actions.navigate.call("albums".into()), "All albums" }
+        }
+        div { class: "home-album-shelf",
+            for album in albums.into_iter().take(6) {
+                { let open = album.clone(); rsx! {
+                    button { key: "{album.id}", class: "home-album-card", "data-album-id": "{album.id}",
+                        "aria-label": "Open album {album.title} by {album.artist}",
+                        onclick: move |_| actions.album.call(open.clone()),
+                        CatalogCover { artwork_id: album.artwork_id.clone() }
+                        strong { "{album.title}" }
+                        small { "{album.artist}" }
+                    }
+                } }
+            }
+        }
+    } }
+}
+
+fn home_playlist_cards(
+    playlists: Vec<PlaylistSummary>,
+    owner_id: &str,
+    actions: Actions,
+) -> Element {
+    rsx! { div { class: "home-playlist-grid",
+        for list in playlists {
+            { let id = list.id.clone(); let shared = list.owner_id != owner_id; rsx! {
+                button { key: "{list.id}", class: "home-playlist-card", "data-playlist-id": "{list.id}",
+                    "aria-label": "Open playlist {list.name}",
+                    onclick: move |_| actions.playlist.call(id.clone()),
+                    Icon { name: "playlists" }
+                    div { strong { "{list.name}" } small { "{list.item_count} tracks" if shared { " · Shared metadata" } } }
+                }
+            } }
+        }
+    } }
+}
+
+fn home_playlist_preview(
+    playlists: Vec<PlaylistSummary>,
+    owner_id: &str,
+    actions: Actions,
+) -> Element {
+    rsx! { section { class: "home-section", "aria-labelledby": "home-playlists",
+        div { class: "section-toolbar",
+            div { h2 { id: "home-playlists", "Your playlists" } p { "Playlists you own or can open from your library." } }
+            button { class: "text-button", onclick: move |_| actions.navigate.call("playlists".into()), "Open playlists" }
+        }
+        { home_playlist_cards(playlists.into_iter().take(3).collect(), owner_id, actions) }
+    } }
+}
+
+/// The playlist view keeps the real create/open path: the create control opens
+/// the existing Playlists creation form, and every card opens the real,
+/// reauthorized playlist detail. Home never grows a second playlist writer.
+fn home_playlists_view(
+    playlists: Vec<PlaylistSummary>,
+    owner_id: &str,
+    settled: bool,
+    actions: Actions,
+) -> Element {
+    rsx! { section { class: "home-section home-playlists-view", "aria-labelledby": "home-playlists",
+        div { class: "section-toolbar",
+            div { h2 { id: "home-playlists", "For every mood" } p { "Your private playlists, in one place." } }
+            button { class: "button primary small", "aria-label": "Create a playlist", onclick: move |_| actions.navigate.call("playlists".into()), "+ Create a playlist" }
+        }
+        if playlists.is_empty() {
+            if settled { div { class: "empty-state home-empty", span { class: "empty-icon", Icon { name: "queue" } }
+                h3 { "Make room for a mood" }
+                p { "You have no playlists yet. Create one on the Playlists page, then add tracks from your library." }
+            } }
+        } else { { home_playlist_cards(playlists, owner_id, actions) } }
+    } }
+}
+
+fn home_first_listen(actions: Actions) -> Element {
+    rsx! { div { class: "empty-state", Icon { name: "music" }
+        h2 { "Make room for your first listen" }
+        p { "Upload music you own or import an authorized audio download. Your library stays private." }
+        button { class: "button primary", onclick: move |_| actions.add.call(()), "Add music" }
+        button { class: "text-button", onclick: move |_| actions.navigate.call("imports".into()), "Import from a URL" }
+    } }
+}
+
+fn home_albums_note(actions: Actions) -> Element {
+    rsx! { div { class: "home-note", Icon { name: "albums" }
+        div { strong { "No albums yet" }
+            p { "Albums appear here when your files carry album tags. Untagged music still plays from your library." }
+        }
+        button { class: "text-button", onclick: move |_| actions.add.call(()), "Add tagged music" }
+    } }
 }
 
 #[component]
@@ -153,6 +333,7 @@ pub fn Home(
     let mut owner = use_signal(String::new);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(String::new);
+    let view = use_signal(|| HomeView::ForYou);
     use_effect(move || {
         requests.cancel();
         let session = token(auth);
@@ -182,27 +363,22 @@ pub fn Home(
         let alive = alive.clone();
         spawn_authorized(auth, async move {
             let recent = get::<TrackPage>("/api/tracks?sort=newest&limit=8", &signal).await;
-            let favorites =
-                get::<TrackPage>("/api/tracks?sort=newest&favorites=true&limit=8", &signal).await;
             let albums = get::<AlbumPage>("/api/albums?limit=6", &signal).await;
             let playlists = get::<Vec<PlaylistSummary>>("/api/playlists", &signal).await;
             if !alive.get() || token(auth) != session || *generation.peek() != request {
                 return;
             }
-            let failed =
-                recent.is_err() || favorites.is_err() || albums.is_err() || playlists.is_err();
+            let failed = recent.is_err() || albums.is_err() || playlists.is_err();
             // Known rows stay during a refresh: a failed section keeps its last
             // confirmed music instead of blanking what the listener already sees.
             let HomeData {
                 recent: previous_recent,
-                favorites: previous_favorites,
                 albums: previous_albums,
                 playlists: previous_playlists,
             } = data.peek().clone();
             data.set(HomeData {
-                recent: recent.map(|p| p.items).unwrap_or(previous_recent),
-                favorites: favorites.map(|p| p.items).unwrap_or(previous_favorites),
-                albums: albums.map(|p| p.items).unwrap_or(previous_albums),
+                recent: recent.map(|page| page.items).unwrap_or(previous_recent),
+                albums: albums.map(|page| page.items).unwrap_or(previous_albums),
                 playlists: playlists
                     .map(|items| items.into_iter().take(6).collect())
                     .unwrap_or(previous_playlists),
@@ -215,35 +391,123 @@ pub fn Home(
             loading.set(false);
         });
     });
-    let snapshot = data.read().clone();
-    let name = auth
+    // Render only data that belongs to the current account: a session change
+    // must never paint the previous account's rows, albums or playlists, even
+    // for the frame before the refetch effect runs.
+    let session = token(auth);
+    let known_owner = !session.is_empty() && *owner.read() == session;
+    let snapshot = if known_owner {
+        data.read().clone()
+    } else {
+        HomeData::default()
+    };
+    let pending = *loading.read() || !known_owner;
+    let error_text = error.read().clone();
+    // Empty states settle only after a real request finished: a pending Home
+    // shows bounded placeholders, never a no-results view.
+    let settled = !pending && error_text.is_empty();
+    let current = *view.read();
+    let owner_id = auth
         .read()
         .as_ref()
-        .map(|a| a.user.username.clone())
+        .map(|value| value.user.id.clone())
         .unwrap_or_default();
-    let playable = snapshot.recent.clone();
-    rsx! { section { class: "home-page", "aria-label": "Home",
-        div { class: "home-hero",
-            div { span { class: "eyebrow", "YOURS TO DISCOVER" } h1 { "Hello, {name}." } p { "A little closer to the music you love." }
-                if !playable.is_empty() { button { class: "button cream", onclick: move |_| actions.start.call((playable.clone(), 0, PlaybackContext::new(ContextKind::Home,"New in your library"))), Icon { name: "play" } "Play new additions" } }
-                else if !loading() { button { class: "button cream", onclick: move |_| actions.add.call(()), Icon { name: "plus" } "Add your first music" } }
+    let body = if pending && snapshot.is_empty() && error_text.is_empty() {
+        match current {
+            HomeView::Playlists => {
+                rsx! { div { class: "loading-skeletons", role: "status", "aria-busy": "true", "aria-label": "Loading Home",
+                    for _ in 0..3 { div { class: "skeleton-card", "aria-hidden": "true" } }
+                } }
             }
-            div { class: "home-artwork", "aria-hidden": "true", if let Some(track) = snapshot.recent.first() { Art { track: track.clone() } } else { div { class: "home-vinyl", span { "v" } } } }
+            _ => rsx! { TrackSkeletonCards {} },
         }
-        div { class: "section-toolbar home-toolbar", p { "Your music. A fresh place to start." } button { class: "button secondary small", disabled: loading(), onclick: move |_| { let next = refresh.peek().wrapping_add(1); refresh.set(next); }, "Refresh Home" } }
-        if !error().is_empty() { div { class: "alert error", role: "alert", "{error}" } }
-        if loading() && snapshot.recent.is_empty() && error().is_empty() { TrackSkeletonCards {} }
-        {children}
-        if !snapshot.recent.is_empty() {
-            section { class: "home-section", "aria-labelledby": "home-additions", div { class: "section-toolbar", h2 { id: "home-additions", "New in your library" } button { class: "text-button", onclick: move |_| actions.navigate.call("library".into()), "Open library" } } TrackCards { tracks: snapshot.recent, origin:PlaybackContext::new(ContextKind::Home,"New in your library"), actions } }
-        } else if !loading() && error().is_empty() { div { class: "empty-state", Icon { name: "music" } h2 { "Make room for your first listen" } p { "Upload music you own or import an authorized audio download. Your library stays private." } button { class: "button primary", onclick: move |_| actions.add.call(()), "Add music" } button { class: "text-button", onclick: move |_| actions.navigate.call("imports".into()), "Import from a URL" } } }
-        if !snapshot.favorites.is_empty() { section { class: "home-section", "aria-labelledby": "home-favorites", div { class: "section-toolbar", h2 { id: "home-favorites", "Your favorites" } button { class: "text-button", onclick: move |_| actions.navigate.call("favorites".into()), "All favorites" } } TrackCards { tracks: snapshot.favorites, origin:PlaybackContext::new(ContextKind::Favorites,"Your favorites"), actions } } }
-        if !snapshot.albums.is_empty() { section { class: "home-section", "aria-labelledby": "home-albums", h2 { id: "home-albums", "From your albums" } div { class: "home-album-grid", for album in snapshot.albums {
-            { let open = album.clone(); rsx! { button { class: "listening-card collection-card", onclick: move |_| actions.album.call(open.clone()), "aria-label": "Open album {album.title} by {album.artist}", CatalogCover { artwork_id: album.artwork_id } strong { "{album.title}" } small { "{album.artist}" } } } }
-        } } } }
-        if !snapshot.playlists.is_empty() { section { class: "home-section", "aria-labelledby": "home-playlists", h2 { id: "home-playlists", "Your playlists" } div { class: "home-playlist-grid", for list in snapshot.playlists {
-            { let id = list.id.clone(); let shared = auth.read().as_ref().is_some_and(|u| u.user.id != list.owner_id); rsx! { button { class: "home-playlist-card", onclick: move |_| actions.playlist.call(id.clone()), Icon { name: "playlists" } div { strong { "{list.name}" } small { "{list.item_count} tracks" if shared { " · Shared metadata" } } } } } }
-        } } } }
+    } else {
+        match current {
+            HomeView::ForYou => rsx! {
+                {home_editorial_absence()}
+                if snapshot.recent.is_empty() {
+                    if settled {
+                        {home_first_listen(actions)}
+                    }
+                } else {
+                    {home_additions(snapshot.recent.clone(), actions)}
+                }
+                if !snapshot.albums.is_empty() {
+                    {home_album_shelf("From your albums", "Familiar records from your own collection.", snapshot.albums.clone(), actions)}
+                }
+                if !snapshot.playlists.is_empty() {
+                    {home_playlist_preview(snapshot.playlists.clone(), &owner_id, actions)}
+                }
+            },
+            HomeView::Albums => rsx! {
+                if snapshot.albums.is_empty() {
+                    if settled && !snapshot.recent.is_empty() {
+                        {home_albums_note(actions)}
+                    }
+                } else {
+                    {home_album_shelf("Your albums", "Every album in your library.", snapshot.albums.clone(), actions)}
+                }
+                if snapshot.recent.is_empty() {
+                    if settled && snapshot.albums.is_empty() {
+                        {home_first_listen(actions)}
+                    }
+                } else {
+                    {home_additions(snapshot.recent.clone(), actions)}
+                }
+            },
+            HomeView::Playlists => {
+                home_playlists_view(snapshot.playlists.clone(), &owner_id, settled, actions)
+            }
+        }
+    };
+    rsx! { section { class: "home-page", "aria-label": "Home",
+        header { class: "home-header",
+            div { class: "home-heading",
+                span { class: "eyebrow", "MUSIC. ONLY YOURS." }
+                h1 { "In your own rhythm" span { class: "home-title-dot", "aria-hidden": "true" } }
+            }
+            p { class: "home-private", Icon { name: "shield-check" } span { "Private space" } }
+        }
+        div { class: "home-filter-row",
+            div { class: "home-filter-group", role: "tablist", "aria-label": "Home views",
+                for option in HomeView::ALL {
+                    { let selected = option == current; rsx! {
+                        button { key: "{option.key()}", id: "{option.tab_id()}", r#type: "button", role: "tab",
+                            class: if selected { "home-filter active" } else { "home-filter" },
+                            "aria-selected": selected, "aria-controls": "home-view-panel",
+                            tabindex: if selected { "0" } else { "-1" },
+                            onclick: move |_| select_home_view(view, option),
+                            onkeydown: move |event| {
+                                let count = HomeView::ALL.len();
+                                let index = HomeView::ALL.iter().position(|item| *item == option).unwrap_or(0);
+                                let next = match event.key() {
+                                    Key::ArrowRight | Key::ArrowDown => Some(HomeView::ALL[(index + 1) % count]),
+                                    Key::ArrowLeft | Key::ArrowUp => Some(HomeView::ALL[(index + count - 1) % count]),
+                                    Key::Home => Some(HomeView::ALL[0]),
+                                    Key::End => Some(HomeView::ALL[count - 1]),
+                                    _ => None,
+                                };
+                                if let Some(next) = next {
+                                    event.prevent_default();
+                                    select_home_view(view, next);
+                                }
+                            },
+                            "{option.label()}"
+                        }
+                    } }
+                }
+            }
+            div { class: "home-filter-meta",
+                p { class: "home-filter-caption", "Familiar. Loved. Unexpected." }
+                button { class: "text-button home-refresh", "aria-label": "Refresh Home", disabled: *loading.read(),
+                    onclick: move |_| { let next = refresh.peek().wrapping_add(1); refresh.set(next); }, "Refresh" }
+            }
+        }
+        if !error_text.is_empty() { div { class: "alert error", role: "alert", "{error_text}" } }
+        div { class: "home-view", id: "home-view-panel", role: "tabpanel", "aria-labelledby": "{current.tab_id()}",
+            {body}
+        }
+        div { class: "home-extra", hidden: current != HomeView::ForYou, {children} }
     } }
 }
 

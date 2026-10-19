@@ -46,6 +46,9 @@ pub fn Icon(name: &'static str) -> Element {
         "down" => "m5 12 7 7 7-7M12 3v16",
         "check" => "m4 12 5 5L20 6",
         "back" => "m14 5-7 7 7 7",
+        "shield-check" => {
+            "M12 3 5 6v5c0 4.4 2.9 8.3 7 9.5 4.1-1.2 7-5.1 7-9.5V6Zm-3.5 9 2.5 2.5 4.5-5"
+        }
         _ => "M9 18V5l12-2v13M9 18a3 3 0 1 1-3-3h3m12 1a3 3 0 1 1-3-3h3",
     };
     rsx! { svg { class: "vela-icon", view_box: "0 0 24 24", width: "24", height: "24", fill: "none", stroke: "currentColor", stroke_width: "1.7", stroke_linecap: "round", stroke_linejoin: "round", "aria-hidden": "true", "focusable": "false", path { d: path } } }
