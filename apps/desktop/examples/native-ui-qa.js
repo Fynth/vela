@@ -69,6 +69,34 @@ const resizeCompact = async () => {
   }
   window.__velaResizeTrace = trace;
 };
+// The compositor owns the first geometry, so the fixture asks for its configured
+// viewport explicitly before the artwork evidence is captured.
+const resizeExact = async (targetWidth, targetHeight) => {
+  const trace = [];
+  await resize(targetWidth, targetHeight);
+  trace.push(innerWidth);
+  for (let attempt = 0; attempt < 6 && Math.abs(innerWidth - targetWidth) > 2; attempt++) {
+    const current = innerWidth;
+    if (!(Number.isFinite(current) && current > 0)) { await sleep(200); continue; }
+    const width = Math.max(320, Math.min(4096, Math.round(physical(targetWidth) * targetWidth / current)));
+    const height = innerHeight > 0 ? Math.max(320, Math.min(4096, Math.round(physical(targetHeight) * targetHeight / innerHeight))) : physical(targetHeight);
+    dioxus.send({resize:{width,height}});
+    await dioxus.recv(); await sleep(350);
+    trace.push(innerWidth);
+  }
+  return trace;
+};
+const imageMetrics = async image => {
+  try { await image.decode(); } catch {}
+  const style = getComputedStyle(image), rect = image.getBoundingClientRect();
+  return {
+    src: image.getAttribute('src') || '', complete: image.complete,
+    naturalWidth: image.naturalWidth, naturalHeight: image.naturalHeight,
+    objectFit: style.objectFit, objectPosition: style.objectPosition,
+    boxWidth: rect.width, boxHeight: rect.height,
+    artwork: image.dataset.nativeArtwork, classes: image.className
+  };
+};
 if (config.windowOnly) {
   try {
     await wait(() => button('Sign in') && !button('Sign in').disabled, 'Native output initialization');
@@ -124,10 +152,52 @@ if (config.windowOnly) {
 try {
   assert(config.decorations === false, 'Linux window disables GTK titlebar decorations');
   assert(button('Close window') && button('Minimize window') && button('Maximize or restore window'), 'Frameless window keeps accessible window controls');
+  const requestedWidth = Number(config.windowWidth) || 1280;
+  const requestedHeight = Number(config.windowHeight) || 840;
+  const resizeTrace = await resizeExact(requestedWidth, requestedHeight);
+  assert(Math.abs(innerWidth - requestedWidth) <= 2 && Math.abs(innerHeight - requestedHeight) <= 2, `Native QA window runs at the requested ${requestedWidth}x${requestedHeight} viewport (actual ${innerWidth}x${innerHeight}, dpr ${dpr()}, trace ${JSON.stringify(resizeTrace)})`);
   await wait(() => button('Sign in') && !button('Sign in').disabled, 'Native output initialization');
   fill('#native-origin', config.origin); fill('#native-username', config.username); fill('#native-password', config.password);
   el('.signin-form form').requestSubmit();
   await wait(() => document.querySelectorAll('[data-native-track-id]').length === 3, 'Three real private uploaded tracks');
+  // ART01/ART11: the uploaded FLAC carries a real embedded cover. The renderer may only
+  // receive the validated data URL the native client authorized; a missing cover is the
+  // neutral Vela glyph, never a broken image.
+  fill('#native-volume', '0'); await sleep(200);
+  const rowCovers = () => [...document.querySelectorAll('[data-native-track-id] img.neutral-cover')];
+  await wait(() => rowCovers().some(image => image.src.startsWith('data:image/') && image.complete && image.naturalWidth > 0 && image.naturalHeight > 0), 'Authorized library cover <img>');
+  const libraryCover = rowCovers().find(image => image.getAttribute('src')?.startsWith('data:image/') && image.naturalWidth > 0);
+  const libraryMetrics = await imageMetrics(libraryCover);
+  const artworkWidth = Math.round(innerWidth);
+  await capture(`library-artwork-${artworkWidth}`);
+  assert(libraryMetrics.artwork === 'ready', `Library cover <img> is the ready artwork state (actual ${libraryMetrics.artwork}, classes ${libraryMetrics.classes})`);
+  assert(libraryMetrics.naturalWidth > 0 && libraryMetrics.naturalHeight > 0, `Library cover decodes real pixels (natural ${libraryMetrics.naturalWidth}x${libraryMetrics.naturalHeight})`);
+  assert(libraryMetrics.objectFit === 'cover', `Library cover uses object-fit: cover (actual ${libraryMetrics.objectFit})`);
+  assert(libraryMetrics.boxWidth > 0 && Math.abs(libraryMetrics.boxWidth - libraryMetrics.boxHeight) < 1, `Library cover occupies a square box (actual ${libraryMetrics.boxWidth}x${libraryMetrics.boxHeight})`);
+  assert(document.querySelectorAll('[data-native-track-id] .neutral-cover[data-native-artwork="missing"]').length >= 1, 'Tracks without embedded art render the neutral Vela fallback');
+  assert([...document.images].every(image => (image.getAttribute('src') || '').startsWith('data:image/')), 'The renderer never fetches an arbitrary image URL');
+  assert([...document.images].every(image => image.naturalWidth > 0), 'No broken-image glyph is rendered');
+  checks.push(`Library cover evidence: src ${libraryMetrics.src.slice(0, 23)}… (${libraryMetrics.src.length} chars), natural ${libraryMetrics.naturalWidth}x${libraryMetrics.naturalHeight}, box ${libraryMetrics.boxWidth}x${libraryMetrics.boxHeight}, object-fit ${libraryMetrics.objectFit}/${libraryMetrics.objectPosition}, missing fallbacks ${document.querySelectorAll('[data-native-track-id] .neutral-cover[data-native-artwork="missing"]').length}, viewport ${innerWidth}x${innerHeight} dpr ${dpr()}`);
+  await click('Play Signal');
+  await wait(() => (el('.player-track strong')?.textContent || '') === 'Signal' && phase() === 'Playing' && position() > 100, 'Signal playback for the player cover');
+  const playerCoverNode = () => [...document.querySelectorAll('.native-player img.neutral-cover.player-cover')].find(image => image.src.startsWith('data:image/') && image.naturalWidth > 0);
+  await wait(() => playerCoverNode(), 'Bottom player cover <img>');
+  const playerMetrics = await imageMetrics(playerCoverNode());
+  await capture(`player-artwork-${Math.round(innerWidth)}`);
+  assert(playerMetrics.artwork === 'ready', `Player cover <img> is the ready artwork state (actual ${playerMetrics.artwork})`);
+  assert(playerMetrics.naturalWidth > 0 && playerMetrics.naturalHeight > 0, `Player cover decodes real pixels (natural ${playerMetrics.naturalWidth}x${playerMetrics.naturalHeight})`);
+  assert(playerMetrics.objectFit === 'cover', `Player cover uses object-fit: cover (actual ${playerMetrics.objectFit})`);
+  assert(playerMetrics.boxWidth > 0 && Math.abs(playerMetrics.boxWidth - playerMetrics.boxHeight) < 1, `Player cover occupies a square box (actual ${playerMetrics.boxWidth}x${playerMetrics.boxHeight})`);
+  assert(playerMetrics.src === libraryMetrics.src, 'Bottom player reuses the exact library data-URL rendition for the same track');
+  assert([...document.querySelectorAll('.native-player img')].every(image => image.src.startsWith('data:image/')), 'Player cover is a native data URL, never a remote image address');
+  checks.push(`Player cover evidence: src ${playerMetrics.src.slice(0, 23)}… (${playerMetrics.src.length} chars, identical to library ${playerMetrics.src === libraryMetrics.src}), natural ${playerMetrics.naturalWidth}x${playerMetrics.naturalHeight}, box ${playerMetrics.boxWidth}x${playerMetrics.boxHeight}, object-fit ${playerMetrics.objectFit}/${playerMetrics.objectPosition}`);
+  await click('Pause Signal'); await wait(() => phase() === 'Paused', 'Artwork fixture track paused');
+  await click('Queue');
+  await wait(() => button('Clear queue') && !button('Clear queue').disabled, 'Queue clear control for the artwork fixture');
+  await click('Clear queue'); await wait(() => phase() === 'Idle', 'Artwork fixture playback stopped');
+  await click('Library');
+  await wait(() => document.querySelectorAll('[data-native-track-id]').length === 3, 'Library restored after the artwork fixture');
+  if (button('Dismiss notification')) await click('Dismiss notification');
   await click('Favorite Signal');
   await wait(() => button('Remove Signal from favorites'), 'Real favorite mutation acknowledged');
   assert(button('Remove Signal from favorites'), 'Favorite mutation acknowledged by the API');
@@ -434,6 +504,8 @@ try {
     await wait(() => document.querySelectorAll('[data-native-track-id]').length === 3, 'Library after public playback');
     await click('Sign out'); await wait(() => button('Sign in'), 'Native sign-out clears account');
     assert(!el('.native-player') && document.querySelectorAll('[data-native-track-id]').length === 0, 'Sign-out removes private catalog and player');
+    assert(document.querySelectorAll('img[src^="data:image/"]').length === 0, 'Sign-out leaves zero authorized artwork data URLs in the native DOM');
+    assert(document.querySelectorAll('[data-native-artwork]').length === 0, 'Sign-out leaves zero cover presentation slots in the native DOM');
     fill('#native-origin', config.origin); fill('#native-username', config.username); fill('#native-password', config.password);
     if (config.testSession) {
       if (!el('#native-remember').checked) el('#native-remember').click();
@@ -444,6 +516,8 @@ try {
       el('.signin-form form').requestSubmit();
       await wait(() => document.querySelectorAll('[data-native-track-id]').length === 3, 'Library after offline sign-in');
     }
+    await wait(() => [...document.querySelectorAll('[data-native-track-id] img.neutral-cover')].some(image => image.src.startsWith('data:image/') && image.complete && image.naturalWidth > 0), 'Authorized artwork after sign-in again');
+    assert(document.querySelectorAll('[data-native-track-id] img.neutral-cover').length >= 1, 'Re-authorized library renders the embedded cover after sign-in');
     const offlineTitles = [...document.querySelectorAll('[data-native-track-id] .native-track-name strong')].slice(0, 2).map(node => node.textContent);
     assert(offlineTitles.length === 2, 'Offline fixtures are listed');
     for (const title of offlineTitles) {

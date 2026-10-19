@@ -21,6 +21,8 @@ fn Harness() -> Element {
             "cachedOrigin": std::env::var("VELA_NATIVE_QA_CACHED_ORIGIN").unwrap_or_default(),
             "sessionPhase": std::env::var("VELA_NATIVE_QA_SESSION_PHASE").unwrap_or_default(),
             "testSession": std::env::var("VELA_NATIVE_QA_TEST_SESSION").as_deref() == Ok("1"),
+            "windowWidth": qa_dimension("VELA_NATIVE_QA_WIDTH", 1280.0),
+            "windowHeight": qa_dimension("VELA_NATIVE_QA_HEIGHT", 840.0),
         }))
         .expect("fixture credentials sent to own window");
         let mut captures = Vec::new();
@@ -53,19 +55,7 @@ fn Harness() -> Element {
                 }
                 Ok(Ok(message)) if message["capture"].is_string() => {
                     let name = message["capture"].as_str().unwrap().to_owned();
-                    if !matches!(
-                        name.as_str(),
-                        "library-dark"
-                            | "library-wide-dark"
-                            | "library-ultrawide-dark"
-                            | "queue-light"
-                            | "compact-light"
-                            | "favorites-dark"
-                            | "playlists-dark"
-                            | "albums-dark"
-                            | "public-dark"
-                            | "public-search-dark"
-                    ) {
+                    if !known_capture(&name) {
                         break json!({"ok":false,"failure":"Unknown capture stage"});
                     }
                     let output = report.with_file_name(format!("native-{name}.png"));
@@ -200,6 +190,38 @@ fn Harness() -> Element {
     rsx! { vela_desktop::ui::App {} }
 }
 
+/// Fixed capture stages plus the per-viewport artwork evidence. The width suffix is
+/// bounded so a driver message can never choose an arbitrary output path.
+fn known_capture(name: &str) -> bool {
+    matches!(
+        name,
+        "library-dark"
+            | "library-wide-dark"
+            | "library-ultrawide-dark"
+            | "queue-light"
+            | "compact-light"
+            | "favorites-dark"
+            | "playlists-dark"
+            | "albums-dark"
+            | "public-dark"
+            | "public-search-dark"
+    ) || ["library-artwork-", "player-artwork-"].iter().any(|prefix| {
+        name.strip_prefix(prefix)
+            .and_then(|width| width.parse::<u32>().ok())
+            .is_some_and(|width| (320..=4096).contains(&width))
+    })
+}
+
+/// Optional requested fixture viewport. Invalid or unbounded values keep the documented
+/// defaults instead of being passed to the window/compositor.
+fn qa_dimension(name: &str, default: f64) -> f64 {
+    std::env::var(name)
+        .ok()
+        .and_then(|value| value.parse::<f64>().ok())
+        .filter(|value| value.is_finite() && (320.0..=4096.0).contains(value))
+        .unwrap_or(default)
+}
+
 fn resize_owned_window(width: u64, height: u64) {
     let pid = std::process::id().to_string();
     if let Ok(clients) = std::process::Command::new("hyprctl")
@@ -254,7 +276,11 @@ fn main() {
         std::fs::read_to_string(alsa).is_ok_and(|config| config.contains(&sink)),
         "isolated ALSA configuration must route to the owned null sink"
     );
-    let window = vela_desktop::window::builder("Vela Music — isolated native QA");
+    let window = vela_desktop::window::builder("Vela Music — isolated native QA")
+        .with_inner_size(dioxus::desktop::LogicalSize::new(
+            qa_dimension("VELA_NATIVE_QA_WIDTH", 1280.0),
+            qa_dimension("VELA_NATIVE_QA_HEIGHT", 840.0),
+        ));
     dioxus::LaunchBuilder::desktop()
         .with_cfg(
             Config::new()
