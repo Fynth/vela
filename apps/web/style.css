@@ -1349,3 +1349,6 @@ input[type="range"]:focus { outline:2px solid var(--accent); outline-offset:3px;
 
 .playlist-target input[type="search"] { width:130px; min-height:30px; padding:4px 9px; font-size:10px; }
 @media(max-width:620px){.playlist-target{flex-wrap:wrap}.playlist-target input[type="search"]{width:100%}}
+
+.playlist-undo { gap:10px; flex-wrap:wrap; }
+.playlist-undo span { flex:1; min-width:180px; }

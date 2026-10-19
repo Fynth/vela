@@ -1126,6 +1126,15 @@ fn GroupTracks(
     } }
 }
 
+#[derive(Clone)]
+struct PlaylistUndo {
+    playlist_id: String,
+    item_id: String,
+    revision: i64,
+    name: String,
+    title: String,
+}
+
 #[allow(non_snake_case)]
 fn App() -> Element {
     let mut auth = use_signal(|| None::<AuthResponse>);
@@ -1220,6 +1229,7 @@ fn App() -> Element {
     let mut collaborator_edit = use_signal(|| false);
     let mut selected_add_playlist = use_signal(String::new);
     let mut playlist_filter = use_signal(String::new);
+    let mut playlist_undo = use_signal(|| None::<PlaylistUndo>);
     let mut new_user = use_signal(String::new);
     let mut new_password = use_signal(String::new);
     let mut queue = use_signal(Vec::<Track>::new);
@@ -1523,6 +1533,7 @@ fn App() -> Element {
         collaborator.set(String::new());
         selected_add_playlist.set(String::new());
         playlist_filter.set(String::new());
+        playlist_undo.set(None);
         show_queue.set(false);
         playback_order.write().reset(0, 0);
         shuffle.set(false);
@@ -1882,6 +1893,20 @@ fn App() -> Element {
                         div { class: "content-inner",
                     if !error().is_empty() { div { class: "alert error", role: "alert", span { "{error}" } button { "aria-label": "Dismiss error", onclick: move |_| error.set(String::new()), Icon { name: "close" } } } }
                     if !notice().is_empty() { div { class: "alert success", role: "status", span { "{notice}" } button { "aria-label": "Dismiss notification", onclick: move |_| notice.set(String::new()), Icon { name: "close" } } } }
+                    if let Some(undo) = playlist_undo() { div { class: "alert success playlist-undo", role: "status",
+                        span { "Added “{undo.title}” to {undo.name}." }
+                        button { class: "button secondary small", onclick: move |_| {
+                            let undo = undo.clone();
+                            spawn_authorized(auth, async move {
+                                let path = format!("/api/playlists/{}/items/{}?revision={}&mutation_id={}", undo.playlist_id, undo.item_id, undo.revision, uuid::Uuid::new_v4());
+                                match mutate("DELETE", &path, None, &token(auth)).await {
+                                    Ok(()) => { playlist_undo.set(None); notice.set("Removed the added track.".into()); }
+                                    Err(message) => error.set(message),
+                                }
+                            });
+                        }, "Undo" }
+                        button { class: "icon-button", "aria-label": "Dismiss added-track receipt", onclick: move |_| playlist_undo.set(None), Icon { name: "close" } }
+                    } }
                     if page() != "home" {div { class: "page-heading", h1 { "{heading}" }
                         if page() == "library" {
                             if !tracks.read().is_empty() { button { class: "button primary", onclick: move |_| play_queue(tracks.peek().clone(), 0, view_context(page,catalog,selected_playlist), playback), Icon {name:"play"} "Play these tracks" } }
@@ -1960,9 +1985,21 @@ fn App() -> Element {
                                                 button { class: "icon-button", title: "Add to playback queue", "aria-label": "Add {track.title} to playback queue", onclick: move |_| { enqueue_track(track.clone(),false,playback,notice); }, "+" }
                                                 button { class: "icon-button metadata-edit", "aria-label": "Edit metadata for {edit_track.title}", title: "Edit metadata", onclick: move |_| editing_track.set(Some(edit_track.clone())), Icon { name: "edit" } }
                                                 button { class: "icon-button track-radio", "aria-label": "Start track radio for {radio_track.title}", title: "Track radio", onclick: move |_| actions.radio.call(radio_track.clone()), Icon { name: "radio" } }
-                                                if !selected_add_playlist().is_empty() { button { class: "icon-button", title: "Add to selected playlist", "aria-label": "Add to selected playlist", onclick: move |_| { let track = add_track.clone(); let id = selected_add_playlist(); spawn_authorized(auth, async move {
+                                                if !selected_add_playlist().is_empty() { button { class: "icon-button", title: "Add to selected playlist", "aria-label": "Add to selected playlist", onclick: move |_| { let track = add_track.clone(); let id = selected_add_playlist(); let mut undo_signal = playlist_undo; spawn_authorized(auth, async move {
+                                                    let track_id = track.id.clone();
+                                                    let title = track.title.clone();
                                                     match api::<PlaylistDetail>("GET", &format!("/api/playlists/{id}"), None, "").await {
-                                                        Ok(detail) => { match mutate("POST", &format!("/api/playlists/{id}/items"), Some(json!({"revision": detail.playlist.revision, "mutation_id": uuid::Uuid::new_v4().to_string(), "track_id": track.id})), &token(auth)).await { Ok(()) => notice.set("Track added to your playlist.".into()), Err(message) => error.set(message) } }
+                                                        Ok(detail) => { match mutate("POST", &format!("/api/playlists/{id}/items"), Some(json!({"revision": detail.playlist.revision, "mutation_id": uuid::Uuid::new_v4().to_string(), "track_id": track.id})), &token(auth)).await {
+                                                            Ok(()) => {
+                                                                if let Ok(updated) = api::<PlaylistDetail>("GET", &format!("/api/playlists/{id}"), None, "").await
+                                                                    && let Some(item) = updated.items.iter().rev().find(|item| item.track.id == track_id)
+                                                                {
+                                                                    undo_signal.set(Some(PlaylistUndo { playlist_id: id, item_id: item.id.clone(), revision: updated.playlist.revision, name: updated.playlist.name.clone(), title }));
+                                                                }
+                                                                notice.set("Track added to your playlist.".into());
+                                                            }
+                                                            Err(message) => error.set(message)
+                                                        } }
                                                         Err(message) => error.set(message)
                                                     }
                                                 }); }, Icon { name: "queue" } } }
