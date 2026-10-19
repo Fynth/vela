@@ -2118,7 +2118,7 @@ fn App() -> Element {
                                 {
                                     let card_name = list.name.clone();
                                     rsx! { button { class: "playlist-card", key: "{list.id}", onclick: move |_| { share_url.set(String::new()); playlist_rename.set(card_name.clone()); playlist_rename_busy.set(false); playlist_delete_confirm.set(false); open_playlist(list.id.clone(),playlist_view,error); },
-                                        div { class: "playlist-art", Icon { name: "queue" } }
+                                        div { class: "playlist-art", CatalogCover { artwork_id: list.artwork_id.clone() } }
                                         h3 { "{list.name}" }
                                         p { "{list.item_count} tracks" if !list.can_edit { " · Shared with you" } }
                                     } }

@@ -239,7 +239,7 @@ fn home_playlist_cards(
                 button { key: "{list.id}", class: "home-playlist-card", "data-playlist-id": "{list.id}",
                     "aria-label": "Open playlist {list.name}",
                     onclick: move |_| actions.playlist.call(id.clone()),
-                    Icon { name: "playlists" }
+                    CatalogCover { artwork_id: list.artwork_id.clone() }
                     div { strong { "{list.name}" } small { "{list.item_count} tracks" if shared { " · Shared metadata" } } }
                 }
             } }
