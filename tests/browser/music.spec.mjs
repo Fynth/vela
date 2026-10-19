@@ -1890,6 +1890,197 @@ test('PC02 held genuine personal recommendations cannot return after navigation 
   expect(errors).toEqual([]);
 });
 
+// Device app size (EX261 / SCALE01–SCALE02, SCALE07–SCALE09 subset). The preference
+// is presentation-only, device-scoped and validated: malformed stores never reach
+// the renderer, and no scale change may remount the one real media element.
+test('SCALE01 device app size applies live, persists, recovers from bad stores and keeps playback identity', async ({ page }) => {
+  test.setTimeout(180000);
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  const deviceKey = 'vela.device.presentation.v1';
+  const zoom = async () => Number(await page.evaluate(() => getComputedStyle(document.documentElement).zoom));
+  const setSlider = async value => {
+    await page.getByRole('slider', { name: 'App size', exact: true })
+      .evaluate((input, next) => { input.value = String(next); input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true })); }, value);
+  };
+  // A reload re-mounts the SPA, so every navigation waits for the signed-in shell.
+  const reloadApp = async () => {
+    await page.reload();
+    await expect(page.locator('main.main-content')).toBeVisible();
+  };
+  // Full-suite runs reuse the suite's own session; a targeted `-g` run starts from
+  // the isolated server.sh fixture and therefore creates its own account and track.
+  let title = 'Drift';
+  if (adminCookies) {
+    await openAdminFixture(page);
+  } else {
+    await page.goto('/');
+    await page.locator('#username').fill('admin');
+    await page.locator('#password').fill(password);
+    await page.getByRole('button', { name: /Create your music space|Sign in →/ }).click();
+    await expect(page.getByRole('button', { name: 'Library', exact: true }).first()).toBeVisible();
+    const auth = await (await page.request.get('/api/me')).json();
+    const upload = await page.request.post('/api/upload', { headers: { 'X-CSRF-Token': auth.csrf_token }, multipart: { file: { name: 'Appearance fixture.wav', mimeType: 'audio/wav', buffer: pcmWave(20, 440) } } });
+    expect(upload.ok()).toBeTruthy();
+    title = (await upload.json()).track.title;
+  }
+  await findTrack(page, title);
+  await page.getByRole('button', { name: `Play ${title}`, exact: true }).click();
+  await page.getByRole('button', { name: `Add ${title} to playback queue`, exact: true }).click();
+  await expect.poll(() => page.locator('#vela-audio').evaluate(audio => audio.currentTime)).toBeGreaterThan(0);
+  const source = await page.locator('#vela-audio').getAttribute('src');
+  await page.evaluate(() => { window.__scaleAudio = document.getElementById('vela-audio'); });
+  const assertSamePlayback = async () => {
+    expect(await page.evaluate(() => document.getElementById('vela-audio') === window.__scaleAudio)).toBeTruthy();
+    await expect(page.locator('#vela-audio')).toHaveAttribute('src', source);
+    await expect(page.locator('#vela-audio')).toHaveJSProperty('paused', false);
+  };
+  await navigate(page, 'Settings');
+  const appearance = page.locator('[data-testid="settings-appearance"]');
+  await expect(appearance).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Appearance', exact: true })).toBeVisible();
+  await expect(appearance).toContainText('Changes this device only');
+  await expect(appearance).toContainText('stored in this browser only');
+  await expect(page.locator('[data-testid="app-scale-value"]')).toHaveText('100%');
+  expect(await zoom()).toBeCloseTo(1, 3);
+  // Keyboard-only: reach the slider, change the value with an arrow key, keep focus.
+  const slider = page.getByRole('slider', { name: 'App size', exact: true });
+  await slider.focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(page.locator('[data-testid="app-scale-value"]')).toHaveText('105%');
+  expect(await zoom()).toBeCloseTo(1.05, 3);
+  expect(await slider.evaluate(input => input === document.activeElement)).toBeTruthy();
+  expect(await slider.evaluate(input => getComputedStyle(input).outlineStyle)).not.toBe('none');
+  await expect(page.locator('[data-testid="appearance-save-state"]')).toHaveText('Saved on this device.');
+  // Stepper and drag both apply exactly once and never stack.
+  await page.getByRole('button', { name: 'Decrease app size', exact: true }).click();
+  await expect(page.locator('[data-testid="app-scale-value"]')).toHaveText('100%');
+  await setSlider(125);
+  await expect(page.locator('[data-testid="app-scale-value"]')).toHaveText('125%');
+  expect(await zoom()).toBeCloseTo(1.25, 3);
+  expect(await page.evaluate(() => getComputedStyle(document.documentElement).zoom)).not.toMatch(/2\./);
+  await assertSamePlayback();
+  // Queue, cursor and position survive the scale change.
+  await page.getByRole('button', { name: 'Show playback queue', exact: true }).click();
+  await expect(page.locator('.queue-row')).toHaveCount(2);
+  await expect(page.locator('.queue-row').first()).toHaveClass(/current/);
+  await expect(page.locator('.queue-row .queue-track strong').first()).toHaveText(title);
+  await page.getByRole('button', { name: 'Close playback queue', exact: true }).click();
+  await expect.poll(() => page.locator('#vela-audio').evaluate(audio => audio.currentTime)).toBeGreaterThan(0);
+  await assertSamePlayback();
+  // The versioned device document holds presentation fields only.
+  const document = await page.evaluate(key => localStorage.getItem(key), deviceKey);
+  expect(JSON.parse(document)).toEqual({ app_scale_percent: 125, theme: 'dark', version: 1 });
+  const account = await (await page.request.get('/api/me')).json();
+  expect(document).not.toContain(account.csrf_token);
+  expect(document.toLowerCase()).not.toMatch(/csrf|token|cookie|password/);
+  expect(await page.evaluate(() => localStorage.getItem('vela.theme'))).toBeNull();
+  // Responsive evidence at 1280 and 320, both themes, reduced motion honoured.
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.screenshot({ path: 'test-results/scale-settings-1280-dark-125.png' });
+  await page.getByRole('radio', { name: 'Light', exact: true }).check();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+  await page.screenshot({ path: 'test-results/scale-settings-1280-light-125.png' });
+  await page.getByRole('radio', { name: 'System', exact: true }).check();
+  expect(await page.locator('html').getAttribute('data-theme')).toBe(await page.evaluate(() => matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'));
+  await page.getByRole('radio', { name: 'Dark', exact: true }).check();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  expect(JSON.parse(await page.evaluate(key => localStorage.getItem(key), deviceKey)).theme).toBe('dark');
+  await page.setViewportSize({ width: 320, height: 780 });
+  await setSlider(150);
+  await expect(page.locator('[data-testid="app-scale-value"]')).toHaveText('150%');
+  expect(await zoom()).toBeCloseTo(1.5, 3);
+  await assertSamePlayback();
+  // High scale must not strand the reset action outside the visible width.
+  const reset = page.getByRole('button', { name: 'Reset to 100%', exact: true });
+  await reset.scrollIntoViewIfNeeded();
+  const box = await reset.boundingBox();
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual((await page.evaluate(() => innerWidth)) + 1);
+  await page.screenshot({ path: 'test-results/scale-settings-320-dark-150.png' });
+  // Reload: the saved size is applied before the app's own private requests.
+  await page.addInitScript(() => {
+    window.__scaleOrder = { zoomAt: null, firstApiAt: null };
+    const setAttribute = Element.prototype.setAttribute;
+    Element.prototype.setAttribute = function (name, value) {
+      if (name === 'style' && String(value).includes('--app-zoom') && window.__scaleOrder.zoomAt === null) window.__scaleOrder.zoomAt = performance.now();
+      return setAttribute.call(this, name, value);
+    };
+    const fetch = window.fetch;
+    window.fetch = function (input, init) {
+      const url = typeof input === 'string' ? input : input && input.url;
+      if (window.__scaleOrder.firstApiAt === null && String(url).includes('/api/')) window.__scaleOrder.firstApiAt = performance.now();
+      return fetch.call(this, input, init);
+    };
+  });
+  let streams = 0;
+  page.on('request', request => { if (/\/stream$/.test(request.url())) streams++; });
+  await reloadApp();
+  await expect(page.locator('[data-testid="app-scale-value"]')).toHaveText('150%');
+  expect(await zoom()).toBeCloseTo(1.5, 3);
+  const order = await page.evaluate(() => window.__scaleOrder);
+  expect(order.zoomAt).not.toBeNull();
+  expect(order.firstApiAt === null || order.zoomAt <= order.firstApiAt).toBeTruthy();
+  expect(streams).toBe(0);
+  await expect(page.locator('.now-playing strong')).toHaveText(title);
+  await navigate(page, 'Settings');
+  // Reset and its own persistence.
+  await page.getByRole('button', { name: 'Reset to 100%', exact: true }).click();
+  await expect(page.locator('[data-testid="app-scale-value"]')).toHaveText('100%');
+  expect(await zoom()).toBeCloseTo(1, 3);
+  expect(JSON.parse(await page.evaluate(key => localStorage.getItem(key), deviceKey)).app_scale_percent).toBe(100);
+  await reloadApp();
+  await expect(page.locator('[data-testid="app-scale-value"]')).toHaveText('100%');
+  expect(await zoom()).toBeCloseTo(1, 3);
+  // A malformed store never reaches the renderer and is explained, not deleted.
+  await page.evaluate(key => localStorage.setItem(key, '{not json'), deviceKey);
+  await reloadApp();
+  await navigate(page, 'Settings');
+  await expect(page.locator('[data-testid="app-scale-value"]')).toHaveText('100%');
+  expect(await zoom()).toBeCloseTo(1, 3);
+  await expect(page.locator('[data-testid="appearance-recovery"]')).toBeVisible();
+  expect(await page.evaluate(key => localStorage.getItem(key), deviceKey)).toBe('{not json');
+  // Out-of-range and out-of-step values are rejected before the renderer.
+  for (const bad of ['{"version":1,"app_scale_percent":200,"theme":"dark"}', '{"version":1,"app_scale_percent":83,"theme":"dark"}', '{"version":9,"app_scale_percent":125,"theme":"dark"}']) {
+    await page.evaluate(([key, value]) => localStorage.setItem(key, value), [deviceKey, bad]);
+    await reloadApp();
+    await navigate(page, 'Settings');
+    await expect(page.locator('[data-testid="app-scale-value"]')).toHaveText('100%');
+    expect(await zoom()).toBeCloseTo(1, 3);
+    await expect(page.locator('[data-testid="appearance-recovery"]')).toBeVisible();
+  }
+  // Storage denied: the value applies for this session and says so; the next start
+  // recovers the last durable value instead of claiming it was saved.
+  await page.evaluate(([key, value]) => localStorage.setItem(key, value), [deviceKey, '{"app_scale_percent":100,"theme":"dark","version":1}']);
+  await reloadApp();
+  await navigate(page, 'Settings');
+  // Resume playback so a denied write is measured against a listening user. The
+  // restored bookmark may sit at the fixture's end, so restart inside the file.
+  await page.getByRole('slider', { name: 'Playback position', exact: true }).evaluate(input => { input.value = '1'; input.dispatchEvent(new Event('input', { bubbles: true })); });
+  await page.locator('#player-toggle').click();
+  await expect(page.locator('#vela-audio')).toHaveJSProperty('paused', false);
+  await expect.poll(() => page.locator('#vela-audio').evaluate(audio => audio.currentTime)).toBeGreaterThan(0);
+  const playingSource = await page.locator('#vela-audio').getAttribute('src');
+  await page.evaluate(() => {
+    window.__restoreSetItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function () { throw new DOMException('denied', 'QuotaExceededError'); };
+  });
+  await page.getByRole('button', { name: 'Increase app size', exact: true }).click();
+  await expect(page.locator('[data-testid="app-scale-value"]')).toHaveText('105%');
+  expect(await zoom()).toBeCloseTo(1.05, 3);
+  await expect(page.locator('[data-testid="appearance-save-state"]')).toHaveText(/Applied for this session/);
+  await expect(page.locator('#vela-audio')).toHaveJSProperty('paused', false);
+  await expect(page.locator('#vela-audio')).toHaveAttribute('src', playingSource);
+  const before = await page.locator('#vela-audio').evaluate(audio => audio.currentTime);
+  await expect.poll(() => page.locator('#vela-audio').evaluate(audio => audio.currentTime)).toBeGreaterThan(before);
+  // The denied value was never durable: the next start recovers the saved 100%.
+  await reloadApp();
+  await expect(page.locator('[data-testid="app-scale-value"]')).toHaveText('100%');
+  expect(await zoom()).toBeCloseTo(1, 3);
+  expect(errors).toEqual([]);
+});
+
 test('AUTH01 real revoked session stops the source and clears private playback UI',async({page})=>{
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   // A dedicated real session prevents revoking another scenario's fixture cookie.

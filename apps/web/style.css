@@ -706,3 +706,51 @@ input::placeholder { color:var(--quiet); opacity:1; }
   .home-track-grid { gap:16px; }
   .listening-card,.catalog-card,.collection-card,.playlist-card { padding:8px; }
 }
+
+/* ---------------------------------------------------------------------------
+   Device app size (EX261) — one validated percentage applied exactly once as
+   CSS zoom on the document root. `--app-zoom` is the only inline style the
+   presentation adapter writes. 100% leaves the app at the platform's own
+   scaling, and browser page zoom stays an independent user control.
+   --------------------------------------------------------------------------- */
+:root { --app-zoom: 1; zoom: var(--app-zoom); }
+/* Viewport units do not follow root zoom, so the shell and modals divide them
+   back out to stay exactly one zoomed viewport tall. At 100% this is a no-op. */
+.boot-screen, .auth-shell, .app-shell { min-height: calc(100vh / var(--app-zoom)); }
+.modal { max-height: calc(90vh / var(--app-zoom)); }
+
+.settings-appearance { grid-column: 1 / -1; }
+.settings-appearance > .eyebrow { margin-bottom: 10px; }
+.settings-appearance h2 { margin-bottom: 8px; }
+.settings-appearance > p { max-width: 660px; font-size: 12px; line-height: 1.75; }
+.setting-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
+.setting-text { flex: 1 1 260px; min-width: 0; }
+.setting-text h3 { font-size: 15px; letter-spacing: -.2px; margin-bottom: 5px; }
+.setting-text p { font-size: 12px; line-height: 1.7; margin: 0; }
+.setting-value { display: flex; align-items: center; gap: 6px; }
+.app-scale-value { min-width: 62px; text-align: center; font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--accent); }
+.app-scale-step { min-width: 44px; height: 44px; font-size: 20px; color: var(--text); background: var(--surface-raised); border: 1px solid var(--line); border-radius: 9px; }
+.app-scale-step:hover:not(:disabled) { background: var(--surface-hover); }
+.app-scale-control { margin-top: 16px; }
+.app-scale-control > label { margin: 0 0 6px; font-size: 11px; color: var(--muted); }
+.app-scale-control input { width: 100%; }
+.app-scale-legend { display: flex; justify-content: space-between; font-size: 10px; color: var(--quiet); margin-top: 2px; }
+.appearance-actions { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-top: 16px; }
+.appearance-actions .appearance-note { margin: 0; flex: 1 1 240px; }
+.appearance-note { font-size: 11px; line-height: 1.7; color: var(--muted); margin: 12px 0 0; }
+.appearance-note.warning { color: var(--danger); }
+.setting-divider { height: 1px; background: var(--line); margin: 24px 0; }
+.theme-choices { display: flex; gap: 8px; flex-wrap: wrap; }
+.theme-choice { display: flex; align-items: center; gap: 7px; margin: 0; min-height: 44px; padding: 9px 15px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg); font-size: 12px; font-weight: 500; color: var(--text); cursor: pointer; }
+.theme-choice:hover { background: var(--surface-hover); }
+.theme-choice:focus-within { border-color: var(--accent); }
+.theme-choice input[type=radio] { min-height: 0; width: 16px; height: 16px; accent-color: var(--accent); }
+
+/* Narrow layouts must reflow rather than clip when the app is scaled up:
+   at 150% a 320px viewport has ~213 CSS pixels of layout width. */
+@media (max-width: 620px) {
+  .modal { max-height: calc(92vh / var(--app-zoom)); }
+  .topbar { flex-wrap: wrap; row-gap: 8px; }
+  .player-bar { grid-template-columns: minmax(0, 1fr) 140px; }
+  .mobile-nav button { min-width: 0; flex: 1 1 0; }
+}

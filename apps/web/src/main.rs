@@ -11,9 +11,11 @@ mod network;
 mod now_playing;
 mod personal_mixes;
 mod playback;
+mod preferences;
 mod radio;
 mod scanner;
 mod session;
+mod settings;
 mod shell;
 use client::{api, mutate};
 use dioxus::prelude::*;
@@ -28,6 +30,10 @@ use wasm_bindgen_futures::JsFuture;
 use web_sys::{FormData, HtmlAudioElement, HtmlInputElement};
 
 fn main() {
+    // Apply the validated device size/theme before the first visible frame so the
+    // boot screen never paints at the wrong scale and no signed-out request is
+    // needed to read the preference.
+    preferences::boot();
     dioxus::launch(App);
 }
 
@@ -1261,7 +1267,13 @@ fn App() -> Element {
         }
     });
 
-    let mut theme = use_signal(|| storage_get("vela.theme").unwrap_or_else(|| "dark".into()));
+    // Device-scoped presentation preferences (app size + theme). They are never
+    // account data, never touch the media element and never trigger a request.
+    let loaded = use_hook(preferences::load);
+    let device = use_signal(|| loaded.preferences);
+    let device_save = use_signal(|| settings::SaveStatus::Unchanged);
+    let device_repair = use_signal(|| loaded.repair);
+    let device_zoom_supported = use_hook(preferences::zoom_supported);
 
     let playlist_view = PlaylistView {
         auth,
@@ -1685,13 +1697,9 @@ fn App() -> Element {
         }
     });
     use_effect(move || {
-        let value = theme.read().clone();
-        storage_set("vela.theme", &value);
-        if let Some(document) = web_sys::window().and_then(|w| w.document())
-            && let Some(root) = document.document_element()
-        {
-            let _ = root.set_attribute("data-theme", &value);
-        }
+        // Reapplies only presentation attributes on the document root. The
+        // persistent media element, queue, cursor and position are untouched.
+        preferences::apply(*device.read());
     });
 
     let current = queue.read().get(*index.read()).cloned();
@@ -1755,7 +1763,7 @@ fn App() -> Element {
                 shell::Sidebar {radio_available:radio_seed.read().is_some(), page:page(), user:auth.read().as_ref().unwrap().user.clone(), stats:stats(), playlists:playlists(), onnav:actions.navigate, onplaylist:actions.playlist }
                 main { class: "main-content",
                     header { class: "topbar", div { class: "breadcrumb", "YOUR PERSONAL MUSIC CLOUD" }
-                        div { class: "topbar-actions", button { class: "icon-button theme-button", title: "Change color theme", "aria-label": "Change color theme", onclick: move |_| { theme.set(if theme() == "dark" { "light".into() } else { "dark".into() }); }, if theme() == "dark" { Icon { name: "sun" } } else { Icon { name: "moon" } } }
+                        div { class: "topbar-actions", button { class: "icon-button theme-button", title: "Change color theme", "aria-label": "Change color theme", onclick: move |_| settings::toggle_theme(device, device_save), if preferences::effective_theme(device()) == "dark" { Icon { name: "sun" } } else { Icon { name: "moon" } } }
                             button { class: "button primary small", onclick: move |_| { add_music.set(true); }, "+ Add music" }
                         }
                     }
@@ -2190,11 +2198,11 @@ fn App() -> Element {
                     }
 
                     if page() == "settings" {
-                        section { class: "settings-grid", div { class: "panel", h2 { "A space that is yours" } p { "Your library is private. Music files stay on this server, and your session credentials stay in a secure browser cookie." }
+                        section { class: "settings-grid", settings::Appearance { device, status: device_save, repair: device_repair, zoom_supported: device_zoom_supported } div { class: "panel", h2 { "A space that is yours" } p { "Your library is private. Music files stay on this server, and your session credentials stay in a secure browser cookie." }
                                 dl { dt { "Server version" } dd { "{version}" } dt { "Collection storage" } dd { {stats.read().as_ref().map(|s| bytes(s.size_bytes)).unwrap_or_else(|| "—".into())} } dt { "Playback" } dd { "Original audio · Browser native" } dt { "Signed federation" } dd { "Not implemented" } }
                                 button { class: "button secondary", onclick: move |_| { spawn_authorized(auth, async move { match mutate("POST", "/api/logout", None, &token(auth)).await { Ok(()) => { engine.peek().bind(String::new(),None); auth.set(None); invalidate_library(library); clear_catalog(catalog); tracks.set(Vec::new()); queue.set(Vec::new()); playlists.set(Vec::new()); selected_playlist.set(None); stats.set(None); jobs.set(Vec::new()); share_url.set(String::new()); let next_sleep = sleep_generation.peek().wrapping_add(1); sleep_generation.set(next_sleep); sleep_minutes.set("0".into()); sleep_remaining.set(0); page.set("home".into());  error.set(String::new()); username.set(String::new()); } Err(message) => error.set(message) } }); }, "Sign out" }
                             }
-                            div { class: "panel", h2 { "Listening controls" } p { "Press Space to play or pause, and the arrow keys to seek 10 seconds. Use your device’s media controls when your browser supports them." } button { class: "button secondary", onclick: move |_| theme.set(if theme() == "dark" { "light".into() } else { "dark".into() }), if theme() == "dark" { "Switch to light theme" } else { "Switch to dark theme" } } small { "Codec support depends on your browser. Files are streamed directly without transcoding." } }
+                            div { class: "panel", h2 { "Listening controls" } p { "Press Space to play or pause, and the arrow keys to seek 10 seconds. Use your device’s media controls when your browser supports them. Theme and app size are in Appearance above; they change this device only and are never sent to the server." } small { "Codec support depends on your browser. Files are streamed directly without transcoding." } }
                             listening::PrivacySettings {auth,view:listening_view,collector:engine.peek().listening(),onhistory:move |_| actions.navigate.call("history".into())}
                             div { class: "panel", h2 { "Shared by choice" } p { "Manage explicit track publications and preview public servers. Enabling a public catalog does not publish your private library." }
                                 button { class: "button secondary", onclick: move |_| actions.navigate.call("network".into()), "Open Network" }
