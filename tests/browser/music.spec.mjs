@@ -26,7 +26,10 @@ async function openAdminSession(page) {
   }
   await page.goto('/');
   const setup = page.getByRole('button', { name: 'Create your music space →', exact: true });
-  if (await setup.isVisible().catch(() => false)) {
+  const signin = page.getByRole('button', { name: 'Sign in →', exact: true });
+  // Boot is asynchronous: decide setup-vs-signin only after one of them exists.
+  await expect(setup.or(signin)).toBeVisible({ timeout: 30000 });
+  if (await setup.isVisible()) {
     await page.locator('#username').fill('admin');
     await page.locator('#password').fill(password);
     await setup.click();
@@ -960,9 +963,13 @@ test('IN01 Home and search skeletons keep real geometry without changing playbac
   const cataloged = await page.request.patch(`/api/tracks/${track.id}/metadata`, { headers: { 'X-CSRF-Token': auth.csrf_token }, data: { revision: metadata.revision, title: track.title, artist: 'Vela Test', album: 'IN01 geometry', album_artist: 'Vela Test', genre: '', year: null, track_number: null, disc_number: null } });
   expect(cataloged.ok()).toBeTruthy();
 
-  await navigate(page, 'Library');
+  // Search issues a fresh authenticated request, so a just-uploaded track does
+  // not depend on a stale Library list (a Firefox-observed race).
+  await navigate(page, 'Search');
+  await page.locator('#global-search').fill(track.title);
+  await page.locator('#global-search').press('Enter');
   const play = page.getByRole('button', { name: `Play ${track.title}`, exact: true }).first();
-  await expect(play).toBeVisible();
+  await expect(play).toBeVisible({ timeout: 15000 });
   await play.click();
   await expect.poll(() => page.locator('#vela-audio').evaluate(audio => audio.currentTime)).toBeGreaterThan(0);
   await page.evaluate(() => { window.__in01Audio = document.getElementById('vela-audio'); });
