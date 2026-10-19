@@ -233,6 +233,10 @@ try {
   await wait(() => document.querySelectorAll('[data-native-track-id]').length === 3, 'Library restored after the skeleton fixture');
   await click('Play Signal');
   await wait(() => (el('.player-track strong')?.textContent || '') === 'Signal' && phase() === 'Playing' && position() > 100, 'Signal playback for the player cover');
+  // TR03: the band states the real artist and album of the tagged FLAC fixture.
+  assert((el('.player-artist')?.textContent || '') === 'Vela Test' && (el('.player-album')?.textContent || '') === 'Real Fixtures'
+    && cssPx(el('.player-artist'), 'fontSize') === 10,
+    `TR03 band states the real artist and album of the tagged FLAC at the approved 10px role (actual "${(el('.player-artist')?.textContent || '')}" / "${(el('.player-album')?.textContent || '')}", ${cssPx(el('.player-artist'), 'fontSize')}px)`);
   const playerCoverNode = () => [...document.querySelectorAll('.native-player img.neutral-cover.player-cover')].find(image => image.src.startsWith('data:image/') && image.naturalWidth > 0);
   await wait(() => playerCoverNode(), 'Bottom player cover <img>');
   const playerMetrics = await imageMetrics(playerCoverNode());
@@ -244,10 +248,13 @@ try {
   assert(playerMetrics.src === libraryMetrics.src, 'Bottom player reuses the exact library data-URL rendition for the same track');
   assert([...document.querySelectorAll('.native-player img')].every(image => image.src.startsWith('data:image/')), 'Player cover is a native data URL, never a remote image address');
   checks.push(`Player cover evidence: src ${playerMetrics.src.slice(0, 23)}… (${playerMetrics.src.length} chars, identical to library ${playerMetrics.src === libraryMetrics.src}), natural ${playerMetrics.naturalWidth}x${playerMetrics.naturalHeight}, box ${playerMetrics.boxWidth}x${playerMetrics.boxHeight}, object-fit ${playerMetrics.objectFit}/${playerMetrics.objectPosition}`);
+  // TR03: the persistent band carries the approved 48px authorized artwork box.
+  assert(near(playerMetrics.boxWidth, 48) && near(playerMetrics.boxHeight, 48), `TR03 player artwork keeps the approved 48px box (actual ${playerMetrics.boxWidth}x${playerMetrics.boxHeight})`);
   await click('Pause Signal'); await wait(() => phase() === 'Paused', 'Artwork fixture track paused');
   await click('Queue');
   await wait(() => button('Clear queue') && !button('Clear queue').disabled, 'Queue clear control for the artwork fixture');
   await click('Clear queue'); await wait(() => phase() === 'Idle', 'Artwork fixture playback stopped');
+  assert(!el('.native-player .player-source'), 'TR03 player shows no source line when nothing is selected');
   await click('Library');
   await wait(() => document.querySelectorAll('[data-native-track-id]').length === 3, 'Library restored after the artwork fixture');
   if (button('Dismiss notification')) await click('Dismiss notification');
@@ -362,6 +369,118 @@ try {
   el('[data-testid="native-player-favorite"]').click();
   await wait(() => el('[data-testid="native-player-favorite"]')?.getAttribute('aria-label') === 'Remove Native Continuity from favorites', 'Player favorite mutation');
   assert(el('[data-testid="native-player-favorite"]')?.getAttribute('aria-label') === 'Remove Native Continuity from favorites', 'Player favorite control updates the shared queue state');
+  // TR03: reference-style persistent player band. These checks read the real rendered
+  // band and dispatch the existing root transport actions; the presentation keeps no
+  // second audio, queue or position authority.
+  const bandNode = () => el('.native-player');
+  const zoneRect = selector => el(selector)?.getBoundingClientRect();
+  const overlapping = (a, b) => Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1
+    && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1;
+  const bandControls = () => [...document.querySelectorAll('.native-player button,.native-player input')]
+    .filter(node => node.getClientRects().length)
+    .map(node => ({label: (node.getAttribute('aria-label') || node.id || node.textContent).trim(), rect: node.getBoundingClientRect()}));
+  const bandRect = bandNode().getBoundingClientRect();
+  const trackZone = zoneRect('.player-track'), centerZone = zoneRect('.player-controls'), extrasZone = zoneRect('.player-extras');
+  assert(bandRect && near(bandRect.height, 88) && near(bandRect.left, 0) && near(bandRect.width, innerWidth),
+    `TR03 player is one full-width 88px band (actual ${bandRect?.width}x${bandRect?.height} at ${bandRect?.left},${bandRect?.top})`);
+  assert(cssPx(bandNode(), 'paddingTop') === 10 && cssPx(bandNode(), 'paddingBottom') === 10
+    && cssPx(bandNode(), 'paddingLeft') === 26 && cssPx(bandNode(), 'paddingRight') === 26,
+    `TR03 band keeps the approved 10px 26px padding (${cssPx(bandNode(), 'paddingTop')}px ${cssPx(bandNode(), 'paddingLeft')}px)`);
+  assert(getComputedStyle(bandNode()).backgroundColor === 'rgb(16, 19, 15)'
+    && getComputedStyle(bandNode()).borderTopColor === 'rgb(52, 59, 46)',
+    'TR03 band renders the player surface and top border roles');
+  assert(trackZone && centerZone && extrasZone && near(trackZone.left, bandRect.left + 26) && near(extrasZone.right, bandRect.right - 26),
+    `TR03 three unboxed zones span the band exactly once (track ${trackZone?.left}, actions right ${extrasZone?.right}, band ${bandRect.left}..${bandRect.right})`);
+  assert(trackZone.right <= centerZone.left + 1 && centerZone.right <= extrasZone.left + 1,
+    `TR03 zones do not overlap (track right ${trackZone.right}, transport ${centerZone.left}..${centerZone.right}, actions left ${extrasZone.left})`);
+  const transport = el('.player-controls .transport');
+  const transportLabels = [...transport.querySelectorAll('button')].map(node => (node.getAttribute('aria-label') || '').trim());
+  assert(JSON.stringify(transportLabels) === JSON.stringify(['Shuffle', 'Previous', 'Pause', 'Next', 'Repeat off']),
+    `TR03 transport order is shuffle/previous/play-pause/next/repeat (actual ${transportLabels.join('/')})`);
+  const transportRects = [...transport.querySelectorAll('button')].map(node => node.getBoundingClientRect());
+  assert(transportRects.every(rect => rect.width >= 44 && rect.height >= 44),
+    `TR03 each transport control keeps its own 44px hit box (${transportRects.map(rect => `${Math.round(rect.width)}x${Math.round(rect.height)}`).join(',')})`);
+  assert(transportRects.every((rect, at) => at === 0 || rect.left >= transportRects[at - 1].right - 1), 'TR03 transport hit boxes do not overlap');
+  const playCircle = el('[data-testid="native-player-play"] .play-circle').getBoundingClientRect();
+  assert(near(playCircle.width, 32) && near(playCircle.height, 32),
+    `TR03 play uses the approved 32px circle inside its 44px hit box (actual ${playCircle.width}x${playCircle.height})`);
+  assert(getComputedStyle(el('.play-circle')).backgroundColor === 'rgb(228, 235, 217)'
+    && getComputedStyle(el('.play-circle')).color === 'rgb(27, 37, 17)',
+    'TR03 play circle renders the approved #e4ebd9 fill with the dark icon');
+  assert(cssPx(el('.player-track strong'), 'fontSize') === 12,
+    `TR03 player title uses the approved 12px role (actual ${cssPx(el('.player-track strong'), 'fontSize')}px)`);
+  assert((el('.player-track strong')?.textContent || '') === 'Native Continuity' && !el('.player-sub'),
+    `TR03 states only real metadata: the untagged WAV fixture shows its title without an invented artist or album (sub ${!!el('.player-sub')})`);
+  const seekInput = el('#native-seek');
+  assert(seekInput.type === 'range' && Number(seekInput.max) > 0 && (seekInput.getAttribute('aria-valuetext') || '').includes(' of '),
+    `TR03 seek is a real native range with an honest time announcement (${seekInput.getAttribute('aria-valuetext')})`);
+  assert(cssPx(seekInput, 'height') === 22 && parseFloat(cssToken(seekInput, '--vela-progress')) > 0,
+    `TR03 seek keeps the compact row and a state-driven filled rail (height ${cssPx(seekInput, 'height')}px, progress ${cssToken(seekInput, '--vela-progress')})`);
+  assert(cssPx(el('.player-time'), 'fontSize') === 10
+    && getComputedStyle(el('.player-time')).fontVariantNumeric.includes('tabular'),
+    `TR03 player times use the approved 10px tabular role (actual ${cssPx(el('.player-time'), 'fontSize')}px ${getComputedStyle(el('.player-time')).fontVariantNumeric})`);
+  const volumeSlider = el('#native-volume');
+  assert(volumeSlider.type === 'range' && near(cssPx(volumeSlider, 'width'), 65),
+    `TR03 volume keeps the approved 65px rail (actual ${cssPx(volumeSlider, 'width')}px)`);
+  const muteState = () => el('[data-testid="native-player-mute"]')?.getAttribute('aria-pressed');
+  const volumeLevel = () => Number(el('#native-volume')?.value);
+  assert(muteState() === 'true' && button('Unmute'), 'TR03 zero engine volume is an honest muted state with a real Unmute action');
+  fill('#native-volume', '45');
+  await wait(() => muteState() === 'false' && volumeLevel() === 45, 'Real engine volume acknowledged at 45%');
+  const tr03Source = generation(), tr03Position = position();
+  await click('Mute');
+  await wait(() => muteState() === 'true' && volumeLevel() === 0, 'Mute drives the one engine volume to zero');
+  assert(generation() === tr03Source && phase() === 'Playing' && position() > tr03Position,
+    'Mute never replaces the source or interrupts the advancing native clock');
+  await click('Unmute');
+  await wait(() => muteState() === 'false' && volumeLevel() === 45, 'Unmute restores the remembered audible level');
+  assert(generation() === tr03Source && button('Pause'), 'Unmute keeps the same native source and playing state');
+  checks.push(`TR03 volume/mute: 45% → 0% → 45% on source ${tr03Source}, position ${tr03Position}→${position()}ms, no source replacement`);
+  fill('#native-volume', '0'); await sleep(250);
+  const queueEntry = el('[data-testid="native-player-queue"]');
+  assert(queueEntry && queueEntry.getAttribute('aria-label') === 'Open queue', 'TR03 band exposes the real Queue entry');
+  const queueSource = generation(), queuePosition = position();
+  await click('Open queue');
+  await wait(() => document.querySelectorAll('[data-native-queue-index]').length > 0, 'Band Queue entry opens the real playback queue');
+  assert(generation() === queueSource && position() >= queuePosition && phase() === 'Playing',
+    `TR03 opening the queue never resets the source or rewinds the position (source ${generation()}, ${position()}ms vs ${queuePosition}ms)`);
+  await sleep(350);
+  assert(position() > queuePosition, 'TR03 the native clock keeps advancing while the queue view is open');
+  const queueOccurrences = document.querySelectorAll('[data-native-queue-index]').length;
+  const queueCurrentAt = [...document.querySelectorAll('.native-queue-row')].findIndex(row => row.classList.contains('current'));
+  assert(queueCurrentAt >= 0, 'TR03 queue view marks the current occurrence');
+  await click('Library');
+  await wait(() => document.querySelectorAll('[data-native-track-id]').length === 3, 'Library returns after the band queue entry');
+  await click('Open queue');
+  await wait(() => document.querySelectorAll('[data-native-queue-index]').length === queueOccurrences, 'Queue reopens with the same occurrences');
+  assert(document.querySelectorAll('[data-native-queue-index]').length === queueOccurrences
+    && [...document.querySelectorAll('.native-queue-row')].findIndex(row => row.classList.contains('current')) === queueCurrentAt
+    && generation() === queueSource,
+    'TR03 navigation through the band never resets queue, current occurrence or source');
+  checks.push(`TR03 queue entry: ${queueOccurrences} occurrences, current ${queueCurrentAt}, source ${queueSource} retained across Library↔Queue`);
+  await click('Library');
+  await wait(() => document.querySelectorAll('[data-native-track-id]').length === 3, 'Library restored after the band continuity check');
+  assert([...document.querySelectorAll('.native-player button')].every(node => (node.getAttribute('aria-label') || '').trim().length > 0),
+    'TR03 every band control keeps an accessible name');
+  assert((document.querySelector('label[for="native-seek"]')?.textContent || '') === 'Playback position'
+    && (document.querySelector('label[for="native-volume"]')?.textContent || '') === 'Volume',
+    'TR03 both native sliders keep their keyboard labels');
+  const bandTabbable = [...document.querySelectorAll('.native-player button,.native-player input')].filter(node => !node.disabled && node.tabIndex >= 0).length;
+  assert(bandTabbable >= 9, `TR03 band stays keyboard reachable (${bandTabbable} tabbable controls)`);
+  assert(el('[data-testid="native-player-announcement"]')?.getAttribute('aria-live') === 'polite'
+    && (el('[data-testid="native-player-announcement"]')?.textContent || '').includes('Native Continuity'),
+    'TR03 announces the current track once through a polite live region');
+  assert(seekInput.disabled === false && el('#native-volume').disabled === false,
+    'TR03 seek and volume stay operable while a source is loaded');
+  const bandText = (bandNode().textContent || '').toLowerCase();
+  assert(!/lossless|bit-?perfect|hi-?res|hires|studio master|kbps|khz|demo/.test(bandText),
+    `TR03 band claims no invented quality, bitrate or licence state (text "${(bandNode().textContent || '').trim().slice(0, 120)}")`);
+  assert((el('.player-source-value')?.textContent || '').trim() === 'Your library',
+    `TR03 source line states the actual playback context (actual "${(el('.player-source-value')?.textContent || '').trim()}")`);
+  assert(!el('[data-testid="native-expanded-player"]') && !button('Expand') && !button('Now playing'),
+    'TR03 presents no expanded Now Playing surface; TR07 owns it and the band never fakes one');
+  checks.push(`TR03 player band: ${Math.round(bandRect.width)}x${Math.round(bandRect.height)} at (${Math.round(bandRect.left)},${Math.round(bandRect.top)}), zones ${Math.round(trackZone.width)}/${Math.round(centerZone.width)}/${Math.round(extrasZone.width)}px, transport ${transportRects.map(rect => Math.round(rect.width)).join('/')}px, play circle ${Math.round(playCircle.width)}px, seek ${cssPx(seekInput, 'height')}px, volume ${Math.round(cssPx(volumeSlider, 'width'))}px, source "${(el('.player-source-value')?.textContent || '').trim()}"`);
+  await capture('player-band-dark');
   const gen = generation(); const before = position();
   await click('Queue'); await sleep(450);
   assert(generation() === gen && position() > before, 'Navigation preserves native source and advancing position');
@@ -378,6 +497,9 @@ try {
   await wait(() => position() >= 5900 && position() <= 6300 && phase() === 'Paused', 'Native seek remains paused');
   await click('Play'); await wait(() => phase() === 'Playing' && position() > 6400, 'Native resume after seek');
   await click('Pause'); await wait(() => phase() === 'Paused', 'Pause before queue edits');
+  // TR03: record the actual queue signature before the appearance changes below.
+  const appearanceQueue = {count: document.querySelectorAll('[data-native-queue-index]').length, current: [...document.querySelectorAll('.native-queue-row')].findIndex(row => row.classList.contains('current'))};
+  assert(appearanceQueue.count > 0 && appearanceQueue.current >= 0, 'Queue view exposes the current occurrence before the appearance checks');
   await click('Use the light theme');
   assert(el('.native-app').dataset.theme === 'light', 'Functional light theme');
   assert(generation() === gen && phase() === 'Paused', 'Theme change preserves the native source, queue and paused state');
@@ -396,6 +518,12 @@ try {
   await click('Reset to 100%');
   await wait(() => el('[data-testid="native-app-scale-value"]')?.textContent === '100%', 'App size reset to 100%');
   assert(generation() === scaleSource && phase() === 'Paused', 'Scale reset keeps the same native source and paused state');
+  await click('Queue');
+  await wait(() => document.querySelectorAll('[data-native-queue-index]').length > 0, 'Queue view after theme and app-scale changes');
+  assert(document.querySelectorAll('[data-native-queue-index]').length === appearanceQueue.count
+    && [...document.querySelectorAll('.native-queue-row')].findIndex(row => row.classList.contains('current')) === appearanceQueue.current
+    && generation() === scaleSource && phase() === 'Paused',
+    'TR03 theme and app-scale changes never reset the queue, its current occurrence, the source or the paused state');
   await click('Library');
   fill('#native-search', 'Signal'); el('.native-search').requestSubmit();
   await wait(() => document.querySelectorAll('[data-native-track-id]').length === 1 && button('Play Signal'), 'Real API search');
@@ -453,6 +581,32 @@ try {
     && getComputedStyle(compactNav).overflowX === 'auto',
     'All current native destinations remain reachable in the compact navigation');
   checks.push(`TR02 narrow shell: ${innerWidth}x${innerHeight}, main left ${Math.round(compactMainRect.left)}, topbar ${Math.round(compactTopbarRect.height)}px, player ${compactPlayer.height.toFixed(1)}px at y=${compactPlayer.top.toFixed(1)}, scroller ${Math.round(compactScrollRect.height)}px, destinations ${compactNavButtons.map(node => (node.getAttribute('aria-label') || node.textContent).trim()).join('/')}`);
+  // TR03 at 640px: the same band keeps every real control reachable in two rows
+  // with no overlap, no clipped control and no hidden transport.
+  const narrowBandNode = el('.native-player'), narrowBand = narrowBandNode.getBoundingClientRect();
+  const narrowTrack = zoneRect('.player-track'), narrowCenter = zoneRect('.player-controls'), narrowExtras = zoneRect('.player-extras');
+  assert(narrowTrack && narrowCenter && narrowTrack.bottom <= narrowCenter.top + 1,
+    `TR03 narrow band stacks the real title row above the transport (track bottom ${narrowTrack?.bottom}, transport top ${narrowCenter?.top})`);
+  assert(narrowExtras && narrowExtras.top < narrowCenter.bottom && narrowExtras.bottom > narrowCenter.top,
+    'TR03 narrow band keeps Queue, mute and volume beside the transport in the second row');
+  assert(near(cssPx(el('.player-cover'), 'width'), 48), `TR03 narrow band keeps the 48px artwork box (actual ${cssPx(el('.player-cover'), 'width')}px)`);
+  assert(getComputedStyle(el('.player-source')).display === 'none',
+    'TR03 narrow band applies the approved 761–900px "hide source" step instead of clipping it');
+  const narrowControls = bandControls();
+  assert(narrowControls.length >= 9, `TR03 narrow band keeps every control (actual ${narrowControls.length})`);
+  assert(narrowControls.every(control => control.rect.left >= narrowBand.left - 1 && control.rect.right <= narrowBand.right + 1
+    && control.rect.top >= narrowBand.top - 1 && control.rect.bottom <= narrowBand.bottom + 1),
+    `TR03 no narrow band control leaves the player (${narrowControls.map(control => control.label).join('/')})`);
+  assert(narrowControls.every((control, at) => narrowControls.every((other, index) => at === index || !overlapping(control.rect, other.rect))),
+    `TR03 narrow band controls never overlap (${narrowControls.map(control => `${control.label}:${Math.round(control.rect.width)}x${Math.round(control.rect.height)}`).join(',')})`);
+  assert(narrowControls.every(control => control.rect.width >= 44 && control.rect.height >= 22),
+    'TR03 narrow band keeps usable pointer boxes for every control');
+  assert(narrowBandNode.scrollWidth <= narrowBandNode.clientWidth + 1,
+    `TR03 narrow band has no clipped horizontal content (scroll ${narrowBandNode.scrollWidth} vs ${narrowBandNode.clientWidth})`);
+  assert(button('Play') && !button('Pause') && muteState() === 'true' && button('Unmute'),
+    'TR03 narrow band renders the real paused and muted states');
+  checks.push(`TR03 narrow band: ${Math.round(narrowBand.width)}x${Math.round(narrowBand.height)} at 640px, track row bottom ${Math.round(narrowTrack.bottom)}, transport y ${Math.round(narrowCenter.top)}–${Math.round(narrowCenter.bottom)}, actions x ${Math.round(narrowExtras.left)}–${Math.round(narrowExtras.right)}, controls ${narrowControls.length}`);
+  await capture('player-band-narrow-light');
   await capture('compact-light');
   assert(document.documentElement.scrollWidth <= innerWidth + 1, 'Compact native window has no horizontal document overflow');
   await click('Clear queue'); await wait(() => phase() === 'Idle', 'Clear queue stops native audio');

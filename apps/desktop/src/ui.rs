@@ -258,6 +258,10 @@ struct Ui {
     repeat: Signal<Repeat>,
     context: Signal<String>,
     snapshot: Signal<AudioSnapshot>,
+    /// Last audible level remembered for the player's Mute/Unmute pair. It is the
+    /// engine's own volume that is muted to zero, so there is still exactly one
+    /// output authority; this is only the value to restore.
+    volume_restore: Signal<f32>,
     preparing: Signal<bool>,
     /// Requested transport state; independent of delayed decoder snapshots.
     wants_play: Signal<bool>,
@@ -2287,7 +2291,36 @@ fn volume(mut ui: Ui, value: String) {
     let Some(audio) = ui.audio.peek().clone() else {
         return;
     };
-    if let Err(error) = audio.set_volume(*ui.selection.peek(), (value / 100.0).clamp(0.0, 1.0)) {
+    let level = (value / 100.0).clamp(0.0, 1.0);
+    // Remember the last audible level so Mute/Unmute restores what the listener
+    // actually set instead of a hard-coded percentage.
+    if level > 0.0 {
+        ui.volume_restore.set(level);
+    }
+    if let Err(error) = audio.set_volume(*ui.selection.peek(), level) {
+        ui.source_error.set(error);
+    }
+}
+
+/// Player Mute/Unmute. The engine's own volume is set to zero (or back to the
+/// remembered audible level); no second volume owner, element or output exists and
+/// the current source, queue and position are untouched.
+fn toggle_mute(mut ui: Ui) {
+    if !ui.signed_in() {
+        return;
+    }
+    let Some(audio) = ui.audio.peek().clone() else {
+        return;
+    };
+    let current = ui.snapshot.peek().volume.clamp(0.0, 1.0);
+    let level = if current > 0.001 {
+        ui.volume_restore.set(current);
+        0.0
+    } else {
+        let remembered = ui.volume_restore.peek().clamp(0.0, 1.0);
+        if remembered > 0.001 { remembered } else { 0.7 }
+    };
+    if let Err(error) = audio.set_volume(*ui.selection.peek(), level) {
         ui.source_error.set(error);
     }
 }
@@ -4308,10 +4341,73 @@ fn player(ui: Ui) -> Element {
     let favorite_disabled = track
         .as_ref()
         .is_some_and(|track| ui.favorite_busy.read().as_str() == track.id);
+    // The player only states facts the current DTO carries. Album comes from the
+    // owned track or from the exact public queue occurrence; an absent album is
+    // omitted instead of being replaced with invented metadata.
+    let album = if remote.is_some() {
+        ui.remote_queue
+            .read()
+            .get(*ui.remote_index.read())
+            .map(|item| item.track.album.trim().to_owned())
+            .filter(|album| !album.is_empty())
+    } else {
+        track
+            .as_ref()
+            .map(|track| track.album.trim().to_owned())
+            .filter(|album| !album.is_empty())
+    };
+    let (title, artist) = match (&remote, &track) {
+        (Some(remote), _) => (remote.title.clone(), remote.artist.clone()),
+        (None, Some(track)) => (track.title.clone(), track.artist.clone()),
+        (None, None) => (
+            "Ready when you are".to_owned(),
+            "Choose something you love".to_owned(),
+        ),
+    };
+    // An untagged recording has no artist or album: the band then shows its title
+    // only instead of inventing a performer or a release.
+    let has_sub = !artist.is_empty() || album.is_some() || remote.is_some();
+    let announcement = match (&remote, &track) {
+        (Some(remote), _) if remote.artist.is_empty() => {
+            format!("{}, public source", remote.title)
+        }
+        (Some(remote), _) => format!("{} by {}, public source", remote.title, remote.artist),
+        (None, Some(track)) if track.artist.is_empty() => track.title.clone(),
+        (None, Some(track)) => format!("{} by {}", track.title, track.artist),
+        (None, None) => String::new(),
+    };
+    // Mute is the engine's own zero level, so the button can never disagree with
+    // what is actually coming out. The remembered audible level is restored on
+    // Unmute rather than a hard-coded default.
+    let muted = snapshot.volume <= 0.001;
+    let volume_percent = (snapshot.volume * 100.0).round().clamp(0.0, 100.0);
+    let volume_style = format!("--vela-progress:{volume_percent:.2}%;");
+    let volume_text = format!("{volume_percent} percent");
+    let seek_percent = if snapshot.duration_ms > 0 {
+        (snapshot.position_ms as f64 * 100.0 / snapshot.duration_ms as f64).clamp(0.0, 100.0)
+    } else {
+        0.0
+    };
+    let seek_style = format!("--vela-progress:{seek_percent:.2}%;");
+    let seek_text = format!(
+        "{} of {}",
+        time_label(snapshot.position_ms),
+        time_label(snapshot.duration_ms)
+    );
+    let mut open_queue = ui.clone();
+    let mute_ui = ui.clone();
     rsx! {footer {class:"native-player","aria-label":"Native music player","data-audio-phase":"{snapshot.phase:?}","data-audio-generation":"{snapshot.generation}",
-        div {class:"player-track",
+        div {class:"player-track","data-testid":"native-player-track",
             ArtworkCover {ui:ui.clone(),artwork_id:track.as_ref().and_then(|track|track.artwork_id.clone()),class:"neutral-cover player-cover",icon:"music"}
-            div {if let Some(remote)=remote.clone() {strong {"{remote.title}"} small {"{remote.artist} · public"} } else if let Some(track)=track.clone() {strong {"{track.title}"} small {"{track.artist}"}}else{strong {"Ready when you are"} small {"Choose something you love"}}}
+            div {class:"player-meta",strong {"{title}"}
+                if has_sub {
+                    p {class:"player-sub",
+                        if !artist.is_empty(){span {class:"player-artist","{artist}"}}
+                        if let Some(album)=album.clone(){span {class:"player-album",title:"{album}","{album}"}}
+                        if remote.is_some(){span {class:"player-kind","Public"}}
+                    }
+                }
+            }
             if remote.is_none() && let Some(favorite_track)=track.clone() {
                 {
                     let favorite_ui=ui.clone();
@@ -4319,17 +4415,41 @@ fn player(ui: Ui) -> Element {
                 }
             }
         }
-        div {class:"player-controls",div {class:"transport",
-            button {class:if shuffle{"icon-button selected"}else{"icon-button"},"aria-label":"Shuffle",title:shuffle_help,"aria-description":shuffle_help,"aria-pressed":shuffle,disabled:blocked||offline_active||remote.is_some(),onclick:move |_|{let ui=shuffle_ui.clone();let next=!*ui.shuffle.peek();set_shuffle(ui,next);},Icon {name:"shuffle"}}
-            button {class:"icon-button","aria-label":"Previous",disabled:blocked||(offline_active&&offline_current.is_none_or(|current|current==0))||(remote.is_some()&&*ui.remote_index.read()==0),onclick:move |_|player_previous(previous.clone()),Icon {name:"previous"}}
-            button {class:"native-play-toggle","aria-label":if playing{"Pause"}else{"Play"},disabled:blocked,onclick:move |_|toggle(toggle_ui.clone()),if playing{Icon {name:"pause"}}else{Icon {name:"play"}}}
-            button {class:"icon-button","aria-label":"Next",disabled:blocked||(offline_active&&offline_current.is_none_or(|current|current+1>=offline_len))||(remote.is_some()&&*ui.remote_index.read()+1>=ui.remote_queue.read().len()),onclick:move |_|player_next(next.clone()),Icon {name:"next"}}
-            button {class:if repeat!=Repeat::Off{"icon-button selected"}else{"icon-button"},"aria-label":repeat_label,title:repeat_help,"aria-description":repeat_help,"aria-pressed":repeat!=Repeat::Off,disabled:blocked||remote.is_some(),onclick:move |_|{let next=match repeat{Repeat::Off if offline_active=>Repeat::One,Repeat::Off=>Repeat::All,Repeat::All=>Repeat::One,Repeat::One=>Repeat::Off};set_repeat(repeat_ui.clone(),next);},if repeat==Repeat::One{Icon {name:"repeat-one"}}else{Icon {name:"repeat"}}}
+        div {class:"player-controls",
+            div {class:"transport",role:"group","aria-label":"Playback transport",
+                button {class:if shuffle{"icon-button selected"}else{"icon-button"},"aria-label":"Shuffle",title:shuffle_help,"aria-description":shuffle_help,"aria-pressed":shuffle,disabled:blocked||offline_active||remote.is_some(),onclick:move |_|{let ui=shuffle_ui.clone();let next=!*ui.shuffle.peek();set_shuffle(ui,next);},Icon {name:"shuffle"}}
+                button {class:"icon-button","aria-label":"Previous",disabled:blocked||(offline_active&&offline_current.is_none_or(|current|current==0))||(remote.is_some()&&*ui.remote_index.read()==0),onclick:move |_|player_previous(previous.clone()),Icon {name:"previous"}}
+                button {class:"native-play-toggle","data-testid":"native-player-play","aria-label":if playing{"Pause"}else{"Play"},disabled:blocked,onclick:move |_|toggle(toggle_ui.clone()),
+                    span {class:"play-circle","aria-hidden":"true",if playing{Icon {name:"pause"}}else{Icon {name:"play"}}}
+                }
+                button {class:"icon-button","aria-label":"Next",disabled:blocked||(offline_active&&offline_current.is_none_or(|current|current+1>=offline_len))||(remote.is_some()&&*ui.remote_index.read()+1>=ui.remote_queue.read().len()),onclick:move |_|player_next(next.clone()),Icon {name:"next"}}
+                button {class:if repeat!=Repeat::Off{"icon-button selected"}else{"icon-button"},"aria-label":repeat_label,title:repeat_help,"aria-description":repeat_help,"aria-pressed":repeat!=Repeat::Off,disabled:blocked||remote.is_some(),onclick:move |_|{let next=match repeat{Repeat::Off if offline_active=>Repeat::One,Repeat::Off=>Repeat::All,Repeat::All=>Repeat::One,Repeat::One=>Repeat::Off};set_repeat(repeat_ui.clone(),next);},if repeat==Repeat::One{Icon {name:"repeat-one"}}else{Icon {name:"repeat"}}}
+            }
+            div {class:"native-seek",
+                span {class:"player-time","{time_label(snapshot.position_ms)}"}
+                label {class:"sr-only",r#for:"native-seek","Playback position"}
+                input {id:"native-seek",r#type:"range",min:0,max:snapshot.duration_ms.max(1),step:100,value:snapshot.position_ms,disabled:!can_seek,"aria-valuetext":"{seek_text}",style:"{seek_style}",onchange:move |event|seek(seek_ui.clone(),event.value())}
+                span {class:"player-time","{time_label(snapshot.duration_ms)}"}
+            }
         }
-            div {class:"native-seek",span {"{time_label(snapshot.position_ms)}"} label {class:"sr-only",r#for:"native-seek","Playback position"} input {id:"native-seek",r#type:"range",min:0,max:snapshot.duration_ms.max(1),step:100,value:snapshot.position_ms,disabled:!can_seek,onchange:move |event|seek(seek_ui.clone(),event.value())} span {"{time_label(snapshot.duration_ms)}"}}
+        div {class:"player-extras","data-testid":"native-player-extras",
+            if !context.is_empty(){
+                div {class:"player-source","data-testid":"native-player-source","aria-label":"Playback source",
+                    span {class:"player-source-label","Source"}
+                    span {class:"player-source-value",title:"{context}","{context}"}
+                }
+            }
+            div {class:"player-actions",
+                button {class:"icon-button player-queue","data-testid":"native-player-queue","aria-label":"Open queue",title:"Queue",onclick:move |_|open_queue.view.set("queue"),Icon {name:"queue"}}
+                button {class:if muted{"icon-button player-mute selected"}else{"icon-button player-mute"},"data-testid":"native-player-mute","aria-label":if muted{"Unmute"}else{"Mute"},"aria-pressed":muted,title:if muted{"Restore the last audible level"}else{"Mute the native output"},disabled:!ui.audio_ready(),onclick:move |_|toggle_mute(mute_ui.clone()),Icon {name:"volume"}}
+                div {class:"player-volume",
+                    label {class:"sr-only",r#for:"native-volume","Volume"}
+                    input {id:"native-volume",r#type:"range",min:0,max:100,step:1,value:volume_percent,disabled:!ui.audio_ready(),"aria-valuetext":"{volume_text}",style:"{volume_style}",oninput:move |event|volume(volume_ui.clone(),event.value())}
+                }
+            }
         }
         div { class: "native-player-status", hidden: true, "data-testid": "native-playback-status", small { "{context}" } }
-        div {class:"player-volume",Icon {name:"volume"} label {class:"sr-only",r#for:"native-volume","Volume"} input {id:"native-volume",r#type:"range",min:0,max:100,step:1,value:(snapshot.volume*100.0).round(),disabled:!ui.audio_ready(),oninput:move |event|volume(volume_ui.clone(),event.value())}}
+        div {class:"sr-only",role:"status","aria-live":"polite","aria-atomic":"true","data-testid":"native-player-announcement","{announcement}"}
         if !ui.audio_error.read().is_empty(){div {class:"player-error",role:"alert","{ui.audio_error}"}}
         if !error.is_empty(){div {class:"player-error",role:"alert","{error} Press Play to retry."}}
         if let Some(error)=snapshot.error{div {class:"player-error",role:"alert","{error}"}}
@@ -4448,6 +4568,7 @@ pub fn App() -> Element {
         repeat: use_signal(Repeat::default),
         context: use_signal(String::new),
         snapshot: use_signal(AudioSnapshot::default),
+        volume_restore: use_signal(|| 0.7),
         preparing: use_signal(|| false),
         wants_play: use_signal(|| false),
         progress: use_signal(DownloadProgress::default),

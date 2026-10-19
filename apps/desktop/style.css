@@ -22,6 +22,9 @@
   --vela-sidebar-bg:#0e100f;
   --vela-player-bg:#10130f;
   --vela-player-border:#343b2e;
+  /* 02_DESIGN_SPEC §11: the 32px main circle is #e4ebd9 with a dark icon. */
+  --vela-player-play:#e4ebd9;
+  --vela-player-play-text:#1b2511;
   --vela-topbar-border:#ffffff05;
   --vela-search-bg:#1d211c;
   --vela-filter-inactive:#22271f;
@@ -85,6 +88,8 @@
   --vela-sidebar-bg:#fff;
   --vela-player-bg:#fff;
   --vela-player-border:#c1d1c5;
+  --vela-player-play:#08754c;
+  --vela-player-play-text:#fff;
   --vela-topbar-border:#c1d1c5;
   --vela-search-bg:#fff;
   --vela-filter-inactive:#eef3ee;
@@ -259,33 +264,102 @@ input::placeholder { color:var(--quiet); opacity:1; }
 .native-create>summary:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
 .native-create>.inline-form { margin-top:12px; max-width:560px; }
 .native-create input { flex:1 1 240px; }
-/* The player reserve is this grid row, not a second body/content padding. Its
-   own height is the approved 88px baseline; an honest preparation/error line may
-   grow the row instead of clipping. */
+/* TR03 persistent player band. One root AudioEngine remains the only output
+   authority: this band renders its snapshot and dispatches the existing root
+   commands. Geometry is 02_DESIGN_SPEC §11: an 88px full-window band, three
+   unboxed zones, the real 48px authorized cover, a 32px play circle inside a
+   44px hit box, a 3px seek rail and an honest source line. Mute is the engine's
+   own zero level, never a second volume owner. */
 .native-player {
   position:static; grid-column:1/-1; grid-row:2;
   height:var(--vela-player-height); min-height:var(--vela-player-height);
   max-height:var(--vela-player-height);
-  grid-template-columns:minmax(170px,1fr) minmax(280px,1.5fr) minmax(100px,.7fr);
-  align-items:center; padding:10px 26px; gap:0 25px;
+  grid-template-columns:minmax(180px,1fr) minmax(300px,470px) minmax(178px,1fr);
+  grid-template-areas:"meta controls extras";
+  align-items:center; padding:10px 26px; column-gap:25px;
   background:var(--vela-player-bg); border-top:1px solid var(--vela-player-border);
   box-shadow:none;
 }
-.player-track { min-width:0; padding-right:0; }
-.player-track strong { font-size:14px; }
-.player-track small { font-size:12px; }
-.player-cover { width:48px; height:48px; flex-basis:48px; }
-.player-controls { min-width:0; }
-.transport { gap:12px; }
-.native-play-toggle { width:40px; height:40px; background:var(--accent); color:var(--accent-text); }
-.native-player .icon-button { min-width:40px; width:40px; height:40px; }
-.native-play-toggle:disabled { opacity:1; background:var(--disabled-surface); color:var(--disabled-text); }
-.native-seek { margin-top:3px; }
-.native-seek>span { font-size:12px; color:var(--muted); }
-.native-seek input { min-width:0; }
-.native-seek input,.player-volume>input { height:24px; min-height:24px; }
-.player-volume { grid-column:auto; grid-row:auto; position:static; width:auto; }
-.player-volume>input { max-width:100px; }
+.player-track { grid-area:meta; display:flex; align-items:center; gap:12px; min-width:0; padding-right:0; }
+.player-cover { width:48px; height:48px; flex:0 0 48px; border-radius:6px; }
+.player-meta { flex:1 1 auto; min-width:0; }
+.player-meta strong {
+  display:block; font-size:12px; font-weight:600; letter-spacing:-.1px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.player-sub {
+  display:flex; align-items:baseline; gap:6px; min-width:0; margin:3px 0 0;
+  font-size:10px; line-height:1.5; color:var(--vela-muted-text);
+}
+.player-sub>span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.player-sub>span+span::before { content:"·"; margin-right:6px; color:var(--vela-quiet-text); }
+.player-kind { color:var(--vela-quiet-text); }
+.player-controls { grid-area:controls; display:grid; grid-template-rows:44px 22px; min-width:0; }
+.transport { display:flex; align-items:center; justify-content:center; gap:17px; }
+.native-player .icon-button { min-width:44px; width:44px; height:44px; padding:0; }
+.native-play-toggle {
+  display:grid; place-items:center; width:44px; height:44px; padding:0;
+  border-radius:50%; background:none; color:var(--vela-player-play-text);
+  flex-shrink:0; transition:transform .15s;
+}
+.native-play-toggle:active:not(:disabled) { transform:scale(.96); }
+.play-circle {
+  display:grid; place-items:center; width:32px; height:32px; border-radius:50%;
+  background:var(--vela-player-play); color:var(--vela-player-play-text);
+}
+.play-circle>.vela-icon { width:14px; height:14px; fill:currentColor; stroke-width:2.4; }
+.native-play-toggle:disabled { opacity:1; }
+.native-play-toggle:disabled .play-circle { background:var(--vela-disabled-surface); color:var(--vela-disabled-text); }
+.native-seek { display:flex; align-items:center; gap:9px; margin:0; min-width:0; }
+/* Specificity beats the legacy `.native-seek>span` rule so the approved 10px
+   tabular time role wins over the pre-TR stylesheet. */
+.native-player .player-time {
+  flex:0 0 auto; min-width:34px; font-size:10px; text-align:center;
+  font-variant-numeric:tabular-nums; color:var(--vela-muted-text);
+}
+.native-player input[type=range] {
+  -webkit-appearance:none; appearance:none;
+  flex:1 1 auto; width:100%; min-width:0; height:22px; min-height:22px;
+  margin:0; padding:0; border:0; border-radius:0; background:transparent; cursor:pointer;
+}
+.native-player input[type=range]:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+.native-player input[type=range]::-webkit-slider-runnable-track {
+  height:3px; border-radius:2px;
+  background:linear-gradient(to right,var(--vela-seek-fill) 0 var(--vela-progress,0%),var(--vela-seek-rail) var(--vela-progress,0%) 100%);
+}
+.native-player input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance:none; appearance:none; width:8px; height:8px; margin-top:-2.5px;
+  border:0; border-radius:50%; background:var(--vela-seek-fill); opacity:0;
+  transition:opacity .15s;
+}
+.native-player input[type=range]:hover::-webkit-slider-thumb,
+.native-player input[type=range]:focus-visible::-webkit-slider-thumb { opacity:1; }
+.native-player input[type=range]:disabled { opacity:.45; cursor:default; }
+.player-extras { grid-area:extras; display:grid; justify-items:end; row-gap:2px; min-width:0; }
+.player-source {
+  display:flex; align-items:baseline; gap:6px; min-width:0; max-width:100%;
+  font-size:10px; line-height:1.5;
+}
+.player-source-label {
+  flex:0 0 auto; font-size:8px; font-weight:650; letter-spacing:1.4px;
+  text-transform:uppercase; color:var(--vela-quiet-text);
+}
+.player-source-value {
+  min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  color:var(--vela-muted-text);
+}
+.player-actions { display:flex; align-items:center; justify-content:flex-end; gap:4px; min-width:0; }
+.player-volume {
+  display:flex; align-items:center; justify-content:flex-end; gap:0;
+  max-width:none; min-width:0; margin-left:4px;
+}
+.player-volume input[type=range] { flex:0 0 65px; width:65px; }
+.player-mute { position:relative; }
+.player-mute[aria-pressed=true]::after {
+  content:""; position:absolute; left:50%; top:50%; width:16px; height:2px;
+  border-radius:1px; background:currentColor;
+  transform:translate(-50%,-50%) rotate(-45deg);
+}
 .native-player-status { display:none; }
 .preparation-progress,.preparation-progress>small,.player-error { font-size:13px; }
 .native-player:has(.preparation-progress),.native-player:has(.player-error) {
@@ -295,18 +369,34 @@ input::placeholder { color:var(--quiet); opacity:1; }
   .native-app { --vela-sidebar-width:190px; --vela-gutter:25px; }
   .native-track-header,.native-track { grid-template-columns:44px minmax(0,1fr) 48px 176px; gap:8px; }
   .native-track-album,.native-track-header>span:nth-child(3) { display:none; }
+  /* Compact transport: tighter gaps, smaller volume rail, same one band. */
+  .native-player {
+    padding-left:25px; padding-right:25px; column-gap:18px;
+    grid-template-columns:minmax(160px,1fr) minmax(288px,1fr) minmax(168px,1fr);
+  }
+  .transport { gap:9px; }
+  .player-volume input[type=range] { flex-basis:44px; width:44px; }
 }
 @media(max-width:900px) {
   .native-app { --vela-sidebar-width:175px; --vela-gutter:20px; }
   .native-sidebar { padding:24px 12px 0; }
+  /* Two honest rows: the track, then the full-width transport beside its
+     actions. Nothing is hidden and no control is covered. The source line is
+     the approved "hide quality" step for 761–900px widths. */
   .native-player {
     height:auto; max-height:none; min-height:var(--vela-player-height);
-    grid-template-columns:minmax(0,1fr) minmax(280px,1.3fr); gap:8px 16px;
-    padding:10px 20px;
+    grid-template-columns:minmax(0,1fr) auto;
+    grid-template-areas:"meta meta" "controls extras";
+    row-gap:6px; column-gap:14px; padding:10px 20px;
   }
-  .player-track { grid-column:1; grid-row:1; }
-  .player-controls { grid-column:2; grid-row:1; padding:0; display:block; }
-  .player-volume { grid-column:2; grid-row:2; justify-self:end; }
+  .player-track { padding-right:0; }
+  .player-extras { align-self:center; justify-self:end; }
+  .player-source { display:none; }
+  .player-volume {
+    grid-column:auto; grid-row:auto; position:static; top:auto; right:auto;
+    width:auto; justify-self:auto;
+  }
+  .player-volume input[type=range] { flex-basis:65px; width:65px; }
   .native-scroll-inner>.alert.notice { bottom:150px; }
 }
 @media(max-width:760px) {
@@ -328,10 +418,12 @@ input::placeholder { color:var(--quiet); opacity:1; }
   .native-track-header,.native-track { grid-template-columns:28px minmax(0,1fr) 160px; }
   .native-track-time,.native-track-header>span:nth-child(4) { display:none; }
   .native-track-actions>.icon-button { width:40px; min-width:40px; }
-  .native-player { grid-template-columns:minmax(0,1fr); padding:12px 16px; }
-  .player-track { grid-column:1; grid-row:1; padding-right:0; }
-  .player-controls { grid-column:1; grid-row:2; }
-  .player-volume { grid-column:1; grid-row:3; justify-self:start; position:static; width:auto; }
+  .native-player { grid-template-columns:minmax(0,1fr); grid-template-areas:"meta" "controls" "extras"; padding:12px 16px; }
+  .player-track { grid-area:meta; }
+  .player-controls { grid-area:controls; }
+  .player-extras { grid-area:extras; justify-self:stretch; }
+  .player-actions { justify-content:space-between; }
+  .player-volume { margin-left:0; }
   .native-scroll-inner>.alert.notice { bottom:210px; }
 }
 
@@ -394,6 +486,8 @@ img.neutral-cover {
     --vela-sidebar-bg:#fff;
     --vela-player-bg:#fff;
     --vela-player-border:#c1d1c5;
+    --vela-player-play:#08754c;
+    --vela-player-play-text:#fff;
     --vela-topbar-border:#c1d1c5;
     --vela-search-bg:#fff;
     --vela-filter-inactive:#eef3ee;
@@ -454,12 +548,18 @@ img.neutral-cover {
 .theme-choice:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
 .theme-choice input[type=radio] { min-height: 0; width: 16px; height: 16px; accent-color: var(--accent); }
 
-/* At a narrow window with an enlarged app size the fixed 280px player column no
-   longer fits the content box, so the transport column is allowed to shrink. */
-@media(max-width:900px) {
+/* App zoom divides the layout box without changing media-query widths, so at
+   ≤1100px with an enlarged app size the available player box is narrower than
+   the media query suggests. It falls back to the same reviewed two-row player
+   rather than clipping a fixed transport column. */
+@media(max-width:1100px) {
   .native-app[data-app-scale]:not([data-app-scale="100"]) .native-player {
-    grid-template-columns: minmax(0,1fr) minmax(0,1.2fr);
+    height:auto; max-height:none; min-height:var(--vela-player-height);
+    grid-template-columns:minmax(0,1fr) auto;
+    grid-template-areas:"meta meta" "controls extras";
+    row-gap:6px; column-gap:14px;
   }
+  .native-app[data-app-scale]:not([data-app-scale="100"]) .player-source { display:none; }
 }
 @media(max-width:560px) {
   .setting-row { gap: 12px; }
@@ -486,4 +586,12 @@ img.neutral-cover {
   .native-skeleton-bar,.native-skeleton-art {
     animation: none !important; background-color: var(--raised); opacity: 1;
   }
+}
+
+/* TR03: the player keeps every state under reduced motion; only the decorative
+   press scale and the seek/volume thumb fade are removed. Focus still reveals the
+   thumb and the play icon still swaps between Play and Pause. */
+@media (prefers-reduced-motion: reduce) {
+  .native-player .native-play-toggle:active:not(:disabled) { transform: none; }
+  .native-player input[type=range]::-webkit-slider-thumb { transition: none; }
 }

@@ -205,6 +205,8 @@ fn known_capture(name: &str) -> bool {
             | "albums-dark"
             | "public-dark"
             | "public-search-dark"
+            | "player-band-dark"
+            | "player-band-narrow-light"
     ) || ["library-artwork-", "player-artwork-"]
         .iter()
         .any(|prefix| {
