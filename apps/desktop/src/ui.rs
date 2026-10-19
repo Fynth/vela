@@ -4147,9 +4147,14 @@ fn browse_view(ui: Ui) -> Element {
         if !error.is_empty() {div {class:"alert error",role:"alert","{error}"}}
         if selected {
             div {class:"native-track-actions",button {class:"button secondary small",onclick:move |_|{let mut ui=back.clone();ui.browse_id.set(None);ui.browse_title.set(String::new());ui.browse_tracks.set(Vec::new());},"Back to {group_label}s"} button {class:"button primary small",disabled:!ui.audio_ready()||tracks.is_empty(),onclick:move |_|play_group(play.clone()),Icon {name:"play"} "Play {group_label}"}}
-            if !tracks.is_empty() {div {class:"native-queue-list",for (at, track) in tracks.iter().cloned().enumerate() {{let play=ui.clone();let active=ui.current_track().is_some_and(|t|t.id==track.id) && *ui.wants_play.read();let verb=if active {"Pause"}else{"Play"}; rsx!{article {class:"native-queue-row",key:"{at}-{track.id}",
-                button {class:"icon-button", "aria-label":"{verb} {track.title} from {group_label}",onclick:move |_|{let tracks=play.browse_tracks.peek().clone();let title=play.browse_title.peek().clone();play_owned_context(play.clone(),tracks,at,title);},if active{Icon {name:"pause"}}else{Icon {name:"play"}}} ArtworkCover {ui:ui.clone(),artwork_id:track.artwork_id.clone(),class:"neutral-cover",icon:"music"} div {class:"native-queue-select",div {strong {"{track.title}"} small {"{track.artist}"}}}
-                span {class:"native-track-time","{time_label(track.duration_ms.max(0) as u64)}"}
+            if !tracks.is_empty() {div {class:"native-track-table","data-native-detail-table":"1",
+                div {class:"native-track-header","aria-hidden":"true",span {""} span {"TITLE / ARTIST"} span {"ALBUM"} span {"TIME"} span {""}}
+                for (at, track) in tracks.iter().cloned().enumerate() {{let play=ui.clone();let active=ui.current_track().is_some_and(|t|t.id==track.id) && *ui.wants_play.read();let current=ui.current_track().is_some_and(|t|t.id==track.id);let verb=if active {"Pause"}else{"Play"}; rsx!{article {class:if current {"native-track current"} else {"native-track"},key:"{at}-{track.id}","data-native-detail-track-id":"{track.id}",
+                button {class:"icon-button track-start", "aria-label":"{verb} {track.title} from {group_label}",onclick:move |_|{let tracks=play.browse_tracks.peek().clone();let title=play.browse_title.peek().clone();play_owned_context(play.clone(),tracks,at,title);},if active{Icon {name:"pause"}}else{Icon {name:"play"}}}
+                div {class:"native-track-name",ArtworkCover {ui:ui.clone(),artwork_id:track.artwork_id.clone(),class:"neutral-cover",icon:"music"} div {strong {"{track.title}"} small {"{track.artist}"}}}
+                div {class:"native-track-album","{track.album}"}
+                div {class:"native-track-time","{time_label(track.duration_ms.max(0) as u64)}"}
+                div {class:"native-track-actions",small {"{at+1}"}}
             } } }} } }
         } else {
             if kind == "albums" {
