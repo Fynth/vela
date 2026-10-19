@@ -312,6 +312,9 @@ pub struct PlaylistSummary {
     pub can_edit: bool,
     #[serde(default)]
     pub folder_id: Option<String>,
+    /// First real artwork among the playlist's authorized track entries.
+    #[serde(default)]
+    pub artwork_id: Option<String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PlaylistFolder {

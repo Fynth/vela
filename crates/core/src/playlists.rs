@@ -205,6 +205,7 @@ impl PlaylistService {
             item_count: 0,
             can_edit: true,
             folder_id: None,
+            artwork_id: None,
         })
     }
     /// Owner-only rename. Editors may change entries but not ownership metadata.
@@ -281,11 +282,11 @@ impl PlaylistService {
         Ok(())
     }
     async fn owned_summary(&self, user: &User, id: &str) -> Result<PlaylistSummary> {
-        let row=sqlx::query("SELECT p.*, (SELECT COUNT(*) FROM playlist_items i WHERE i.playlist_id=p.id) item_count, 1 can_edit FROM playlists p WHERE p.id=? AND p.owner_id=?").bind(id).bind(&user.id).fetch_optional(&self.pool).await?.ok_or(Error::NotFound)?;
+        let row=sqlx::query("SELECT p.*, (SELECT COUNT(*) FROM playlist_items i WHERE i.playlist_id=p.id) item_count, (SELECT t.artwork_id FROM playlist_items i JOIN tracks t ON t.id=i.track_id WHERE i.playlist_id=p.id AND t.artwork_id IS NOT NULL ORDER BY i.position LIMIT 1) artwork_id, 1 can_edit FROM playlists p WHERE p.id=? AND p.owner_id=?").bind(id).bind(&user.id).fetch_optional(&self.pool).await?.ok_or(Error::NotFound)?;
         Ok(summary(&row))
     }
     pub async fn list(&self, user: &User) -> Result<Vec<PlaylistSummary>> {
-        let rows=sqlx::query("SELECT p.*, (SELECT COUNT(*) FROM playlist_items i WHERE i.playlist_id=p.id) item_count, (p.owner_id=? OR COALESCE(c.can_edit,0)) can_edit FROM playlists p LEFT JOIN playlist_collaborators c ON c.playlist_id=p.id AND c.user_id=? WHERE p.owner_id=? OR c.user_id IS NOT NULL ORDER BY p.created_at DESC,p.id LIMIT 200").bind(&user.id).bind(&user.id).bind(&user.id).fetch_all(&self.pool).await?;
+        let rows=sqlx::query("SELECT p.*, (SELECT COUNT(*) FROM playlist_items i WHERE i.playlist_id=p.id) item_count, (SELECT t.artwork_id FROM playlist_items i JOIN tracks t ON t.id=i.track_id WHERE i.playlist_id=p.id AND t.artwork_id IS NOT NULL ORDER BY i.position LIMIT 1) artwork_id, (p.owner_id=? OR COALESCE(c.can_edit,0)) can_edit FROM playlists p LEFT JOIN playlist_collaborators c ON c.playlist_id=p.id AND c.user_id=? WHERE p.owner_id=? OR c.user_id IS NOT NULL ORDER BY p.created_at DESC,p.id LIMIT 200").bind(&user.id).bind(&user.id).bind(&user.id).fetch_all(&self.pool).await?;
         Ok(rows.iter().map(summary).collect())
     }
     /// Search only owned or explicitly granted names. A result grants no media.
@@ -295,7 +296,7 @@ impl PlaylistService {
                 "Search must contain 1–256 bytes without control characters".into(),
             ));
         }
-        let rows = sqlx::query("SELECT p.*, (SELECT COUNT(*) FROM playlist_items i WHERE i.playlist_id=p.id) item_count, (p.owner_id=? OR COALESCE(c.can_edit,0)) can_edit FROM playlists p LEFT JOIN playlist_collaborators c ON c.playlist_id=p.id AND c.user_id=? WHERE (p.owner_id=? OR c.user_id IS NOT NULL) AND instr(lower(p.name),lower(?))>0 ORDER BY p.name COLLATE NOCASE,p.id LIMIT 8")
+        let rows = sqlx::query("SELECT p.*, (SELECT COUNT(*) FROM playlist_items i WHERE i.playlist_id=p.id) item_count, (SELECT t.artwork_id FROM playlist_items i JOIN tracks t ON t.id=i.track_id WHERE i.playlist_id=p.id AND t.artwork_id IS NOT NULL ORDER BY i.position LIMIT 1) artwork_id, (p.owner_id=? OR COALESCE(c.can_edit,0)) can_edit FROM playlists p LEFT JOIN playlist_collaborators c ON c.playlist_id=p.id AND c.user_id=? WHERE (p.owner_id=? OR c.user_id IS NOT NULL) AND instr(lower(p.name),lower(?))>0 ORDER BY p.name COLLATE NOCASE,p.id LIMIT 8")
             .bind(&user.id).bind(&user.id).bind(&user.id).bind(query.trim()).fetch_all(&self.pool).await?;
         Ok(rows.iter().map(summary).collect())
     }
@@ -580,6 +581,7 @@ fn summary(r: &sqlx::sqlite::SqliteRow) -> PlaylistSummary {
         item_count: r.get("item_count"),
         can_edit: r.get("can_edit"),
         folder_id: r.try_get("folder_id").unwrap_or(None),
+        artwork_id: r.try_get("artwork_id").unwrap_or(None),
     }
 }
 fn track(r: &sqlx::sqlite::SqliteRow) -> Track {
