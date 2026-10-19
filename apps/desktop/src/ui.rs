@@ -3457,7 +3457,8 @@ fn playlists_view(ui: Ui) -> Element {
         if loading {div {class:"native-loading",role:"status",span {class:"loading-mark","aria-hidden":"true"} "Loading playlists…"}}
         if !error.is_empty() {div {class:"alert error",role:"alert","{error}"}}
         if let Some(detail) = detail {
-            div { class: "library-intro",
+            div { class: "library-intro playlist-detail-intro",
+                ArtworkCover { ui:ui.clone(), artwork_id:detail.playlist.artwork_id.clone(), class:"neutral-cover playlist-detail-cover", icon:"queue" }
                 div {
                     h1 { "data-testid": "native-playlist-name", "{detail.playlist.name}" }
                     p { "{detail.items.len()} tracks" if detail.playlist.can_edit { " · You can edit" } else { " · Shared with you" } }
