@@ -3014,6 +3014,11 @@ fn remove_offline(mut ui: Ui, track_id: String) {
     });
 }
 
+/// IN01: the pending private-library page is one bounded list of placeholder rows.
+/// The count is fixed and small: the request itself carries no page size, so the
+/// skeleton never claims how many rows are coming.
+const LIBRARY_SKELETON_ROWS: usize = 8;
+
 fn library(ui: Ui) -> Element {
     let loading = *ui.catalog_loading.read();
     let error = ui.catalog_error.read().clone();
@@ -3048,7 +3053,7 @@ fn library(ui: Ui) -> Element {
         .iter()
         .map(|saved| saved.track.id.clone())
         .collect::<std::collections::HashSet<_>>();
-    rsx! {section {class:"native-library","aria-label":if favorites {"Favorite tracks"} else {"Private library"},"data-view":if favorites {"favorites"} else {"library"},"data-query":"{query}","data-loading":"{loading}","data-error":"{error}","data-catalog-items":"{catalog_items}",
+    rsx! {section {class:"native-library","aria-label":if favorites {"Favorite tracks"} else {"Private library"},"data-view":if favorites {"favorites"} else {"library"},"data-query":"{query}","data-loading":"{loading}","aria-busy":"{loading}","data-error":"{error}","data-catalog-items":"{catalog_items}",
         div {class:"library-intro",div {h1 {if favorites {"Your favorites"} else {"Your library"}} p {if favorites {"The tracks you love, all in one place."} else {"Find your next listen."}}}
             button {class:"button secondary",disabled:loading,onclick:move |_|{let query=refresh.query.peek().clone();let cursor=refresh.cursor.peek().clone();let favorites=*refresh.view.peek()=="favorites";load_catalog(refresh.clone(),query,cursor,favorites);},Icon {name:"history"} if favorites {"Refresh favorites"} else {"Refresh library"}}
         }
@@ -3090,7 +3095,32 @@ fn library(ui: Ui) -> Element {
         }
         if !offline_error.is_empty() {div {class:"alert error",role:"alert","{offline_error}"}}
         div {class:"catalog-caption",p {if favorites {if query.is_empty() {"Your favorites · Up to 50 per page"} else {"Favorite results for “{query}” · Up to 50 per page"}} else if query.is_empty() {"Your private tracks · Up to 50 per page"} else {"Results for “{query}” · Up to 50 per page"}} span {"ORIGINAL AUDIO"}}
-        if loading {div {class:"native-loading",role:"status",span {class:"loading-mark","aria-hidden":"true"} if favorites {"Loading your favorites…"} else {"Loading your library…"}}}
+        if loading {
+            // IN01: the pending request replaces the old text-only indicator with
+            // geometry-matched skeleton rows. Every row is a real `.native-track`
+            // (same grid, height and padding) whose artwork block is a `.neutral-cover`,
+            // so the settled page replaces it in place. The rows carry no title,
+            // artist, album, duration or percentage, render no controls and request no
+            // artwork; audio, queue and the selected source are untouched.
+            div {class:"native-skeleton-status",role:"status","aria-live":"polite",
+                span {class:"sr-only",if favorites {"Loading your favorites…"} else {"Loading your library…"}}
+            }
+            div {class:"native-track-table native-skeleton-table","aria-busy":"true","data-native-skeleton":"{LIBRARY_SKELETON_ROWS}",
+                div {class:"native-track-header","aria-hidden":"true",span {""} span {"TITLE / ARTIST"} span {"ALBUM"} span {"TIME"} span {"QUEUE"}}
+                for at in 0..LIBRARY_SKELETON_ROWS {
+                    article {class:"native-track native-skeleton-row",key:"library-skeleton-{at}","aria-hidden":"true","data-native-skeleton-row":"{at}",
+                        span {class:"native-skeleton-bar native-skeleton-start"}
+                        div {class:"native-track-name",
+                            div {class:"neutral-cover native-skeleton-art","aria-hidden":"true"}
+                            div {class:"native-skeleton-lines",span {class:"native-skeleton-bar native-skeleton-title"} span {class:"native-skeleton-bar native-skeleton-artist"}}
+                        }
+                        div {class:"native-track-album",span {class:"native-skeleton-bar native-skeleton-album"}}
+                        div {class:"native-track-time",span {class:"native-skeleton-bar native-skeleton-time"}}
+                        div {class:"native-track-actions",span {class:"native-skeleton-bar native-skeleton-actions"}}
+                    }
+                }
+            }
+        }
         if !error.is_empty() {div {class:"alert error",role:"alert","{error} Refresh the library to try again."}}
         if let Some(catalog) = catalog {
             if catalog.page.items.is_empty() {div {class:"native-empty",Icon {name:"heart"} h2 {if favorites {if query.is_empty() {"No favorites yet"} else {"No matching favorites"}} else if query.is_empty() {"Make room for your first listen"} else {"No matching tracks"}} p {if favorites {if query.is_empty() {"Favorite a track from your library to find it here. Favorites are private to your account."} else {"Try a different title, artist or album. Only your favorite tracks are searched."}} else if query.is_empty() {"Add music in Vela’s web app, then refresh this library. Your tracks stay private."} else {"Try a different title, artist or album. Search uses only your own library."}}}}

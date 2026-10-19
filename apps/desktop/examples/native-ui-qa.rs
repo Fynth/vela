@@ -205,11 +205,13 @@ fn known_capture(name: &str) -> bool {
             | "albums-dark"
             | "public-dark"
             | "public-search-dark"
-    ) || ["library-artwork-", "player-artwork-"].iter().any(|prefix| {
-        name.strip_prefix(prefix)
-            .and_then(|width| width.parse::<u32>().ok())
-            .is_some_and(|width| (320..=4096).contains(&width))
-    })
+    ) || ["library-artwork-", "player-artwork-"]
+        .iter()
+        .any(|prefix| {
+            name.strip_prefix(prefix)
+                .and_then(|width| width.parse::<u32>().ok())
+                .is_some_and(|width| (320..=4096).contains(&width))
+        })
 }
 
 /// Optional requested fixture viewport. Invalid or unbounded values keep the documented
@@ -276,11 +278,12 @@ fn main() {
         std::fs::read_to_string(alsa).is_ok_and(|config| config.contains(&sink)),
         "isolated ALSA configuration must route to the owned null sink"
     );
-    let window = vela_desktop::window::builder("Vela Music — isolated native QA")
-        .with_inner_size(dioxus::desktop::LogicalSize::new(
+    let window = vela_desktop::window::builder("Vela Music — isolated native QA").with_inner_size(
+        dioxus::desktop::LogicalSize::new(
             qa_dimension("VELA_NATIVE_QA_WIDTH", 1280.0),
             qa_dimension("VELA_NATIVE_QA_HEIGHT", 840.0),
-        ));
+        ),
+    );
     dioxus::LaunchBuilder::desktop()
         .with_cfg(
             Config::new()

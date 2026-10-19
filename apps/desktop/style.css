@@ -93,6 +93,33 @@ input::placeholder { color:var(--quiet); opacity:1; }
 .native-track-actions>.icon-button { width:44px; min-width:44px; }
 .native-track-actions .selected .vela-icon { fill:currentColor; }
 .neutral-cover { width:48px; height:48px; flex-basis:48px; color:var(--accent); border-radius:6px; }
+
+/* IN01: the pending private-library page is drawn with skeleton rows, not a text
+   spinner. Each row is a real `.native-track`, so it inherits the exact grid
+   columns, min-height and padding of a settled row; its artwork block is a
+   `.neutral-cover`, so it inherits the same square artwork box (43px by the base
+   rule, 48px at the current density, 40px at narrow widths) and the settled page
+   replaces it in place with no layout jump. Nothing here shows a placeholder
+   title, count or percentage. */
+.native-skeleton-status { margin: 0; }
+.native-skeleton-row { pointer-events: none; }
+.native-skeleton-bar {
+  display: block; height: 11px; border-radius: 5px;
+  background-color: var(--raised);
+  animation: native-skeleton-pulse 1.6s ease-in-out infinite;
+}
+.native-skeleton-start { width: 22px; height: 22px; justify-self: center; border-radius: 50%; }
+.native-skeleton-art { animation: native-skeleton-pulse 1.6s ease-in-out infinite; }
+.native-skeleton-lines { display: flex; flex-direction: column; justify-content: center; flex: 1; min-width: 0; }
+.native-skeleton-title { width: min(62%,232px); height: 13px; }
+.native-skeleton-artist { width: min(38%,146px); height: 10px; margin-top: 7px; }
+.native-skeleton-album { width: min(72%,190px); }
+.native-skeleton-time { width: 34px; height: 10px; margin-left: auto; }
+.native-skeleton-actions { width: min(100%,140px); height: 22px; margin-left: auto; }
+@keyframes native-skeleton-pulse {
+  from, to { background-color: var(--raised); }
+  50% { background-color: var(--hover); }
+}
 .native-queue-list { gap:0; }
 .native-queue-row { padding:12px 8px; border:0; border-bottom:1px solid var(--line); border-radius:6px; background:transparent; }
 .native-queue-row:hover { background:var(--surface); }
@@ -303,3 +330,12 @@ img.neutral-cover {
 .signed-out-back { margin-bottom: 20px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .signed-out-back .button { gap: 8px; }
 .signin-form .button.signin-appearance { width: 100%; margin-top: 10px; }
+
+/* IN01: the skeleton rows keep their geometry but stop moving when the user asks
+   for reduced motion. The list stays a static, honest placeholder instead of a
+   pulsing block; the status label still carries the loading announcement. */
+@media (prefers-reduced-motion: reduce) {
+  .native-skeleton-bar,.native-skeleton-art {
+    animation: none !important; background-color: var(--raised); opacity: 1;
+  }
+}

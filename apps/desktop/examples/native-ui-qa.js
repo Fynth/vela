@@ -178,6 +178,54 @@ try {
   assert([...document.images].every(image => (image.getAttribute('src') || '').startsWith('data:image/')), 'The renderer never fetches an arbitrary image URL');
   assert([...document.images].every(image => image.naturalWidth > 0), 'No broken-image glyph is rendered');
   checks.push(`Library cover evidence: src ${libraryMetrics.src.slice(0, 23)}… (${libraryMetrics.src.length} chars), natural ${libraryMetrics.naturalWidth}x${libraryMetrics.naturalHeight}, box ${libraryMetrics.boxWidth}x${libraryMetrics.boxHeight}, object-fit ${libraryMetrics.objectFit}/${libraryMetrics.objectPosition}, missing fallbacks ${document.querySelectorAll('[data-native-track-id] .neutral-cover[data-native-artwork="missing"]').length}, viewport ${innerWidth}x${innerHeight} dpr ${dpr()}`);
+  // IN01: the pending private-library page renders bounded skeleton rows instead of
+  // the old text-only indicator. The response is delayed relative to the DOM update,
+  // so the pending skeleton state is observable before the settled rows replace it.
+  const skeletons = () => [...document.querySelectorAll('[data-native-skeleton-row]')];
+  const pendingSkeletons = [];
+  const skeletonObserver = new MutationObserver(() => {
+    const libraryView = el('.native-library');
+    if (!libraryView || libraryView.dataset.loading !== 'true' || pendingSkeletons.length >= 24) return;
+    const rows = skeletons();
+    if (!rows.length) return;
+    const table = rows[0].closest('[data-native-skeleton]');
+    const row = rows[0].getBoundingClientRect();
+    const art = rows[0].querySelector('.neutral-cover')?.getBoundingClientRect();
+    pendingSkeletons.push({
+      at: performance.now(), count: rows.length, declared: table?.dataset.nativeSkeleton || '',
+      busy: (table?.getAttribute('aria-busy') || '') === 'true' && (libraryView.getAttribute('aria-busy') || '') === 'true',
+      status: (el('.native-skeleton-status')?.textContent || '').trim(),
+      text: rows.map(node => node.textContent.trim()).join(''),
+      controls: rows.reduce((total, node) => total + node.querySelectorAll('button,input,a,img').length, 0),
+      columns: getComputedStyle(rows[0]).gridTemplateColumns,
+      row: {x: row.x, y: row.y, width: row.width, height: row.height},
+      art: art ? {width: art.width, height: art.height} : null
+    });
+  });
+  skeletonObserver.observe(document.body, {childList: true, subtree: true, attributes: true, attributeFilter: ['data-loading', 'aria-busy']});
+  if (!el('[data-native-track-id]')) throw new Error('Skeleton fixture needs one settled library row first');
+  fill('#native-search', 'Signal'); el('.native-search').requestSubmit();
+  try { await wait(() => pendingSkeletons.length > 0, 'Skeleton rows during the pending library request'); }
+  catch { throw new Error(`Skeleton rows during the pending library request failed rows=${skeletons().length} loading=${el('.native-library')?.dataset.loading} dataset=${JSON.stringify(el('.native-library')?.dataset)}`); }
+  const pendingSkeleton = pendingSkeletons[0];
+  const settledColumns = getComputedStyle(el('[data-native-track-id]')).gridTemplateColumns;
+  assert(pendingSkeleton.count === 8 && pendingSkeleton.declared === '8', `Pending library request shows the bounded eight-row skeleton list (actual ${pendingSkeleton.count} rows, declared ${pendingSkeleton.declared || '-'})`);
+  assert(pendingSkeleton.busy, 'Pending library region and skeleton table are marked aria-busy while the request is unanswered');
+  assert(pendingSkeleton.status.includes('Loading your library'), `Skeleton keeps the honest library status label (actual "${pendingSkeleton.status}")`);
+  assert(pendingSkeleton.text === '', 'Skeleton rows carry no placeholder title, artist, album, duration or percentage');
+  assert(pendingSkeleton.controls === 0, `Skeleton rows render no controls and no artwork request slot (actual ${pendingSkeleton.controls})`);
+  assert(pendingSkeleton.art && pendingSkeleton.art.width > 0 && Math.abs(pendingSkeleton.art.width - pendingSkeleton.art.height) < 1, `Skeleton artwork block is square (actual ${pendingSkeleton.art ? `${pendingSkeleton.art.width}x${pendingSkeleton.art.height}` : 'missing'})`);
+  assert(pendingSkeleton.columns === settledColumns, `Skeleton rows use the settled track grid (skeleton ${pendingSkeleton.columns}, settled ${settledColumns})`);
+  await wait(() => skeletons().length === 0 && document.querySelectorAll('[data-native-track-id]').length === 1 && button('Play Signal'), 'Settled rows replace the skeleton list');
+  const settledRow = el('[data-native-track-id]').getBoundingClientRect();
+  assert(Math.abs(settledRow.y - pendingSkeleton.row.y) <= 1 && Math.abs(settledRow.height - pendingSkeleton.row.height) <= 1 && Math.abs(settledRow.width - pendingSkeleton.row.width) <= 1, `Settled row replaces its skeleton without a layout jump (skeleton y=${pendingSkeleton.row.y.toFixed(1)} ${pendingSkeleton.row.width.toFixed(1)}x${pendingSkeleton.row.height.toFixed(1)}, settled y=${settledRow.y.toFixed(1)} ${settledRow.width.toFixed(1)}x${settledRow.height.toFixed(1)})`);
+  const settledArt = el('[data-native-track-id] .neutral-cover')?.getBoundingClientRect();
+  assert(settledArt && Math.abs(settledArt.width - pendingSkeleton.art.width) < 1 && Math.abs(settledArt.height - pendingSkeleton.art.height) < 1, 'Skeleton artwork block occupies the settled artwork box');
+  assert(!el('.native-skeleton-status'), 'Settled library removes the pending status region');
+  skeletonObserver.disconnect();
+  checks.push(`IN01 skeleton evidence: ${pendingSkeletons.length} pending observation(s) over ${(performance.now() - pendingSkeleton.at).toFixed(0)}ms, ${pendingSkeleton.count} rows (declared ${pendingSkeleton.declared}), artwork ${pendingSkeleton.art.width}x${pendingSkeleton.art.height}, grid ${pendingSkeleton.columns}, skeleton y ${pendingSkeleton.row.y.toFixed(1)} vs settled y ${settledRow.y.toFixed(1)}, status "${pendingSkeleton.status}"`);
+  fill('#native-search', ''); el('.native-search').requestSubmit();
+  await wait(() => document.querySelectorAll('[data-native-track-id]').length === 3, 'Library restored after the skeleton fixture');
   await click('Play Signal');
   await wait(() => (el('.player-track strong')?.textContent || '') === 'Signal' && phase() === 'Playing' && position() > 100, 'Signal playback for the player cover');
   const playerCoverNode = () => [...document.querySelectorAll('.native-player img.neutral-cover.player-cover')].find(image => image.src.startsWith('data:image/') && image.naturalWidth > 0);
@@ -552,6 +600,20 @@ try {
     await click(`Confirm remove offline ${offlineTitles[1]}`);
     await wait(() => !button(`Play offline ${offlineTitles[1]}`), 'Offline copy removed');
     assert(document.querySelectorAll('[data-offline-track-id]').length === 1, 'Offline removal leaves the other device copy');
+    // IN01: with the fixture server stopped the library request cannot settle, so the
+    // skeleton state now stops instead of pretending: the error surfaces, the pending
+    // rows and busy region are gone, no stale row is kept and the retry stays enabled.
+    const retry = button('Refresh library');
+    if (!retry || retry.disabled) throw new Error(`Library retry control missing before the failure fixture (rows=${document.querySelectorAll('[data-native-track-id]').length})`);
+    retry.click();
+    await wait(() => (el('.native-library')?.dataset.error || '') !== '' && el('.native-library')?.dataset.loading === 'false', 'Failed library request reports an error');
+    assert((el('.alert.error')?.textContent || '').includes('Refresh the library to try again'), 'Failed library request explains how to retry');
+    assert(button('Refresh library') && !button('Refresh library').disabled, 'Failed library request keeps the explicit refresh retry enabled');
+    assert(skeletons().length === 0, 'Failed library request leaves no pending skeleton rows');
+    assert(!el('.native-skeleton-status'), 'Failed library request removes the pending status region');
+    assert((el('.native-library')?.getAttribute('aria-busy') || '') === 'false', 'Failed library request clears the busy region');
+    assert(document.querySelectorAll('[data-native-track-id]').length === 0, 'Failed library request renders no stale or fake track rows');
+    checks.push(`IN01 failure evidence: pending skeletons stopped at ${skeletons().length} rows, busy=${el('.native-library')?.getAttribute('aria-busy')}, retry enabled=${!button('Refresh library')?.disabled}, error="${(el('.alert.error')?.textContent || '').trim()}"`);
     dioxus.send({ok:true, checks, viewportEvidence});
   }
 } catch(error) { dioxus.send({ok:false, checks, failure:String(error.message)}); }
