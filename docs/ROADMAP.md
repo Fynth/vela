@@ -1,5 +1,21 @@
 # Authoritative backlog
 
+## Approved prototype transfer 2026-10-19 — documentation only
+
+The [prototype transfer package](PLANS/2026-10-19/PROTOTYPE_TRANSFER/README.md)
+turns the user's selected design into a portable English implementation brief for
+DeepSeek or another harness. TR00–TR12 cover actual-source reconnaissance, collision-
+safe roles/fonts/assets, shell/player, real Home/catalog/playlists, overlays/Settings,
+mobile/native adaptation, regression review and local packaging. PT01–PT48 are future
+acceptance scenarios, all NOT_RUN by this planning task.
+
+Use the approved charcoal/pistachio/Manrope composition instead of reopening visual
+direction. Preserve the prior Interaction Playbook's useful behavior and existing
+artwork/scale/skeleton source work. Do not port the prototype's shared demo recording,
+in-memory playlists, track-ID-deduplicated queue or play-event history. The next
+authorized implementation starts TR00→TR01/TR02→TR03, with real playback continuity
+and rendered evidence before claiming a completed transfer.
+
 ## Interactive listening refinement 2026-10-19 — proposed, documentation only
 
 The [Interaction Playbook](PLANS/2026-10-19/PRODUCT_EXPANSION/INTERACTION_PLAYBOOK/README.md)

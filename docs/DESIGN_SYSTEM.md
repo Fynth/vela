@@ -1,5 +1,21 @@
 # Original Vela design system
 
+## Approved prototype transfer target 2026-10-19 — proposed, not implemented
+
+The user selected [the Vela prototype](https://prototyp-opal.vercel.app/) as the
+new visual target. The [transfer specification](PLANS/2026-10-19/PROTOTYPE_TRANSFER/README.md)
+and [DeepSeek handoff](PLANS/2026-10-19/PROTOTYPE_TRANSFER/START_HERE_DEEPSEEK.md)
+define Manrope, charcoal/pistachio roles, compact desktop composition, independent
+content scrolling and the mobile mini-player/navigation layout. They supersede
+older visual proposals for this transfer; existing executed behavior/privacy/audio
+contracts and actual Light/System/80–150% preferences remain authoritative.
+
+This is documentation only. Source tokens below describe their dated implementations,
+not the newly shipped prototype design. Do not blindly overwrite current --sidebar
+(length), --muted (text) or --accent (action) with prototype roles of different types.
+Use the namespaced mapping and real asset/package/native-window acceptance in the
+handoff. No new rendered spacing or application/platform validation is claimed here.
+
 ## Transport/window interaction repair2026-10-19
 
 Keep the contrast tokens below. Current-row Play/Pause reflects root requested

@@ -1,5 +1,33 @@
 # Verified progress
 
+## Approved prototype transfer specification 2026-10-19 — documentation only
+
+Prepared the English [reference transfer package](PLANS/2026-10-19/PROTOTYPE_TRANSFER/README.md)
+and [portable DeepSeek prompt](PLANS/2026-10-19/PROTOTYPE_TRANSFER/START_HERE_DEEPSEEK.md)
+at source anchor `4f16a32`: nine Markdown documents, 13 TR delivery packages and 48 PT
+acceptance scenarios. It specifies the selected prototype across shell/Home/catalog/
+playlists/player/queue/dialogs/Settings/mobile/native, with source mapping, role
+collision migration, original asset/font hashes and a context-resumption protocol.
+
+Inspected actual repository contracts/DTOs/client/style/build/tests and the prototype's
+public HTML/CSS/eight linked JS chunks as data. Retrieved and visually opened the three
+original PNGs; retrieved two WOFF2 subsets and inspected the upstream Manrope OFL.
+Recorded eight numerical opaque-color contrast calculations. Better Design URL
+extraction/guidance/review rules and scoped copy checks were used; its merged token
+roles were reconciled with the explicitly dark published CSS rather than copied blindly.
+
+Interactive browser unavailable: runtime selection returned no browser and discovery
+returned an empty list. Standard web open failed; direct HTTPS source inspection
+succeeded. No screenshot/click/focus/playback/native test was executed in this task.
+Spacing returned needs-capture, not a completed measurement. Exact document/check/
+preservation evidence is in the reference audit; application PT cases remain NOT_RUN.
+
+No application code/CSS/dependency/schema/data/runtime changes, new app benchmarks,
+deployment, publishing or delegation. Existing skeleton/artwork/appearance code is
+preserved. The new design is a target, not a shipped UI. Future implementation must
+receive its own assignment, preserve existing audio/privacy contracts and use the
+non-destructive TR/PT sequence with real source-versus-artifact evidence.
+
 ## Interactive product playbook 2026-10-19 — documentation only
 
 Prepared the English [Interaction Playbook](PLANS/2026-10-19/PRODUCT_EXPANSION/INTERACTION_PLAYBOOK/README.md):
