@@ -17,6 +17,7 @@ pub mod playback;
 /// config document. It owns no credentials, session, media path or queue state and
 /// no renderer/audio authority.
 pub mod presentation;
+pub mod queue_store;
 pub mod remote;
 pub mod session_store;
 pub mod ui;
