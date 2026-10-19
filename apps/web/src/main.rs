@@ -1974,7 +1974,7 @@ fn App() -> Element {
                                 } }
                             else { div { class: "track-table", div { class: "track-header", span { "#" } span { "TITLE" } span { "ALBUM" } span { "QUALITY" } span { "TIME" } span { "" } }
                                     for (at, track) in tracks.read().iter().cloned().enumerate() {
-                                        { let row_track = track.clone(); let favorited_track = track.clone(); let add_track = track.clone(); let edit_track = track.clone(); let radio_track = track.clone();
+                                        { let row_track = track.clone(); let favorited_track = track.clone(); let add_track = track.clone(); let edit_track = track.clone(); let radio_track = track.clone(); let menu_play = track.clone(); let menu_queue = track.clone(); let menu_favorite = track.clone(); let menu_radio = track.clone(); let menu_title = track.title.clone();
                                         rsx! { div { key: "{track.id}", class: if current.as_ref().is_some_and(|t| t.id == track.id) { "track-row current" } else { "track-row" },
                                             button { class: "track-play", "aria-label": actions.play_label(&track.id, &track.title), onclick: move |_| play_or_toggle_queue(tracks.peek().clone(), at, view_context(page,catalog,selected_playlist), playback), if current.as_ref().is_some_and(|t| t.id == track.id) && requested_play { Icon { name: "pause" } } else { Icon { name: "play" } } }
                                             button { class: "track-title", onclick: move |_| play_or_toggle_queue(tracks.peek().clone(), at, view_context(page,catalog,selected_playlist), playback), Art { track: row_track } div { strong { "{track.title}" } small { "{track.artist}" } } }
@@ -1985,6 +1985,16 @@ fn App() -> Element {
                                                 button { class: "icon-button", title: "Add to playback queue", "aria-label": "Add {track.title} to playback queue", onclick: move |_| { enqueue_track(track.clone(),false,playback,notice); }, "+" }
                                                 button { class: "icon-button metadata-edit", "aria-label": "Edit metadata for {edit_track.title}", title: "Edit metadata", onclick: move |_| editing_track.set(Some(edit_track.clone())), Icon { name: "edit" } }
                                                 button { class: "icon-button track-radio", "aria-label": "Start track radio for {radio_track.title}", title: "Track radio", onclick: move |_| actions.radio.call(radio_track.clone()), Icon { name: "radio" } }
+                                                details { class: "track-menu",
+                                                    summary { class: "icon-button", "aria-label": "More actions for {menu_title}", title: "More actions", span { "⋯" } }
+                                                    div { class: "track-menu-panel", role: "menu", "aria-label": "Actions for {menu_title}",
+                                                        button { role: "menuitem", onclick: move |_| play_or_toggle_queue(tracks.peek().clone(), at, view_context(page,catalog,selected_playlist), playback), "Play / Pause" }
+                                                        button { role: "menuitem", onclick: move |_| enqueue_track(menu_queue.clone(), false, playback, notice), "Add to queue" }
+                                                        button { role: "menuitem", onclick: move |_| favorite_track(menu_favorite.clone(), auth, tracks, queue, catalog.tracks, facets_revision, error), "Favorite / Unfavorite" }
+                                                        button { role: "menuitem", onclick: move |_| actions.radio.call(menu_radio.clone()), "Start track radio" }
+                                                        button { role: "menuitem", onclick: move |_| editing_track.set(Some(menu_play.clone())), "Edit metadata" }
+                                                    }
+                                                }
                                                 if !selected_add_playlist().is_empty() { button { class: "icon-button", title: "Add to selected playlist", "aria-label": "Add to selected playlist", onclick: move |_| { let track = add_track.clone(); let id = selected_add_playlist(); let mut undo_signal = playlist_undo; spawn_authorized(auth, async move {
                                                     let track_id = track.id.clone();
                                                     let title = track.title.clone();

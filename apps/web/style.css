@@ -1352,3 +1352,10 @@ input[type="range"]:focus { outline:2px solid var(--accent); outline-offset:3px;
 
 .playlist-undo { gap:10px; flex-wrap:wrap; }
 .playlist-undo span { flex:1; min-width:180px; }
+
+.track-menu { position:relative; }
+.track-menu summary { list-style:none; cursor:pointer; }
+.track-menu summary::-webkit-details-marker { display:none; }
+.track-menu-panel { position:absolute; right:0; top:calc(100% + 4px); z-index:30; min-width:190px; display:grid; padding:5px; border:1px solid var(--control-line); border-radius:8px; background:var(--surface-raised); box-shadow:0 16px 40px #0006; }
+.track-menu-panel button { min-height:36px; padding:8px 10px; border-radius:6px; background:none; color:var(--text); text-align:left; font-size:11px; }
+.track-menu-panel button:hover, .track-menu-panel button:focus-visible { background:var(--surface-hover); }
