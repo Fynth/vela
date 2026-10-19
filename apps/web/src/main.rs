@@ -1767,6 +1767,11 @@ fn App() -> Element {
                             button { class: "button primary small", onclick: move |_| { add_music.set(true); }, "+ Add music" }
                         }
                     }
+                    /* TR02: the main column owns exactly one vertical scroller. The
+                       topbar above and the root player below are siblings, so neither
+                       scrolls with the catalog and no second offset/reserve is added. */
+                    div { class: "main-scroll", id: "main-scroll",
+                        div { class: "content-inner",
                     if !error().is_empty() { div { class: "alert error", role: "alert", span { "{error}" } button { "aria-label": "Dismiss error", onclick: move |_| error.set(String::new()), Icon { name: "close" } } } }
                     if !notice().is_empty() { div { class: "alert success", role: "status", span { "{notice}" } button { "aria-label": "Dismiss notification", onclick: move |_| notice.set(String::new()), Icon { name: "close" } } } }
                     if page() != "home" {div { class: "page-heading", h1 { "{heading}" }
@@ -2235,6 +2240,8 @@ fn App() -> Element {
                         }
                     }
                     footer { class: "content-footer", "YOUR MUSIC, WITHOUT THE NOISE." span { "Vela Music" } }
+                        }
+                    }
                 }
 
                 audio { id: "vela-audio", preload: "metadata",
