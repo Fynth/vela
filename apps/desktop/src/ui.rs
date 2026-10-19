@@ -733,6 +733,72 @@ fn login_still_current(ui: &Ui, ticket: &Ticket, origin: &str, username: &str) -
     ticket.current(ui) && ui.origin.peek().trim() == origin && ui.username.peek().trim() == username
 }
 
+fn save_queue_snapshot(ui: Ui) {
+    let Some(account) = ui.account.peek().clone() else {
+        return;
+    };
+    let queue = ui.queue.peek().clone();
+    if queue.is_empty() {
+        return;
+    }
+    let Some(current) = ui.order.read().current() else {
+        return;
+    };
+    let repeat = match *ui.repeat.peek() {
+        Repeat::Off => "off",
+        Repeat::All => "all",
+        Repeat::One => "one",
+    };
+    if let Ok(snapshot) = crate::queue_store::QueueSnapshot::new(
+        &account.origin,
+        &account.user.id,
+        queue,
+        current,
+        ui.snapshot.peek().position_ms,
+        *ui.shuffle.peek(),
+        repeat,
+        &ui.context.peek(),
+    ) {
+        spawn(async move {
+            let _ = tokio::task::spawn_blocking(move || crate::queue_store::save(&snapshot)).await;
+        });
+    }
+}
+
+fn restore_queue_snapshot(mut ui: Ui) {
+    let Some(account) = ui.account.peek().clone() else {
+        return;
+    };
+    let epoch = account.epoch;
+    spawn(async move {
+        let loaded = tokio::task::spawn_blocking({
+            let origin = account.origin.clone();
+            let user = account.user.id.clone();
+            move || crate::queue_store::load(&origin, &user)
+        })
+        .await;
+        if !ui.alive.get()
+            || *ui.epoch.peek() != epoch
+            || !ui.signed_in()
+            || !ui.queue.peek().is_empty()
+        {
+            return;
+        }
+        if let Ok(Ok(Some(snapshot))) = loaded {
+            let len = snapshot.queue.len();
+            ui.queue.set(snapshot.queue);
+            ui.order.write().reset(len, snapshot.current);
+            ui.shuffle.set(snapshot.shuffle);
+            ui.repeat.set(match snapshot.repeat.as_str() {
+                "all" => Repeat::All,
+                "one" => Repeat::One,
+                _ => Repeat::Off,
+            });
+            ui.context.set(snapshot.context);
+        }
+    });
+}
+
 fn adopt_account(
     mut ui: Ui,
     client: crate::client::VelaClient,
@@ -801,6 +867,7 @@ fn adopt_account(
             ui.offline_corrupt.set(report.corrupt);
         }
     });
+    restore_queue_snapshot(catalog_ui.clone());
     load_catalog(catalog_ui, String::new(), None, false);
 }
 
@@ -958,6 +1025,7 @@ async fn delete_saved_session(
 
 fn sign_out(mut ui: Ui) {
     let old = ui.account.peek().clone();
+    save_queue_snapshot(ui.clone());
     // AUD-02: local access, the queue and audio end immediately. The keyring
     // deletion is started after that and is never awaited on the UI thread, so
     // a hung Secret Service cannot delay stopping playback or the local logout.
@@ -2042,8 +2110,8 @@ fn advance(mut ui: Ui, command: Command) {
     let entropy = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
     let transition = ui.order.write().transition(command, elapsed, entropy);
     match transition {
-        Transition::Play(_) => start_source(ui, false, true, 0),
-        Transition::SeekStart { resume: true } => start_source(ui, true, true, 0),
+        Transition::Play(_) => start_source(ui.clone(), false, true, 0),
+        Transition::SeekStart { resume: true } => start_source(ui.clone(), true, true, 0),
         Transition::SeekStart { resume: false } => {
             if *ui.preparing.peek() {
                 return;
@@ -2068,6 +2136,7 @@ fn advance(mut ui: Ui, command: Command) {
         }
         Transition::None => {}
     }
+    save_queue_snapshot(ui);
 }
 
 fn reconnect_audio(mut ui: Ui) {
