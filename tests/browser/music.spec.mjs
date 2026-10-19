@@ -974,11 +974,7 @@ test('IN01 Home and search skeletons keep real geometry without changing playbac
     const style = getComputedStyle(card);
     const art = card.querySelector('.artwork').getBoundingClientRect();
     const grid = getComputedStyle(card.parentElement);
-    const parts = [...card.children].map(child => ({ tag: child.tagName, cls: String(child.className), height: child.getBoundingClientRect().height, top: child.getBoundingClientRect().top - rect.top }));
-    const small = card.querySelector('small');
-    const shape = element => element && ({ height: element.getBoundingClientRect().height, fontSize: getComputedStyle(element).fontSize, lineHeight: getComputedStyle(element).lineHeight, display: getComputedStyle(element).display });
-    return { height: rect.height, padding: style.padding, columns: grid.gridTemplateColumns, gap: grid.gap, artWidth: art.width, artHeight: art.height, parts, title: card.querySelector('strong')?.textContent, artist: small?.textContent, smallHeight: small ? small.getBoundingClientRect().height : null, strongShape: shape(card.querySelector('strong')), smallShape: shape(small),
-      playShape: shape(card.querySelector('.track-skeleton-play, .listening-card-play')), cardDisplay: style.display };
+    return { height: rect.height, padding: style.padding, columns: grid.gridTemplateColumns, gap: grid.gap, artWidth: art.width, artHeight: art.height };
   });
 
   let homeHold = null;
@@ -1029,7 +1025,6 @@ test('IN01 Home and search skeletons keep real geometry without changing playbac
   await expect(realCards.first()).toBeVisible();
   await expect(page.locator('.track-skeleton-card')).toHaveCount(0);
   const real = await cardMetrics('.home-track-grid .listening-card:not(.track-skeleton-card)');
-  console.log('IN01 metrics', JSON.stringify({ skeleton, real, all: await realCards.evaluateAll(cards => cards.slice(0, 4).map(card => ({ title: card.querySelector('strong')?.textContent, artist: card.querySelector('small')?.textContent, height: card.getBoundingClientRect().height }))) }));
   expect(real.padding).toBe(skeleton.padding);
   const skeletonColumns = skeleton.columns.split(' ').map(width => parseFloat(width));
   const realColumns = real.columns.split(' ').map(width => parseFloat(width));

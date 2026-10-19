@@ -793,7 +793,3 @@ input::placeholder { color:var(--quiet); opacity:1; }
 @media (prefers-reduced-motion: reduce) {
   .track-skeleton-art,.track-skeleton-bar,.track-skeleton-action { animation:none; background:var(--surface-raised); }
 }
-/* IN01: match the real card's text metrics so the settled card keeps its height. */
-.track-skeleton-card strong { height:16px; line-height:16px; }
-.track-skeleton-card small { height:12px; line-height:12px; }
-.track-skeleton-card .track-skeleton-bar { height:100%; }
