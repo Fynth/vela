@@ -479,6 +479,50 @@ fn change_volume(value: f64, mut volume: Signal<f64>) {
         }
     }
 }
+/// The mute control only changes the existing root element's effective output
+/// level. The root volume signal keeps the user's audible level, so Unmute
+/// restores that exact value instead of a hard-coded default, and a saved
+/// session never persists "muted" as the device volume.
+fn toggle_mute(mut muted: Signal<bool>, volume: Signal<f64>) {
+    let next = !*muted.peek();
+    if let Some(player) = audio() {
+        player.set_volume(if next { 0.0 } else { *volume.peek() });
+    }
+    muted.set(next);
+}
+
+/// Honest original-format disclosure from the real Track DTO. Missing values are
+/// omitted; the player never upgrades a codec name into "lossless"/"bit-perfect".
+fn quality_label(track: &Track) -> Option<String> {
+    let mut parts = Vec::new();
+    let codec = track.codec.trim();
+    if !codec.is_empty() {
+        parts.push(codec.to_string());
+    }
+    if let Some(rate) = track.sample_rate.filter(|rate| *rate > 0) {
+        parts.push(if rate % 1000 == 0 {
+            format!("{} kHz", rate / 1000)
+        } else {
+            format!("{:.1} kHz", rate as f64 / 1000.0)
+        });
+    }
+    if let Some(depth) = track.bit_depth.filter(|depth| *depth > 0) {
+        parts.push(format!("{depth}-bit"));
+    }
+    // A container/codec name usually has no honest bit depth. Fall back to the
+    // measured bitrate only when the rate/depth facts are absent.
+    if parts.len() <= 1
+        && let Some(bitrate) = track.bitrate.filter(|bitrate| *bitrate > 0)
+    {
+        parts.push(format!("{bitrate} kbps"));
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(" · "))
+    }
+}
+
 fn set_sleep_timer(
     value: String,
     mut minutes: Signal<String>,
@@ -1040,6 +1084,18 @@ fn MoveDownIcon() -> Element {
 }
 
 #[component]
+fn MutedIcon() -> Element {
+    // Speaker with a strike-through. Same owned outline family, no new icon pack.
+    rsx! { svg { class: "vela-icon", view_box: "0 0 24 24", width: "24", height: "24", fill: "none", stroke: "currentColor", stroke_width: "1.7", stroke_linecap: "round", stroke_linejoin: "round", "aria-hidden": "true", "focusable": "false", path { d: "M3 9h4l5-5v16l-5-5H3Zm13 0 5 6m0-6-5 6" } } }
+}
+
+#[component]
+fn ExpandIcon() -> Element {
+    // Four outward corners: the expanded-player affordance, never a fake window control.
+    rsx! { svg { class: "vela-icon", view_box: "0 0 24 24", width: "24", height: "24", fill: "none", stroke: "currentColor", stroke_width: "1.7", stroke_linecap: "round", stroke_linejoin: "round", "aria-hidden": "true", "focusable": "false", path { d: "M4 9V4h5M20 15v5h-5M15 4h5v5M9 20H4v-5" } } }
+}
+
+#[component]
 fn CatalogCover(artwork_id: Option<String>, #[props(default = false)] artist: bool) -> Element {
     let mut failed = use_signal(|| false);
     rsx! { div { class: if artist { "catalog-cover artist-cover" } else { "catalog-cover" }, if let Some(id) = artwork_id.filter(|_| !failed()) { img { src: "/api/artwork/{id}", alt: "", loading: "lazy", onerror: move |_| failed.set(true) } } else { span { if artist { Icon { name: "artists" } } else { Icon { name: "music" } } } } } }
@@ -1170,6 +1226,12 @@ fn App() -> Element {
     let mut position = use_signal(|| 0.0);
     let mut duration = use_signal(|| 0.0);
     let mut volume = use_signal(|| 0.8);
+    // Mute edits the one existing output element; the audible level stays in
+    // the root volume signal so restoring it is exact. The favorite guard binds
+    // the pending submission to that exact current track, so a session change
+    // can never leave another track permanently disabled.
+    let mut muted = use_signal(|| false);
+    let mut favorite_pending = use_signal(|| None::<String>);
     let mut shuffle = use_signal(|| false);
     let mut repeat = use_signal(|| "off".to_string());
     let mut sleep_minutes = use_signal(|| "0".to_string());
@@ -1225,7 +1287,10 @@ fn App() -> Element {
         shuffle: EventHandler::new(move |_| shuffle.set(!shuffle())),
         repeat: EventHandler::new(move |_| change_repeat(repeat)),
         seek: EventHandler::new(move |value| engine.peek().seek(value)),
-        volume: EventHandler::new(move |value| change_volume(value, volume)),
+        volume: EventHandler::new(move |value| {
+            muted.set(false);
+            change_volume(value, volume);
+        }),
         retry: EventHandler::new(move |_| engine.peek().resume()),
         queue: EventHandler::new(move |_| {
             now.close();
@@ -1670,6 +1735,12 @@ fn App() -> Element {
         });
     });
     use_effect(move || {
+        // A new account/session invalidates pending favorite feedback that no
+        // longer belongs to the current player occurrence.
+        let _ = auth.read();
+        favorite_pending.set(None);
+    });
+    use_effect(move || {
         let _ = (
             auth.read(),
             queue.read(),
@@ -1704,6 +1775,39 @@ fn App() -> Element {
 
     let current = queue.read().get(*index.read()).cloned();
     let requested_play = requested();
+    // TR03: the persistent player only projects root state. It never infers
+    // playback from a click, a download or an expanded dialog opening.
+    let player_state = if current.is_some() {
+        if playing() {
+            "playing"
+        } else if requested_play {
+            "connecting"
+        } else {
+            "paused"
+        }
+    } else {
+        "idle"
+    };
+    let player_state_label = match player_state {
+        "playing" => "Playing",
+        "connecting" => "Connecting to the source",
+        "paused" => "Paused",
+        _ => "Nothing playing",
+    };
+    let seek_max = if duration().is_finite() {
+        duration().max(1.0)
+    } else {
+        1.0
+    };
+    let seek_percent = if duration().is_finite() && duration() > 0.0 {
+        (position() / duration()).clamp(0.0, 1.0) * 100.0
+    } else {
+        0.0
+    };
+    let seek_style = format!("width:{seek_percent:.2}%");
+    let seek_text = format!("{} of {}", seconds(position()), seconds(duration()));
+    let volume_value = if muted() { 0.0 } else { volume() };
+    let quality = current.as_ref().and_then(quality_label);
     let heading = match page.read().as_str() {
         "albums" => "Albums",
         "artists" => "Artists",
@@ -2254,22 +2358,87 @@ fn App() -> Element {
                 if !playback_status().is_empty() {div {class:"playback-status",role:"status", "{playback_status}" button {class:"text-button",onclick:move |_|engine.peek().resume(),"Retry playback"} }}
 
                 div { class: "player-bar", "aria-label": "Music player",
-                    if let Some(track)=current.clone(){button {class:"now-playing now-playing-trigger","aria-label":"Open now playing","aria-haspopup":"dialog",onclick:move |_|{show_queue.set(false);now.show();},Art {key:"{track.id}-{track.artwork_id:?}",track:track.clone()} div {strong {"{track.title}"} small {"{track.artist}"}} }}else{div {class:"now-playing",div {class:"artwork",Icon{name:"music"}} div {strong {"Ready when you are"} small {"Choose something you love"}}}}
-                    div { class: "player-center", div { class: "player-buttons", button { class: if shuffle() { "icon-button selected" } else { "icon-button" }, "aria-label": "Shuffle", "aria-pressed": shuffle(), disabled: current.is_none(), onclick: move |_| { shuffle.set(!shuffle()); }, Icon { name: "shuffle" } }
-                            button { id: "player-previous", class: "icon-button", "aria-label": "Previous track", disabled: current.is_none(), onclick: move |_| advance(Command::Previous, playback), Icon { name: "previous" } }
-                            button { id: "player-toggle", class: "play-toggle", "aria-label": if playing() || requested_play { "Pause" } else { "Play" }, disabled: current.is_none(), onclick: move |_| { toggle_playback(playback) }, if playing() || requested_play { Icon { name: "pause" } } else { Icon { name: "play" } } }
+                    div { class: "player-now",
+                        if let Some(track)=current.clone() {
+                            button { class:"now-playing now-playing-trigger","aria-label":"Open now playing","aria-haspopup":"dialog",onclick:move |_|{show_queue.set(false);now.show();},
+                                Art {key:"{track.id}-{track.artwork_id:?}",track:track.clone()}
+                                span {class:"now-playing-meta",
+                                    span {class:"now-playing-heading",strong {class:"player-title","{track.title}"}
+                                        span {class:"player-eq","data-state":player_state,"aria-hidden":"true",i{}i{}i{}i{}}
+                                    }
+                                    small {class:"player-artist",title:track.artist.clone(),"{track.artist}"}
+                                    if !track.album.trim().is_empty() {small {class:"player-album",title:track.album.clone(),"{track.album}"}}
+                                }
+                            }
+                            button {class:if track.favorite {"icon-button player-favorite selected"}else{"icon-button player-favorite"},"aria-label":if track.favorite {"Remove current track from favorites"}else{"Favorite current track"},"aria-pressed":track.favorite,disabled:favorite_pending.read().as_deref()==Some(track.id.as_str()),onclick:move |_| {
+                                    let id=track.id.clone();
+                                    if favorite_pending.read().as_deref()==Some(id.as_str()){return;}
+                                    let track=track.clone();
+                                    favorite_pending.set(Some(id));
+                                    spawn_authorized(auth, async move {
+                                        let result=change_favorite(track.clone(),auth,tracks,queue,catalog.tracks,facets_revision).await;
+                                        if favorite_pending.peek().as_deref()==Some(track.id.as_str()){favorite_pending.set(None);}
+                                        if let Err(message)=result {error.set(message);}
+                                    });
+                                },Icon {name:"heart"}}
+                            span {class:"sr-only player-state-text","data-state":player_state,"{player_state_label}"}
+                        } else {
+                            div {class:"now-playing",div {class:"artwork",Icon{name:"music"}}span {class:"now-playing-meta",strong {"Ready when you are"}small {"Choose something you love"}}}
+                            span {class:"sr-only player-state-text","data-state":player_state,"{player_state_label}"}
+                        }
+                    }
+                    div { class: "player-center",
+                        div { class: "player-buttons",
+                            button { class: if shuffle() {"icon-button player-shuffle active"} else {"icon-button player-shuffle"}, "aria-label": "Shuffle", "aria-pressed": shuffle(), disabled: current.is_none(), onclick: move |_| { shuffle.set(!shuffle()); },
+                                Icon { name: "shuffle" }
+                                if shuffle() {span {class:"player-mode-dot","aria-hidden":"true"}}
+                            }
+                            button { id: "player-previous", class: "icon-button player-previous", "aria-label": "Previous track", disabled: current.is_none(), onclick: move |_| advance(Command::Previous, playback), Icon { name: "previous" } }
+                            button { id: "player-toggle", class: "play-toggle", "aria-label": if playing() || requested_play { "Pause" } else { "Play" }, "aria-pressed": playing() || requested_play, disabled: current.is_none(), onclick: move |_| { toggle_playback(playback) },
+                                span { class: "play-toggle-face", if playing() || requested_play { Icon { name: "pause" } } else { Icon { name: "play" } } }
+                            }
                             button { id: "player-next", class: "icon-button", "aria-label": "Next track", disabled: current.is_none(), onclick: move |_| advance(Command::Next, playback), Icon { name: "next" } }
                             button { class: "icon-button mobile-queue", "aria-label": "Show playback queue and controls", onclick: move |_| show_queue.set(!show_queue()), Icon { name: "queue" } }
-                            button { class: if repeat() != "off" { "icon-button selected" } else { "icon-button" }, "aria-label": "Repeat: {repeat}", "aria-pressed": repeat() != "off", disabled: current.is_none(), onclick: move |_| { change_repeat(repeat); }, if repeat() == "one" { Icon { name: "repeat-one" } } else { Icon { name: "repeat" } } }
+                            button { class: if repeat() != "off" {"icon-button player-repeat active"} else {"icon-button player-repeat"}, "aria-label": "Repeat: {repeat}", "aria-pressed": repeat() != "off", disabled: current.is_none(), onclick: move |_| { change_repeat(repeat); },
+                                if repeat() == "one" {
+                                    Icon { name: "repeat-one" }
+                                    span {class:"player-mode-dot","aria-hidden":"true"}
+                                } else if repeat() == "all" {
+                                    Icon { name: "repeat" }
+                                    span {class:"player-mode-dot","aria-hidden":"true"}
+                                } else {
+                                    Icon { name: "repeat" }
+                                }
+                            }
                         }
-                        div { class: "seek-row", span { "{seconds(position())}" } input { r#type: "range", min: "0", max: if duration().is_finite() { duration().max(1.0).to_string() } else { "1".into() }, step: "0.1", value: "{position}", "aria-label": "Playback position", disabled: current.is_none(), oninput: move |e| { if let Ok(value) = e.value().parse::<f64>() { engine.peek().seek(value); } } } span { "{seconds(duration())}" } }
+                        div { class: "seek-row",
+                            span { class: "player-time", "aria-hidden": "true", "{seconds(position())}" }
+                            div { class: "seek-control",
+                                div { class: "seek-rail", "aria-hidden": "true", span { class: "seek-fill", style: "{seek_style}" } }
+                                input { r#type: "range", min: "0", max: "{seek_max}", step: "0.1", value: "{position}", "aria-label": "Playback position", "aria-valuetext": "{seek_text}", disabled: current.is_none(), oninput: move |e| { if let Ok(value) = e.value().parse::<f64>() { engine.peek().seek(value); } } }
+                            }
+                            span { class: "player-time", "aria-hidden": "true", "{seconds(duration())}" }
+                        }
                     }
-                    div { class: "player-right", button { class: if show_queue() { "icon-button selected" } else { "icon-button" }, "aria-label": "Show playback queue", "aria-expanded": show_queue(), onclick: move |_| { show_queue.set(!show_queue()); }, Icon { name: "queue" } } span { class: "volume-icon", Icon { name: "volume" } } input { r#type: "range", min: "0", max: "1", step: "0.01", value: "{volume}", "aria-label": "Volume", oninput: move |e| { if let Ok(value) = e.value().parse::<f64>() { change_volume(value,volume); } } } }
+                    div { class: "player-right",
+                        if let Some(quality) = quality.clone() {
+                            div {class:"player-quality",title:"Original file format streamed directly. Your browser decodes it; the output device may use another format.",
+                                span {class:"player-quality-format","{quality}"}
+                                small {"Original file · direct stream"}
+                            }
+                        }
+                        button { class: if show_queue() {"icon-button selected"}else{"icon-button"},"aria-label":"Show playback queue","aria-expanded":show_queue(),onclick:move |_| {show_queue.set(!show_queue());}, Icon { name: "queue" } }
+                        button { class: if muted() {"icon-button player-mute active"}else{"icon-button player-mute"},"aria-label":"Mute","aria-pressed":muted(),onclick:move |_| toggle_mute(muted,volume),
+                            if muted() { MutedIcon {} } else { Icon { name: "volume" } }
+                        }
+                        input { id:"player-volume", r#type:"range", min:"0", max:"1", step:"0.01", value:"{volume_value}", "aria-label":"Volume", oninput: move |e| { if let Ok(value) = e.value().parse::<f64>() { if *muted.peek() { muted.set(false); } change_volume(value,volume); } } }
+                        button { class:"icon-button player-expand","aria-label":"Expand player","aria-haspopup":"dialog",disabled:current.is_none(),onclick:move |_| {show_queue.set(false);now.show();}, ExpandIcon {} }
+                    }
                 }
                 shell::MobileNavigation {page:page(),administrator:auth.read().as_ref().is_some_and(|a|a.user.is_admin),onnav:actions.navigate}
                 if show_queue() { aside { class: "queue-panel", "aria-label": "Playback queue", div { class: "section-toolbar", div { span { class: "eyebrow", "UP NEXT" } h2 { "Your listening queue" } p {class:"queue-context", "Playing from {context.read().label}"} } button { class: "icon-button", "aria-label": "Close playback queue", onclick: move |_| show_queue.set(false), Icon { name: "close" } } }
                         div { class: "queue-playback-controls", button { class: "button secondary small", disabled: current.is_none(), onclick: move |_| advance(Command::Previous, playback), "Previous" } button { class: if shuffle() { "button primary small" } else { "button secondary small" }, "aria-pressed": shuffle(), onclick: move |_| shuffle.set(!shuffle()), "Shuffle" } button { class: "button secondary small", onclick: move |_| change_repeat(repeat), "Repeat: {repeat}" }
-                            label { r#for: "queue-volume", "Volume" } input { id: "queue-volume", r#type: "range", min: "0", max: "1", step: "0.01", value: "{volume}", oninput: move |e| { if let Ok(value) = e.value().parse::<f64>() { change_volume(value,volume); } } }
+                            label { r#for: "queue-volume", "Volume" } input { id: "queue-volume", r#type: "range", min: "0", max: "1", step: "0.01", value: "{volume_value}", oninput: move |e| { if let Ok(value) = e.value().parse::<f64>() { if *muted.peek() { muted.set(false); } change_volume(value,volume); } } }
                         }
                         if shuffle() { p { class: "muted", "Shuffle is on. The list keeps your saved order; Play next requests take priority." } }
                         if queue.read().is_empty() { p { class: "muted", "Choose a track to start your queue." } }
@@ -2301,7 +2470,7 @@ fn App() -> Element {
                     } }
                 if *now.open.read() {
                     if let Some(track)=current.clone(){now_playing::NowPlaying {
-                        track,context:context(),playing:playing(),requested:requested_play,position:position(),duration:duration(),volume:volume(),shuffle:shuffle(),repeat:repeat(),status:playback_status(),error:(now.error)(),favorite_busy:(now.busy)(),queue,cursor:index(),actions:now_actions,
+                        track,context:context(),playing:playing(),requested:requested_play,position:position(),duration:duration(),volume:volume_value,shuffle:shuffle(),repeat:repeat(),status:playback_status(),error:(now.error)(),favorite_busy:(now.busy)(),queue,cursor:index(),actions:now_actions,
                     }}
                 }
                 if let Some(editing) = editing_track.read().clone() {

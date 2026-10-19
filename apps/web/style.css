@@ -62,6 +62,10 @@
   --vela-sidebar-bg: var(--vela-forest);
   --vela-player-bg: #10130f;
   --vela-player-border: #343b2e;
+  /* Main transport face: the approved 32px light circle on the dark band.
+     Light re-points the same roles at its own primary pair. */
+  --vela-player-face: #e4ebd9;
+  --vela-player-face-text: #252c22;
   --vela-topbar-border: #ffffff05;
   --vela-search-bg: #1d211c;
   --vela-filter-inactive: #22271f;
@@ -139,6 +143,8 @@
   --vela-sidebar-bg: #fff;
   --vela-player-bg: #fff;
   --vela-player-border: #c1d1c5;
+  --vela-player-face: var(--vela-primary);
+  --vela-player-face-text: var(--vela-on-primary);
   --vela-topbar-border: #c1d1c5;
   --vela-search-bg: #fff;
   --vela-filter-inactive: #eef3ee;
@@ -1031,4 +1037,199 @@ input::placeholder { color:var(--quiet); opacity:1; }
      topbar still contains its real actions without covering the page title. */
   .topbar .breadcrumb { display:none; }
   .topbar-actions { margin-left:auto; }
+}
+
+/* TR03 persistent player ----------------------------------------------------
+   The reference composition for the one root player. The TR02 shell already
+   reserves the 88px band once (grid row 2) and below 761px the player, then the
+   navigation, are separate rows; this layer only styles the three unboxed
+   zones, and never introduces a second audio element, source or transport
+   authority. Desktop reference: left ≈28% / center ≤470 / right ≈28%, 51px
+   cover, 32px main face inside a 44px hit box, 3px seek rail, 65px volume. */
+.player-bar {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 470px) minmax(0, 1fr);
+  gap: 20px;
+  padding: 10px var(--vela-player-gutter);
+  background: var(--vela-player-bg);
+  border-top: 1px solid var(--vela-player-border);
+}
+.player-now { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.now-playing { gap: 12px; }
+.now-playing-trigger {
+  flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 12px;
+  padding: 0; border: 0; border-radius: 6px; background: none; color: var(--text);
+  text-align: left;
+}
+.now-playing-trigger:hover .player-title { color: var(--vela-primary); }
+.now-playing .artwork { width: 51px; height: 51px; min-width: 51px; border-radius: 6px; }
+.now-playing-meta { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.now-playing-heading { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.now-playing strong.player-title {
+  display: block; min-width: 0; overflow: hidden; white-space: nowrap;
+  text-overflow: ellipsis; font-size: 12px; font-weight: 600; color: var(--text);
+}
+.now-playing .player-artist, .now-playing .player-album {
+  display: block; margin: 0; overflow: hidden; white-space: nowrap;
+  text-overflow: ellipsis; font-size: 10px; line-height: 1.35;
+}
+.now-playing .player-artist { color: var(--vela-muted-text); }
+.now-playing .player-album { color: var(--vela-quiet-text); }
+.player-eq { display: inline-flex; align-items: flex-end; gap: 2px; height: 10px; width: 12px; flex-shrink: 0; }
+.player-eq i { display: block; width: 2px; border-radius: 1px; background: var(--vela-quiet-text); }
+.player-eq i:nth-child(1) { height: 4px; }
+.player-eq i:nth-child(2) { height: 7px; }
+.player-eq i:nth-child(3) { height: 5px; }
+.player-eq i:nth-child(4) { height: 9px; }
+.player-eq[data-state="playing"] i { background: var(--vela-primary); animation: vela-player-eq 800ms ease-in-out infinite alternate; }
+.player-eq[data-state="playing"] i:nth-child(2) { animation-delay: -200ms; }
+.player-eq[data-state="playing"] i:nth-child(3) { animation-delay: -400ms; }
+.player-eq[data-state="playing"] i:nth-child(4) { animation-delay: -600ms; }
+.player-eq[data-state="connecting"] i { background: var(--vela-primary); }
+@keyframes vela-player-eq { from { height: 3px; } to { height: 10px; } }
+.player-favorite { flex-shrink: 0; color: var(--vela-muted-text); }
+.player-favorite.selected { color: var(--vela-primary); }
+.player-favorite .vela-icon { width: 17px; height: 17px; }
+.player-center { gap: 1px; }
+.player-buttons { gap: 17px; height: 44px; flex: 0 0 44px; }
+.player-buttons .icon-button {
+  position: relative; width: 28px; min-width: 28px; height: 28px; padding: 0;
+  color: var(--vela-muted-text); background: none;
+}
+.player-buttons .icon-button:hover:not(:disabled) { color: var(--text); background: none; }
+.player-buttons .icon-button .vela-icon { width: 15px; height: 15px; }
+.player-buttons .icon-button.selected, .player-buttons .icon-button.active { color: var(--vela-primary); }
+.player-mode-dot {
+  position: absolute; right: 2px; bottom: 1px; width: 3px; height: 3px;
+  border-radius: 50%; background: var(--vela-primary);
+}
+.play-toggle {
+  width: 44px; min-width: 44px; height: 44px; padding: 0; border-radius: 50%;
+  display: grid; place-items: center; background: none; color: var(--vela-text);
+}
+.play-toggle-face {
+  width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--vela-player-face); color: var(--vela-player-face-text);
+  transition: transform 150ms ease, background-color 150ms ease;
+}
+.play-toggle:hover:not(:disabled) .play-toggle-face { transform: scale(1.05); }
+.play-toggle:disabled .play-toggle-face { background: var(--vela-disabled-surface); color: var(--vela-disabled-text); }
+.play-toggle .vela-icon { width: 14px; height: 14px; }
+.seek-row {
+  flex: 0 0 22px; height: 22px; min-height: 22px; gap: 9px;
+  align-items: center; justify-content: center;
+}
+.seek-row .player-time {
+  min-width: 32px; text-align: center; font-size: 10px; line-height: 1;
+  color: var(--vela-quiet-text); font-variant-numeric: tabular-nums;
+}
+.seek-control { position: relative; flex: 1 1 auto; min-width: 0; height: 22px; display: flex; align-items: center; }
+.seek-rail {
+  position: absolute; left: 0; right: 0; top: calc(50% - 2px); transform: translateY(-50%);
+  height: 3px; border-radius: 2px; background: var(--vela-seek-rail);
+  overflow: hidden; pointer-events: none;
+}
+.seek-fill { display: block; height: 3px; border-radius: 2px; background: var(--vela-seek-fill); }
+.seek-control input[type=range] {
+  position: relative; z-index: 1; top: -2px; width: 100%; height: 44px;
+  min-height: 44px; margin: 0; padding: 0; background: transparent; cursor: pointer;
+  -webkit-appearance: none; appearance: none;
+}
+.seek-control input[type=range]::-webkit-slider-runnable-track { height: 3px; background: transparent; }
+.seek-control input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; width: 8px; height: 8px;
+  margin-top: -2.5px; border: 0; border-radius: 50%;
+  background: var(--vela-seek-fill); opacity: 0; transition: opacity 150ms ease;
+}
+.seek-control input[type=range]:hover::-webkit-slider-thumb,
+.seek-control input[type=range]:focus-visible::-webkit-slider-thumb { opacity: 1; }
+.seek-control input[type=range]::-moz-range-track { height: 3px; background: transparent; }
+.seek-control input[type=range]::-moz-range-thumb {
+  width: 8px; height: 8px; border: 0; border-radius: 50%; background: var(--vela-seek-fill);
+  opacity: 0; transition: opacity 150ms ease;
+}
+.seek-control input[type=range]:hover::-moz-range-thumb,
+.seek-control input[type=range]:focus-visible::-moz-range-thumb { opacity: 1; }
+@media (hover: none) {
+  .seek-control input[type=range]::-webkit-slider-thumb,
+  .seek-control input[type=range]::-moz-range-thumb { opacity: 1; }
+}
+.player-right { display: flex; align-items: center; justify-content: flex-end; gap: 6px; min-width: 0; }
+.player-quality {
+  display: flex; flex-direction: column; align-items: flex-end; min-width: 0;
+  margin-right: 4px; overflow: hidden; text-align: right;
+}
+.player-quality-format {
+  max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  font-size: 10px; line-height: 1.3; color: var(--vela-muted-text);
+  font-variant-numeric: tabular-nums;
+}
+.player-quality small {
+  max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  margin: 0; font-size: 9px; line-height: 1.3; color: var(--vela-quiet-text);
+}
+.player-right .icon-button { width: 32px; min-width: 32px; height: 32px; padding: 0; }
+.player-right .icon-button .vela-icon { width: 17px; height: 17px; }
+.player-right .player-mute[aria-pressed="true"] { color: var(--vela-primary); }
+.player-right input[type=range] { width: 65px; max-width: 65px; height: 44px; min-height: 44px; margin: 0; padding: 0; }
+
+@media (max-width: 1100px) {
+  .player-bar { gap: 16px; }
+  .player-buttons { gap: 12px; }
+  .player-now .player-favorite { display: none; }
+  .player-quality, .player-expand { display: none; }
+  .player-right { gap: 4px; }
+  .player-right .icon-button { width: 30px; min-width: 30px; height: 30px; }
+  .player-right input[type=range] { width: 44px; max-width: 44px; }
+}
+@media (max-width: 900px) {
+  .player-bar { grid-template-columns: minmax(0, 1fr) minmax(0, 430px) minmax(0, 1fr); gap: 14px; }
+  .player-buttons { gap: 10px; }
+  .player-buttons .mobile-queue { display: none; }
+}
+@media (max-width: 760px) {
+  .player-bar { grid-template-columns: minmax(0, 1fr) minmax(0, 300px) minmax(0, 1fr); gap: 12px; }
+  /* Fixed status feedback clears the same player + navigation reservation, so a
+     real receipt never covers the transport or the volume/queue zone. */
+  .content-inner > .alert.success {
+    bottom: calc(var(--vela-player-height) + var(--vela-mobile-nav-height) + 16px + env(safe-area-inset-bottom));
+  }
+}
+/* Below 621px the existing two-zone mini-player composition stays: art/title,
+   favorite, Play/Pause, Next and Queue above a full-width seek rail. The
+   transport/volume details remain in the expanded player. The shell already
+   reserves the player row above the navigation row plus the safe area. */
+@media (max-width: 620px) {
+  .player-bar {
+    grid-template-columns: minmax(0, 1fr) 140px; gap: 8px;
+    height: var(--vela-player-height); padding: 12px 16px 48px;
+  }
+  .player-now { gap: 8px; }
+  .now-playing { gap: 10px; }
+  .now-playing-trigger { gap: 10px; }
+  .now-playing .artwork { width: 42px; height: 42px; min-width: 42px; border-radius: 5px; }
+  .now-playing strong.player-title { font-size: 12px; }
+  .now-playing .player-artist { font-size: 10px; }
+  .now-playing .player-album { display: none; }
+  .player-now .player-favorite { display: inline-grid; width: 40px; min-width: 40px; height: 40px; }
+  .player-center { flex-direction: row; align-items: center; justify-content: flex-end; max-width: none; }
+  .player-buttons { gap: 8px; justify-content: flex-end; }
+  .player-buttons .icon-button { width: 44px; min-width: 44px; height: 44px; }
+  .player-buttons .icon-button .vela-icon { width: 19px; height: 19px; }
+  .player-buttons .player-shuffle, .player-buttons .player-previous, .player-buttons .player-repeat { display: none; }
+  .player-buttons .mobile-queue { display: inline-grid; }
+  .player-right { display: none; }
+  .seek-row { position: absolute; left: 0; right: 0; bottom: 0; height: 44px; padding: 0 16px; gap: 0; }
+  .seek-row .player-time { display: none; }
+  .seek-control { height: 44px; }
+  .play-toggle-face { width: 36px; height: 36px; }
+  .play-toggle .vela-icon { width: 16px; height: 16px; }
+}
+/* The narrowest reference width gives the title/artist path the room instead of
+   an extra heart; the same real favorite stays in the expanded player and rows. */
+@media (max-width: 360px) {
+  .player-now .player-favorite { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .player-eq i { animation: none !important; }
+  .play-toggle:hover:not(:disabled) .play-toggle-face { transform: none; }
 }
