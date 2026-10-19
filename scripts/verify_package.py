@@ -80,6 +80,28 @@ def main():
                 with urllib.request.urlopen(base + '/now-playing.css', timeout=2) as response:
                     assert response.headers.get_content_type() == 'text/css'
                     assert b'.now-playing-dialog' in response.read(1024 * 1024)
+            # Shipped static assets must resolve from the exact allowlist and be
+            # byte-identical to the packaged file. An unlisted neighbour must
+            # stay denied instead of exposing a directory listing.
+            for name, folder in [('vela-coast.png', 'brand'), ('vela-wave.png', 'brand'),
+                                 ('manrope-latin.woff2', 'fonts'), ('manrope-cyrillic.woff2', 'fonts')]:
+                packaged = root / 'dist' / 'assets' / folder / name
+                assert packaged.is_file(), 'Packaged asset missing: ' + name
+                with urllib.request.urlopen(base + f'/assets/{folder}/{name}', timeout=2) as response:
+                    assert response.status == 200
+                    served = response.read()
+                assert served == packaged.read_bytes(), f'Packaged asset differs from source: {name}'
+            with urllib.request.urlopen(base + '/assets/brand/vela-coast.png', timeout=2) as response:
+                assert response.headers.get_content_type() == 'image/png'
+            with urllib.request.urlopen(base + '/assets/fonts/manrope-latin.woff2', timeout=2) as response:
+                assert response.headers.get_content_type() in ('font/woff2', 'application/octet-stream')
+            for denied in ['/assets/brand/', '/assets/brand/SOURCE.md', '/assets/brand/../fonts/OFL.txt']:
+                try:
+                    urllib.request.urlopen(base + denied, timeout=2)
+                except urllib.error.HTTPError as error:
+                    assert error.code == 404
+                else:
+                    raise AssertionError('Unlisted static path must stay denied: ' + denied)
             with urllib.request.urlopen(base + '/pkg/vela_web_bg.wasm', timeout=2) as response:
                 assert response.read(4) == b'\x00asm'
             process.send_signal(signal.SIGTERM)

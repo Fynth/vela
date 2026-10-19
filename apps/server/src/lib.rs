@@ -275,6 +275,8 @@ async fn protection(State(state): State<AppState>, req: Request, next: Next) -> 
             | "/assets/fonts/manrope-latin.woff2"
             | "/assets/fonts/manrope-cyrillic.woff2"
             | "/assets/fonts/OFL.txt"
+            | "/assets/brand/vela-coast.png"
+            | "/assets/brand/vela-wave.png"
             | "/THIRD_PARTY_NOTICES.txt"
     ) || (path.starts_with("/pkg/")
         && (path.ends_with(".js") || path.ends_with(".wasm")));

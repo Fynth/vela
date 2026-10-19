@@ -23,4 +23,6 @@ mkdir -p dist/pkg
 cp apps/web/index.html apps/web/style.css apps/web/now-playing.css apps/web/bootstrap.js apps/web/player.js apps/web/vela.svg dist/
 mkdir -p dist/assets/fonts
 cp apps/web/assets/fonts/manrope-latin.woff2 apps/web/assets/fonts/manrope-cyrillic.woff2 apps/web/assets/fonts/OFL.txt dist/assets/fonts/
+mkdir -p dist/assets/brand
+cp apps/web/assets/brand/vela-coast.png apps/web/assets/brand/vela-wave.png dist/assets/brand/
 echo 'Web assets built in dist/'

@@ -33,6 +33,32 @@ pub enum Transition {
     None,
 }
 
+/// A side-effect-free view of what the order will play next.
+///
+/// The projection never mutates the order: opening a queue view must not
+/// consume shuffle state or change which occurrence plays first.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Projection {
+    /// The occurrence that is playing now.
+    pub current: Option<usize>,
+    /// Explicit "Play next" requests, most recent first. These are the real
+    /// next occurrences regardless of the saved order or the shuffle deck.
+    pub explicit_next: Vec<usize>,
+    /// The remaining occurrences in the deck's own order. Under shuffle the
+    /// deck is drawn at play time, so this is the pending set rather than a
+    /// fixed running order.
+    pub pending: Vec<usize>,
+}
+
+impl Projection {
+    /// The occurrences that play next, explicit requests first.
+    pub fn next(&self) -> Vec<usize> {
+        let mut next = self.explicit_next.clone();
+        next.extend(self.pending.iter().copied());
+        next
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct PlaybackOrder {
     len: usize,
@@ -48,6 +74,26 @@ pub struct PlaybackOrder {
 impl PlaybackOrder {
     pub fn current(&self) -> Option<usize> {
         self.current
+    }
+
+    /// Read what plays next without consuming shuffle state or mutating the
+    /// order. The explicit "Play next" requests come first because they are
+    /// the real next occurrence; the rest is the pending deck in its own
+    /// order, which the shuffle draw consumes at play time.
+    pub fn projection(&self) -> Projection {
+        // An explicit request stays in the remaining deck until it actually
+        // plays, so it is removed here to keep the two lists disjoint.
+        let pending = self
+            .remaining
+            .iter()
+            .copied()
+            .filter(|at| !self.next_up.contains(at))
+            .collect();
+        Projection {
+            current: self.current,
+            explicit_next: self.next_up.clone(),
+            pending,
+        }
     }
 
     pub fn matches(&self, len: usize, current: usize) -> bool {
@@ -427,6 +473,63 @@ mod tests {
         model.reset(0, 0);
         assert!(model.insert(0, true));
         assert_eq!(model.current(), Some(0));
+        invariants(&model);
+    }
+
+    #[test]
+    fn projection_reports_explicit_next_before_the_pending_deck() {
+        let mut model = order(4, 0, false, Repeat::Off);
+        // Explicit requests are last-request-first. Inserting at 4 then at 3
+        // shifts the first request up to occurrence 5.
+        assert!(model.insert(4, true));
+        assert!(model.insert(3, true));
+        let view = model.projection();
+        assert_eq!(view.current, Some(0));
+        assert_eq!(view.explicit_next, vec![3, 5]);
+        // The pending deck holds the rest, and never repeats an explicit
+        // request: an occurrence appears exactly once across both lists.
+        assert_eq!(view.pending, vec![1, 2, 4]);
+        assert_eq!(view.next(), vec![3, 5, 1, 2, 4]);
+        let mut seen = view.next();
+        seen.sort_unstable();
+        seen.dedup();
+        assert_eq!(seen.len(), view.next().len());
+    }
+
+    #[test]
+    fn projection_never_consumes_shuffle_state() {
+        let mut model = order(5, 2, true, Repeat::Off);
+        let before = model.projection();
+        let after = model.projection();
+        assert_eq!(before, after);
+        assert_eq!(before.current, Some(2));
+        // The pending deck holds every occurrence except the current one.
+        assert_eq!(before.pending.len(), 4);
+        assert!(!before.pending.contains(&2));
+        // Reading the projection must not change what actually plays next.
+        let entropy = 12_345_u32;
+        let first = model.transition(Command::Next, 0.0, entropy);
+        let mut replay = order(5, 2, true, Repeat::Off);
+        let second = replay.transition(Command::Next, 0.0, entropy);
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn projection_tracks_edits_without_dangling_occurrences() {
+        let mut model = order(4, 0, false, Repeat::Off);
+        assert!(model.insert(4, false));
+        assert!(model.remove(2));
+        let view = model.projection();
+        for at in view
+            .current
+            .iter()
+            .chain(&view.explicit_next)
+            .chain(&view.pending)
+        {
+            assert!(*at < 4, "dangling occurrence {at} in projection");
+        }
+        assert_eq!(view.pending.len(), 3);
+        assert_eq!(view.explicit_next, Vec::<usize>::new());
         invariants(&model);
     }
 }

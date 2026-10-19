@@ -1,6 +1,7 @@
 //! Real TCP/HTTP tests against isolated SQLite and filesystem stores.
 use reqwest::{Client, Method, Response, StatusCode};
 use serde_json::json;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use vela_core::config::Config;
 use vela_domain::*;
 use vela_server::{AppState, router};
@@ -2779,6 +2780,85 @@ async fn static_assets_never_serve_arbitrary_database_files() {
             .status(),
         StatusCode::NOT_FOUND
     );
+}
+
+#[tokio::test]
+async fn brand_assets_are_exactly_allowlisted_and_never_expose_their_folder() {
+    let app = TestApp::new().await;
+    let brand = app.state.config.web_dir.join("assets/brand");
+    tokio::fs::create_dir_all(&brand).await.unwrap();
+    tokio::fs::write(brand.join("vela-coast.png"), b"coast fixture bytes")
+        .await
+        .unwrap();
+    tokio::fs::write(brand.join("vela-wave.png"), b"wave fixture bytes")
+        .await
+        .unwrap();
+    tokio::fs::write(brand.join("SOURCE.md"), b"private provenance fixture")
+        .await
+        .unwrap();
+    tokio::fs::write(brand.join("other.png"), b"unlisted fixture bytes")
+        .await
+        .unwrap();
+
+    for name in ["vela-coast.png", "vela-wave.png"] {
+        let response = app
+            .client
+            .get(format!("{}/assets/brand/{name}", app.base))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "{name} must be served");
+        assert!(!response.text().await.unwrap().is_empty());
+    }
+    // The provenance record and every unlisted neighbour stay denied: the
+    // allowlist names exact files, never a directory.
+    for denied in [
+        "/assets/brand/SOURCE.md",
+        "/assets/brand/other.png",
+        "/assets/brand/",
+    ] {
+        let response = app
+            .client
+            .get(format!("{}{denied}", app.base))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::NOT_FOUND,
+            "{denied} must stay denied"
+        );
+        assert!(!response.text().await.unwrap().contains("fixture"));
+    }
+    // Traversal probes go over a raw socket: an HTTP client normalizes `..`
+    // segments away before they reach the server, which would test the client
+    // instead of the allowlist.
+    for raw in [
+        "/assets/brand/%2e%2e/brand/vela-coast.png",
+        "/assets/brand%2fvela-coast.png",
+        "/assets/brand/..%2fbrand/vela-coast.png",
+    ] {
+        let response = raw_request(&app.base, raw).await;
+        assert!(
+            response.starts_with("HTTP/1.1 404"),
+            "{raw} must stay denied, got: {}",
+            response.lines().next().unwrap_or_default()
+        );
+        assert!(!response.contains("fixture"));
+    }
+}
+
+/// Send one request line verbatim so the path is not normalized by a client.
+async fn raw_request(base: &str, path: &str) -> String {
+    let authority = base.trim_start_matches("http://");
+    let mut stream = tokio::net::TcpStream::connect(authority).await.unwrap();
+    let request = format!(
+        "GET {path} HTTP/1.1\r\nHost: {authority}\r\nConnection: close\r\n\r\n"
+    );
+    stream.write_all(request.as_bytes()).await.unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).await.unwrap();
+    response
 }
 
 #[tokio::test]
