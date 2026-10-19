@@ -1,4 +1,5 @@
 //! Listener pages use bounded typed requests and the root-owned playback actions.
+use crate::home_editorial::HomeFeatures;
 use crate::session::{ContextKind, PlaybackContext};
 use crate::{
     Art, CatalogCover,
@@ -181,17 +182,6 @@ fn select_home_view(mut view: Signal<HomeView>, next: HomeView) {
     {
         let _ = tab.focus();
     }
-}
-
-/// §8's editorial/wave pair needs the approved coast/your-wave artwork, which
-/// this increment does not ship. The pair is omitted with an honest absent
-/// state (IMAGE_BLOCKED) instead of substituting unrelated art.
-fn home_editorial_absence() -> Element {
-    rsx! { aside { class: "home-absent", "data-image-blocked": "IMAGE_BLOCKED", "aria-label": "Editorial features not included",
-        span { class: "eyebrow", "EDITORIAL · MY WAVE" }
-        strong { "The featured artwork is not part of this build." }
-        p { "The approved editorial cover and My Wave image are not available yet, so Home shows your real music instead of stand-in art. Your collection and playlists are unchanged." }
-    } }
 }
 
 fn home_additions(tracks: Vec<Track>, actions: Actions) -> Element {
@@ -424,7 +414,7 @@ pub fn Home(
     } else {
         match current {
             HomeView::ForYou => rsx! {
-                {home_editorial_absence()}
+                HomeFeatures { auth, revision, playlists: snapshot.playlists.clone(), owner_id: owner_id.clone(), actions }
                 if snapshot.recent.is_empty() {
                     if settled {
                         {home_first_listen(actions)}

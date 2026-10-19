@@ -1,0 +1,386 @@
+/* ============================================================================
+   TR04b Home editorial feature and My Wave.
+   The approved coast/your-wave artwork, the editorial copy and the personal
+   mix controls. Every rule here belongs to these two cards only: the rest of
+   the Home surface keeps style.css as its only authority.
+   ============================================================================ */
+.home-features {
+  display: grid;
+  grid-template-columns: 1.95fr 1fr;
+  gap: 17px;
+}
+.home-features :focus-visible {
+  outline: 2px solid var(--vela-primary);
+  outline-offset: 2px;
+}
+
+/* Editorial feature: original coast artwork behind two shading layers, copy
+   and controls above them in their own stacking context. */
+.home-feature {
+  position: relative;
+  height: 250px;
+  border-radius: 10px;
+  overflow: hidden;
+  background-image: url("/assets/brand/vela-coast.png");
+  background-size: cover;
+  background-position: 60% 53%;
+}
+.home-feature::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, #071e1be8 0%, #071e1b6a 48%, #071e1b00 85%);
+}
+.home-feature::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(0deg, #081a17af 0%, #081a1700 40%);
+}
+.home-feature-copy {
+  position: relative;
+  z-index: 1;
+  height: 100%;
+  padding: 24px 29px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+.home-eyebrow {
+  font-size: 9px;
+  letter-spacing: 1.8px;
+  text-transform: uppercase;
+  font-weight: 650;
+  color: #f3f3ed;
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.home-feature .home-eyebrow::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--vela-primary);
+  flex-shrink: 0;
+}
+.home-feature-title {
+  font-size: clamp(33px, 3.5vw, 47px);
+  font-weight: 550;
+  line-height: 1.04;
+  letter-spacing: -1.7px;
+  color: #f3f3ed;
+  margin: 0 0 12px;
+  max-width: 15ch;
+  overflow-wrap: anywhere;
+}
+.home-feature-subtitle {
+  font-size: 11px;
+  line-height: 1.7;
+  color: #c0cfc2;
+  margin: 0;
+  max-width: 34ch;
+}
+.home-feature-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 16px;
+}
+.home-feature-listen {
+  height: 33px;
+  min-height: 33px;
+  border-radius: 5px;
+  padding: 0 15px;
+  font-size: 11px;
+}
+.home-feature-arrow {
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
+  border-radius: 50%;
+  border: 1px solid rgba(243, 243, 237, 0.45);
+  background: transparent;
+  color: #f3f3ed;
+  display: grid;
+  place-items: center;
+  padding: 0;
+}
+.home-feature-arrow .vela-icon {
+  width: 14px;
+  height: 14px;
+  transform: rotate(-135deg);
+}
+@media (hover: hover) and (pointer: fine) {
+  .home-feature-arrow:hover {
+    background: rgba(243, 243, 237, 0.12);
+  }
+}
+.home-feature-error {
+  margin: 10px 0 0;
+  font-size: 10px;
+  line-height: 1.6;
+  color: #ef9290;
+  max-width: 40ch;
+}
+/* Upper-right carousel controls: one real button per available target. */
+.home-feature-indicators {
+  position: absolute;
+  z-index: 2;
+  top: 24px;
+  right: 29px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.home-indicator {
+  width: 4px;
+  height: 4px;
+  padding: 0;
+  border-radius: 50%;
+  background: #ffffff59;
+}
+.home-indicator.active {
+  width: 14px;
+  height: 4px;
+  border-radius: 2px;
+  background: #f3f3ed;
+}
+
+/* An owned playlist is missing: the card states it honestly and keeps the
+   grid rhythm without pretending to be a feature. */
+.home-feature-empty {
+  background-image: none;
+  background: var(--vela-card);
+  border: 1px solid var(--vela-border);
+}
+.home-feature-empty::before,
+.home-feature-empty::after {
+  display: none;
+}
+.home-feature-empty .home-feature-title {
+  font-size: clamp(24px, 2.4vw, 32px);
+  max-width: 18ch;
+}
+
+/* My Wave: original your-wave artwork, bottom shade, controls above it. */
+.home-wave {
+  position: relative;
+  height: 250px;
+  border-radius: 10px;
+  overflow: hidden;
+  background-image: url("/assets/brand/vela-wave.png");
+  background-size: cover;
+  background-position: center 32%;
+}
+.home-wave::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(0deg, #241d2deb 0%, #241d2d10 90%);
+}
+.home-wave-copy {
+  position: relative;
+  z-index: 1;
+  height: 100%;
+  padding: 22px 24px 24px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+.home-wave-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.home-wave-top .home-eyebrow {
+  margin-bottom: 0;
+}
+.home-wave-top .vela-icon {
+  width: 15px;
+  height: 15px;
+  color: var(--vela-primary);
+}
+.home-wave-open {
+  width: 26px;
+  height: 26px;
+  min-width: 26px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(243, 243, 237, 0.35);
+  background: transparent;
+  color: #f3f3ed;
+  display: grid;
+  place-items: center;
+}
+.home-wave-open .vela-icon {
+  width: 13px;
+  height: 13px;
+  transform: rotate(-135deg);
+}
+@media (hover: hover) and (pointer: fine) {
+  .home-wave-open:hover {
+    background: rgba(243, 243, 237, 0.12);
+  }
+}
+.home-wave-bottom {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+.home-wave-text {
+  min-width: 0;
+}
+.home-wave-title {
+  font-size: 29px;
+  font-weight: 600;
+  letter-spacing: -1.1px;
+  color: #f3f3ed;
+  margin: 0 0 6px;
+}
+.home-wave-subtitle {
+  font-size: 11px;
+  line-height: 1.6;
+  color: #c9bfd0;
+  margin: 0;
+}
+.home-wave-tuned {
+  display: inline-block;
+  margin-top: 10px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(237, 225, 239, 0.32);
+  color: #d9cfe0;
+  font-size: 9px;
+  letter-spacing: 0.4px;
+  white-space: nowrap;
+}
+.home-wave-note {
+  margin: 10px 0 0;
+  font-size: 10px;
+  line-height: 1.6;
+  color: #c9bfd0;
+  max-width: 30ch;
+}
+.home-wave-note p {
+  margin: 0 0 8px;
+  font-size: 10px;
+  line-height: 1.6;
+  color: #c9bfd0;
+}
+.home-wave-error {
+  color: #ef9290;
+}
+.home-wave-play {
+  width: 38px;
+  height: 38px;
+  min-width: 38px;
+  padding: 0;
+  border-radius: 50%;
+  background: #ede1ef;
+  color: #332739;
+  display: grid;
+  place-items: center;
+  transition: transform 0.15s;
+}
+.home-wave-play .vela-icon {
+  width: 16px;
+  height: 16px;
+}
+@media (hover: hover) and (pointer: fine) {
+  .home-wave-play:hover {
+    transform: scale(1.08);
+  }
+}
+.home-wave-play:disabled {
+  background: #4a4152;
+  color: #b7aec1;
+}
+/* No eligible candidate yet: the card stays honest and keeps the rhythm. */
+.home-wave-empty {
+  background-image: none;
+  background: var(--vela-card);
+  border: 1px solid var(--vela-border);
+}
+.home-wave-empty::after {
+  display: none;
+}
+
+@media (max-width: 1100px) {
+  .home-features {
+    grid-template-columns: 1.7fr 1fr;
+    gap: 14px;
+  }
+}
+@media (max-width: 900px) {
+  .home-features {
+    grid-template-columns: 1fr;
+  }
+  .home-feature,
+  .home-wave {
+    height: 255px;
+  }
+  .home-feature-title {
+    font-size: 36px;
+  }
+  .home-wave-title {
+    font-size: 25px;
+  }
+}
+@media (max-width: 760px) {
+  .home-features {
+    grid-template-columns: 1fr;
+    gap: 15px;
+  }
+  .home-feature {
+    height: 288px;
+  }
+  .home-feature-title {
+    font-size: 48px;
+  }
+  .home-wave {
+    height: 160px;
+  }
+  .home-wave-title {
+    font-size: 25px;
+  }
+  .home-wave-tuned {
+    display: none;
+  }
+  .home-wave-play {
+    width: 39px;
+    height: 39px;
+    min-width: 39px;
+  }
+}
+@media (min-width: 1500px) {
+  .home-features {
+    grid-template-columns: 1.95fr 1fr;
+  }
+  .home-feature,
+  .home-wave {
+    height: 330px;
+  }
+  .home-feature-title {
+    font-size: 60px;
+  }
+  .home-wave-title {
+    font-size: 39px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .home-wave-play,
+  .home-feature-listen,
+  .home-feature-arrow,
+  .home-wave-open {
+    transition: none;
+  }
+  .home-wave-play:hover,
+  .home-feature-arrow:hover,
+  .home-wave-open:hover {
+    transform: none;
+  }
+}

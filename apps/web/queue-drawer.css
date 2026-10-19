@@ -1,0 +1,282 @@
+/* TR07a: the right modal queue drawer.
+   A projection of the root order. The drawer never owns audio, the queue or
+   the cursor; it only renders the saved occurrence list and dispatches the
+   root's own actions. This file must stay the last stylesheet the app loads
+   so the drawer rules win over the legacy fixed `.queue-panel` popover. */
+
+dialog.queue-drawer {
+  margin: 0 0 0 auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  max-width: none;
+  width: min(370px, 100vw - 16px);
+  height: 100dvh;
+  max-height: 100dvh;
+  border-radius: 15px 0 0 15px;
+  overflow: hidden;
+  color: var(--text);
+}
+
+/* The plain color is the fallback; the blur is progressive enhancement. */
+dialog.queue-drawer::backdrop {
+  background: #050a07b3;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+dialog.queue-drawer[open] {
+  display: flex;
+}
+
+.queue-panel {
+  /* The legacy popover was a fixed overlay; inside the modal dialog the
+     panel is the dialog's own child, so the fixed offsets are reset. */
+  position: relative;
+  top: auto;
+  right: auto;
+  bottom: auto;
+  left: auto;
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--vela-popover);
+  border-left: 1px solid var(--vela-border);
+  box-shadow: 0 20px 100px #0009;
+  padding: 26px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.queue-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.queue-heading .eyebrow {
+  margin-bottom: 6px;
+}
+
+.queue-context {
+  max-width: 250px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 12px;
+  margin: 0;
+}
+
+.queue-current {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--vela-accent-surface);
+}
+
+.queue-current-meta {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.queue-current-title {
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.queue-current-artist {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.queue-current-state {
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: .4px;
+  text-transform: uppercase;
+}
+
+.queue-transport {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.queue-transport .icon-button.selected {
+  color: var(--accent);
+  background: var(--surface-hover);
+}
+
+.queue-volume {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.queue-volume input {
+  width: 100%;
+  max-width: none;
+}
+
+.queue-divider {
+  width: 100%;
+  height: 1px;
+  margin: 0;
+  border: 0;
+  background: var(--vela-border);
+}
+
+.queue-upcoming-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.queue-upcoming-heading h3 {
+  margin: 0;
+}
+
+.queue-count {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.queue-note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.queue-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.queue-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border-radius: 8px;
+}
+
+.queue-row.current {
+  background: #d3e9a505;
+}
+
+.queue-row-next {
+  outline: 1px solid #d3e9a533;
+}
+
+.queue-track {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+  flex: 1;
+  background: none;
+  color: inherit;
+  text-align: left;
+  padding: 0;
+}
+
+.queue-track-text {
+  min-width: 0;
+}
+
+.queue-track strong,
+.queue-track small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.queue-panel .artwork {
+  width: 38px;
+  height: 38px;
+  min-width: 38px;
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.queue-panel .queue-current-art {
+  width: 57px;
+  height: 57px;
+  min-width: 57px;
+  border-radius: 6px;
+}
+
+.queue-duration {
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.queue-row-badge {
+  font-size: 10px;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.queue-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.queue-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px 0;
+}
+
+.queue-empty p {
+  margin: 0;
+  font-size: 13px;
+}
+
+.queue-clear {
+  width: 100%;
+  margin-top: 0;
+}
+
+.queue-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 4px;
+}
+
+@media (max-width:620px) {
+  dialog.queue-drawer {
+    width: min(370px, 100vw - 16px);
+  }
+}
+
+@media (prefers-reduced-motion:reduce) {
+  * {
+    transition: none !important;
+  }
+}
+
+dialog.queue-drawer :focus-visible {
+  outline: 2px solid #d3e9a5;
+  outline-offset: 2px;
+}

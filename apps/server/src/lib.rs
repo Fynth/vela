@@ -269,6 +269,8 @@ async fn protection(State(state): State<AppState>, req: Request, next: Next) -> 
         "/" | "/index.html"
             | "/style.css"
             | "/now-playing.css"
+            | "/home-editorial.css"
+            | "/queue-drawer.css"
             | "/bootstrap.js"
             | "/player.js"
             | "/vela.svg"

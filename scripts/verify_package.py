@@ -80,6 +80,16 @@ def main():
                 with urllib.request.urlopen(base + '/now-playing.css', timeout=2) as response:
                     assert response.headers.get_content_type() == 'text/css'
                     assert b'.now-playing-dialog' in response.read(1024 * 1024)
+            # Every stylesheet the shipped index links must resolve, carry CSS
+            # and contain its own component rules. A missing copy would leave
+            # the packaged client unstyled instead of failing the check.
+            for name, marker in [('home-editorial.css', b'.home-feature'),
+                                 ('queue-drawer.css', b'.queue-drawer')]:
+                packaged = root / 'dist' / name
+                assert packaged.is_file(), 'Packaged stylesheet missing: ' + name
+                with urllib.request.urlopen(base + '/' + name, timeout=2) as response:
+                    assert response.headers.get_content_type() == 'text/css'
+                    assert marker in response.read(1024 * 1024)
             # Shipped static assets must resolve from the exact allowlist and be
             # byte-identical to the packaged file. An unlisted neighbour must
             # stay denied instead of exposing a directory listing.

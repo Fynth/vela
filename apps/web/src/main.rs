@@ -3,6 +3,7 @@ mod browser_player;
 mod client;
 mod experience;
 mod filters;
+mod home_editorial;
 mod icons;
 mod jobs;
 mod listening;
@@ -12,6 +13,7 @@ mod now_playing;
 mod personal_mixes;
 mod playback;
 mod preferences;
+mod queue_drawer;
 mod radio;
 mod scanner;
 mod session;
@@ -2436,38 +2438,37 @@ fn App() -> Element {
                     }
                 }
                 shell::MobileNavigation {page:page(),administrator:auth.read().as_ref().is_some_and(|a|a.user.is_admin),onnav:actions.navigate}
-                if show_queue() { aside { class: "queue-panel", "aria-label": "Playback queue", div { class: "section-toolbar", div { span { class: "eyebrow", "UP NEXT" } h2 { "Your listening queue" } p {class:"queue-context", "Playing from {context.read().label}"} } button { class: "icon-button", "aria-label": "Close playback queue", onclick: move |_| show_queue.set(false), Icon { name: "close" } } }
-                        div { class: "queue-playback-controls", button { class: "button secondary small", disabled: current.is_none(), onclick: move |_| advance(Command::Previous, playback), "Previous" } button { class: if shuffle() { "button primary small" } else { "button secondary small" }, "aria-pressed": shuffle(), onclick: move |_| shuffle.set(!shuffle()), "Shuffle" } button { class: "button secondary small", onclick: move |_| change_repeat(repeat), "Repeat: {repeat}" }
-                            label { r#for: "queue-volume", "Volume" } input { id: "queue-volume", r#type: "range", min: "0", max: "1", step: "0.01", value: "{volume_value}", oninput: move |e| { if let Ok(value) = e.value().parse::<f64>() { if *muted.peek() { muted.set(false); } change_volume(value,volume); } } }
+                if show_queue() { queue_drawer::QueueDrawer {
+                    queue: queue.read().clone(),
+                    projection: playback.order.read().projection(),
+                    current: Some(index()),
+                    playing: playing(),
+                    requested: requested_play,
+                    context_label: context.read().label.clone(),
+                    shuffle: shuffle(),
+                    repeat: repeat(),
+                    sleep_minutes: sleep_minutes(),
+                    sleep_remaining: sleep_remaining(),
+                    onclose: move |_| show_queue.set(false),
+                    onselect: move |at| select_queued(at, playback),
+                    onremove: move |at| remove_queued(at, playback),
+                    onmoveup: move |at| move_queue_up(at, playback),
+                    onmovedown: move |at| move_queue_down(at, playback),
+                    onclear: move |_| clear_upcoming(playback),
+                    onprevious: move |_| advance(Command::Previous, playback),
+                    onnext: move |_| advance(Command::Next, playback),
+                    ontoggle: move |_| toggle_playback(playback),
+                    onshuffle: move |_| shuffle.set(!shuffle()),
+                    onrepeat: move |_| change_repeat(repeat),
+                    onvolume: move |value| change_volume(value, volume),
+                    onsleep: move |value| {
+                        if value == "0" && sleep_minutes.peek().as_str() != "0" {
+                            notice.set("Sleep timer canceled.".into());
                         }
-                        if shuffle() { p { class: "muted", "Shuffle is on. The list keeps your saved order; Play next requests take priority." } }
-                        if queue.read().is_empty() { p { class: "muted", "Choose a track to start your queue." } }
-                        for (at, track) in queue.read().iter().cloned().enumerate() { {
-                            let last = at + 1 >= queue.read().len();
-                            let is_current = at == index();
-                            rsx! { div { class: if is_current { "queue-row current" } else { "queue-row" }, key: "{at}-{track.id}", button { class: "queue-track", "aria-label":format!("{} queue item {}: {}",if is_current && requested_play {"Pause"}else{"Play"},at+1,track.title), onclick: move |_| select_queued(at, playback), Art { track: track.clone() } div { strong { "{track.title}" } small { "{track.artist}" } } }
-                                button { class: "icon-button", "aria-label": "Move track up", title: if at == 0 { "Already the first queued track." } else { "Move this occurrence one place earlier in the saved queue." }, disabled: at == 0, onclick: move |_| move_queue_up(at, playback), Icon { name: "up" } }
-                                button { class: "icon-button", "aria-label": "Move queue occurrence {at + 1} down", title: if last { "Already the last queued track." } else { "Move this occurrence one place later in the saved queue." }, disabled: last, onclick: move |_| move_queue_down(at, playback), MoveDownIcon {} }
-                                button { class: "icon-button", "aria-label": "Remove queued track", title: if is_current { "The playing occurrence cannot be removed because that would stop the audio; remove later rows with Clear upcoming tracks instead." } else { "Remove this occurrence from the queue." }, "aria-describedby": if is_current { "queue-current-remove-note" } else { "" }, disabled: is_current, onclick: move |_| remove_queued(at, playback), Icon { name: "close" } }
-                                if is_current { span { id: "queue-current-remove-note", class: "sr-only", "The playing occurrence cannot be removed because that would stop the audio; remove later rows with Clear upcoming tracks instead." } }
-                            } }
-                        } }
-                        if !queue.read().is_empty() { button { class: "button secondary", disabled: !has_upcoming(queue.read().len(), index()), title: if !has_upcoming(queue.read().len(), index()) { "No upcoming tracks: everything queued is at or before the current occurrence." } else { "Remove only the queued occurrences after the current one. The playing track and earlier rows stay." }, onclick: move |_| clear_upcoming(playback), "Clear upcoming tracks" } }
-                        div { class: "inline-form sleep-timer",
-                            label { r#for: "sleep-timer", "Sleep timer" }
-                            select { id: "sleep-timer", value: "{sleep_minutes}", onchange: move |event| set_sleep_timer(event.value(), sleep_minutes, sleep_remaining, sleep_generation, playback, notice),
-                                option { value: "0", "Off" }
-                                option { value: "5", "5 minutes" }
-                                option { value: "15", "15 minutes" }
-                                option { value: "30", "30 minutes" }
-                                option { value: "60", "60 minutes" }
-                            }
-                            if sleep_remaining() > 0 {
-                                small { role: "status", "Pauses in {seconds(sleep_remaining() as f64)}" }
-                                button { class: "text-button", onclick: move |_| { let next = sleep_generation.peek().wrapping_add(1); sleep_generation.set(next); sleep_minutes.set("0".into()); sleep_remaining.set(0); notice.set("Sleep timer canceled.".into()); }, "Cancel sleep timer" }
-                            }
-                        }
-                    } }
+                        set_sleep_timer(value, sleep_minutes, sleep_remaining, sleep_generation, playback, notice);
+                    },
+                    onchoose: move |_| { show_queue.set(false); actions.navigate.call("library".into()); },
+                } }
                 if *now.open.read() {
                     if let Some(track)=current.clone(){now_playing::NowPlaying {
                         track,context:context(),playing:playing(),requested:requested_play,position:position(),duration:duration(),volume:volume_value,shuffle:shuffle(),repeat:repeat(),status:playback_status(),error:(now.error)(),favorite_busy:(now.busy)(),queue,cursor:index(),actions:now_actions,

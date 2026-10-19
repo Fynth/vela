@@ -2783,8 +2783,53 @@ async fn static_assets_never_serve_arbitrary_database_files() {
 }
 
 #[tokio::test]
-async fn brand_assets_are_exactly_allowlisted_and_never_expose_their_folder() {
+async fn shipped_stylesheets_are_allowlisted_and_unlisted_neighbours_stay_denied() {
     let app = TestApp::new().await;
+    tokio::fs::create_dir_all(&app.state.config.web_dir)
+        .await
+        .unwrap();
+    for name in ["style.css", "now-playing.css", "home-editorial.css", "queue-drawer.css"] {
+        tokio::fs::write(
+            app.state.config.web_dir.join(name),
+            format!("/* {name} */.marker{{color:red}}").as_bytes(),
+        )
+        .await
+        .unwrap();
+    }
+    tokio::fs::write(
+        app.state.config.web_dir.join("private.css"),
+        b"private fixture bytes",
+    )
+    .await
+    .unwrap();
+    for name in ["style.css", "now-playing.css", "home-editorial.css", "queue-drawer.css"] {
+        let response = app
+            .client
+            .get(format!("{}/{name}", app.base))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "{name} must be served");
+        assert!(
+            response.headers()["content-type"]
+                .to_str()
+                .unwrap()
+                .starts_with("text/css")
+        );
+    }
+    // A neighbour stylesheet outside the allowlist stays denied.
+    let denied = app
+        .client
+        .get(format!("{}/private.css", app.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(denied.status(), StatusCode::NOT_FOUND);
+    assert!(!denied.text().await.unwrap().contains("private fixture"));
+}
+
+#[tokio::test]
+async fn brand_assets_are_exactly_allowlisted_and_never_expose_their_folder() {    let app = TestApp::new().await;
     let brand = app.state.config.web_dir.join("assets/brand");
     tokio::fs::create_dir_all(&brand).await.unwrap();
     tokio::fs::write(brand.join("vela-coast.png"), b"coast fixture bytes")
@@ -2852,9 +2897,7 @@ async fn brand_assets_are_exactly_allowlisted_and_never_expose_their_folder() {
 async fn raw_request(base: &str, path: &str) -> String {
     let authority = base.trim_start_matches("http://");
     let mut stream = tokio::net::TcpStream::connect(authority).await.unwrap();
-    let request = format!(
-        "GET {path} HTTP/1.1\r\nHost: {authority}\r\nConnection: close\r\n\r\n"
-    );
+    let request = format!("GET {path} HTTP/1.1\r\nHost: {authority}\r\nConnection: close\r\n\r\n");
     stream.write_all(request.as_bytes()).await.unwrap();
     let mut response = String::new();
     stream.read_to_string(&mut response).await.unwrap();
