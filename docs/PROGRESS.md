@@ -1,5 +1,32 @@
 # Verified progress
 
+## Product/settings/native expansion specification2026-10-19 — documentation only
+
+Prepared the English [Product Expansion plan](PLANS/2026-10-19/PRODUCT_EXPANSION/README.md)
+at source anchor6fa2346, incorporating the later native-client request. It contains
+320 feature implementation briefs,120 proposed setting contracts,27 dependency-ordered
+EP packages,30 user journeys, detailed Settings/scale architecture, ART/SCALE/SET
+acceptance, platform audio/cache/prefetch/optimization delivery and general/native
+agent prompts. These are proposals, not shipped features.
+
+Inspected actual source/settings/config/cache/artwork/auth/tests and current dated
+docs; surveyed selected primary product/platform/HTTP/accessibility sources and
+loaded Better Design principles/review rules. Native ui.rs renders neutral covers
+despite existing artwork_id and the authorized server art route; the plan prioritizes
+the missing native image pipeline rather than inventing a tag-extraction failure.
+Existing complete-file cache is retained; actual-next prefetch, progressive integrity
+and pinned offline copies remain separate contracts.
+
+The three pre-existing dirty native launch/QA files and unrelated prompt.txt are
+preserved. No agents, application-code/CSS/asset/dependency/schema/data/runtime changes,
+Cargo/browser/native test runs, new benchmark numbers, deployment or external publication
+were performed. Earlier verification remains historical. Only document integrity/
+preservation checks and scoped proposed-copy review apply; package README records limits.
+
+Next implementation, after a new implementation assignment: native authorized artwork
+plus typed device Settings/scale; then native restore/origin-safe offline, actual-next
+preparation and measured native/platform completion in the specified dependency order.
+
 ## Row transport and frameless Hyprland repair2026-10-19
 
 Evolved actual baseline91867f2 after the newer Better Design implementation request.

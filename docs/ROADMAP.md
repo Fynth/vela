@@ -1,5 +1,20 @@
 # Authoritative backlog
 
+## English product/settings/native expansion2026-10-19 — proposed
+
+The documentation-only request is addressed by the
+[Product Expansion plan](PLANS/2026-10-19/PRODUCT_EXPANSION/README.md):320 feature briefs,
+120 setting contracts,27 delivery packages and explicit native/QA gates. It consolidates
+earlier outcomes without adding their feature counts together or claiming implementation.
+
+Urgent next authorized implementation: native covers from the private artwork API,
+searchable native/web Settings and device App size with HiDPI/reset/persistence.
+Follow the [native master plan/prompt](PLANS/2026-10-19/PRODUCT_EXPANSION/14_NATIVE_CROSS_PLATFORM_MASTER_PLAN.md)
+and ART/SCALE/SET acceptance; then native restore/origin-safe offline, cache controls,
+single-flight/actual-next prefetch, measured optimization and actual Android/iOS/desktop
+engines. No new source/runtime capability or application verification follows from this
+entry. Existing implemented slices below retain their evidence.
+
 ## Implemented interaction and Hyprland repair2026-10-19
 
 Current-row Play/Pause preserves source/position/order in web/Linux native; explicit

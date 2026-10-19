@@ -1,5 +1,12 @@
 # Current state index
 
+Latest2026-10-19 English [product/settings/native plan](PLANS/2026-10-19/PRODUCT_EXPANSION/README.md)
+is documentation only:320 feature briefs/120 settings plus native artwork/cache/
+prefetch/platform delivery and copyable agent mandates. Inspection anchor6fa2346 with
+three preserved dirty launch/QA files. No implementation/schema/runtime upgrade or
+new application test result is implied. Use its evidence limits and current PROGRESS
+before a future implementation task.
+
 Latest source-only interaction repair2026-10-19 (baseline91867f2): row pause/resume,
 pending intent, per-entry native playback, route-independent public transport and
 frameless Linux behavior are recorded in [review](UX_INTERACTION_REVIEW_2026-10-19.md)
