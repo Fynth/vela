@@ -94,6 +94,18 @@ if (config.windowOnly) {
     await capture('library-dark');
     dioxus.send({ok:true, checks, viewportEvidence:[{actualWidth:innerWidth,actualHeight:innerHeight,mode:'normal tiled, no resize requests'}]});
   } catch(error) { dioxus.send({ok:false, checks, failure:String(error.message)}); }
+} else if (config.sessionPhase === 'fps') {
+  try {
+    await wait(() => button('Sign in') && !button('Sign in').disabled, 'Sign-in ready');
+    await new Promise(r => setTimeout(r, 6000));
+    const sample = await new Promise(resolve => {
+      const times=[]; let last=performance.now(); const start=last;
+      function tick(now){ times.push(now-last); last=now; if(now-start<3000) requestAnimationFrame(tick); else resolve({frames:times.length,elapsed:now-start,intervals:times}); }
+      requestAnimationFrame(tick);
+    });
+    const fps = (sample.frames*1000/sample.elapsed).toFixed(1);
+    dioxus.send({ok:true, checks:[`rAF ${fps} fps over ${sample.elapsed.toFixed(0)}ms`, `dpr=${devicePixelRatio} viewport=${innerWidth}x${innerHeight} screen=${screen.width}x${screen.height}`]});
+  } catch(error) { dioxus.send({ok:false, checks, failure:String(error.message)}); }
 } else if (config.sessionPhase === 'resume') {
   try {
     await wait(() => button('Continue saved session') && !button('Continue saved session').disabled, 'Saved session option');

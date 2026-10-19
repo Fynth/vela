@@ -260,6 +260,7 @@ fn main() {
             Config::new()
                 .with_window(window)
                 .with_menu(None)
+                .with_disable_dma_buf_on_wayland(false)
                 .with_navigation_handler(|_| false),
         )
         .launch(Harness);

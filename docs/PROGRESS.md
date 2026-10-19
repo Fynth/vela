@@ -1636,6 +1636,22 @@ cards; exact `background-color` transitions on track rows; neutral 1px pure-blac
 Web rebuilt; Chromium41 passed/1 live-import skip (2.1m). Native CSS was not opened in
 a real window in this pass.
 
+## Native 144 Hz diagnosis — cap attributed to WebKitGTK (2026-10-19)
+
+User reports ~50 Hz. Measured with a real WebKitGTK window on the 3440×1440@144
+DP-1: `requestAnimationFrame` is **72.3 fps** (focused, native Wayland, DMABUF
+enabled), and a bare WebKitGTK page without Dioxus measures **71.8 fps**; a bare
+GTK tick callback measures **60–67 fps**. Dioxus by default forces
+`GDK_BACKEND=x11` and `WEBKIT_DISABLE_DMABUF_RENDERER=1` on Wayland; source now sets
+`with_disable_dma_buf_on_wayland(false)` in both the app and QA driver, so the app
+uses the native Wayland surface with DMABUF. This removes the app-imposed XWayland/
+software path, but the remaining ~72 fps cap reproduces outside Dioxus and cannot be
+raised by app CSS/code: it is in the GTK3/WebKitGTK compositor stack. Reaching true
+144 Hz requires a GTK4/WebKitGTK 6 host (not supported by current Dioxus desktop) or
+a Chromium-based shell. `WEBKIT_FORCE_COMPOSITING_MODE`, `WEBKIT_DISABLE_DMABUF_RENDERER=0`
+and vblank env variants produced the same 72.3 fps. Full native peer/session QA
+passes with the Wayland flag (`target/checks/wayland-dmabuf/`). No claim of 144 Hz.
+
 ## Native chrome cleanup — verified (2026-10-19)
 
 Removed the GTK menu bar (`Config::with_menu(None)`) so no Window/Edit/Help strip
