@@ -1511,9 +1511,15 @@ touching folder/playlist controls. Cause: `.native-content` combined
 `max-width:1600px;margin:auto` with `padding-left:calc(sidebar+40px)`, so the
 centered 1600 box plus the sidebar inset produced a double offset; and native
 `inline-form` had no flex/gap rules at all (web-only), so inputs and buttons
-stacked flush. Fix: content is now left-anchored (`max-width:none;margin:0`) and
+stacked flush. Fix: native and web content are now left-anchored (`max-width:none;margin:0`) and
 native `.inline-form` mirrors the web flex row with `gap:9px` and 12px bottom
-spacing. `target/release/vela-desktop` rebuilt. Wide-window visual verification is
+spacing. The same double-offset existed in web `.main-content` (sidebar padding +
+`margin:auto`) and was removed. `target/release/vela-desktop` rebuilt. A Playwright audit of the user account at 320×640, 375×812, 768×1024,
+1280×800, 1920×1080, 2288×937 and 3440×1440 over Home/Search/Library/Albums/
+Artists/Favorites/Playlists/Listening history/Jobs/Network/Settings found zero
+horizontal overflow or page errors (77 combinations) against an isolated restore
+of the user data with the rebuilt assets; screenshots in
+`target/checks/ui-audit/`. Wide-window NATIVE visual verification is
 NOT_RUN (the existing native QA window is 1280×840 and no credentials were used
 to open the signed-in screen).
 
