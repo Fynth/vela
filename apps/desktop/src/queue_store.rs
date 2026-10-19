@@ -5,11 +5,7 @@
 //! normal root source path. Only canonical IDs, queue order, current occurrence,
 //! position/modes and the non-secret playback context are stored.
 use serde::{Deserialize, Serialize};
-use std::{
-    fs,
-    io::Write,
-    path::{Path, PathBuf},
-};
+use std::{fs, io::Write, path::PathBuf};
 use vela_domain::Track;
 
 const VERSION: u8 = 1;
@@ -31,6 +27,7 @@ pub struct QueueSnapshot {
 }
 
 impl QueueSnapshot {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         origin: &str,
         account_id: &str,
