@@ -1494,3 +1494,13 @@ The QA contributor ran1,800 native authenticated loopback job-history measuremen
 Release hardening reduced metadata-only dependency notice gaps from12 to6 using actual shipped nested licenses, reviewed r-efi AUTHORS grants, exact-commit wasite licenses and byte-proven winapi root texts. The generator verifies cached SHA256 provenance and rejects tampered/missing/oversized texts. Four new Python checks plus the five backup regressions passed. The six remaining packages have no full grant at their inspected packaged VCS commits; pinned archive evidence is retained rather than substituting generic license text. No external redistribution was performed.
 
 The principal independently reran the retained winapi provenance helper against the pinned public tree: all2809 authored files matched, with no unmatched file. The packaged notice generator completed offline with all cached hashes verified and exactly the six documented remaining text gaps. Final package logs: target/checks/jobs-package.log and jobs-package-verify.log; final E2E: jobs-browser-release.log; Rust/Clippy/build/tooling/shutdown evidence uses the jobs-* prefix. The development listener returned health0.4.0 and setup remained unclaimed after schema7 upgrade.
+## better-ui polish — CSS verified (2026-10-19)
+
+Applied the better-ui findings: `:active:not(:disabled){transform:scale(.96)}` and
+explicit `background-color/filter/transform` transitions for web/native buttons, icon
+buttons and the native play toggle; `scale(.98)` for clickable playlist/listening
+cards; exact `background-color` transitions on track rows; neutral 1px pure-black/white
+`--image-outline` on artwork images; unused transform removed from card transitions.
+Web rebuilt; Chromium41 passed/1 live-import skip (2.1m). Native CSS was not opened in
+a real window in this pass.
+
