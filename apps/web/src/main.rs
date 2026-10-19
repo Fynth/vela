@@ -1647,19 +1647,19 @@ fn App() -> Element {
     let current = queue.read().get(*index.read()).cloned();
     let requested_play = engine.peek().wants_play();
     let heading = match page.read().as_str() {
-        "albums" => "Let the whole record play",
-        "artists" => "The voices in your collection",
-        "favorites" => "Made for repeat",
+        "albums" => "Albums",
+        "artists" => "Artists",
+        "favorites" => "Favorites",
         "home" => "Your next great listen",
-        "search" => "Find your next listen",
-        "imports" => "Bring your music home",
-        "jobs" => "Good things in the making",
-        "network" => "Shared by choice",
-        "playlists" => "Every mood, a collection",
-        "settings" => "Your listening space",
-        "history" => "A record of your listening",
-        "radio" => "Let the music lead",
-        _ => "Your music. Your space.",
+        "search" => "Search",
+        "imports" => "Add music",
+        "jobs" => "Jobs",
+        "network" => "Connected music",
+        "playlists" => "Playlists",
+        "settings" => "Settings",
+        "history" => "Listening history",
+        "radio" => "Track radio",
+        _ => "Your library",
     };
 
     rsx! {
@@ -1711,21 +1711,18 @@ fn App() -> Element {
                     }
                     if !error().is_empty() { div { class: "alert error", role: "alert", span { "{error}" } button { "aria-label": "Dismiss error", onclick: move |_| error.set(String::new()), Icon { name: "close" } } } }
                     if !notice().is_empty() { div { class: "alert success", role: "status", span { "{notice}" } button { "aria-label": "Dismiss notification", onclick: move |_| notice.set(String::new()), Icon { name: "close" } } } }
-                    if page() != "home" {div { class: "page-heading", span { class: "eyebrow", "LISTEN A LITTLE LONGER" } h1 { "{heading}" } }}
+                    if page() != "home" {div { class: "page-heading", h1 { "{heading}" }
+                        if page() == "library" {
+                            if !tracks.read().is_empty() { button { class: "button primary", onclick: move |_| play_queue(tracks.peek().clone(), 0, view_context(page,catalog,selected_playlist), playback), Icon {name:"play"} "Play these tracks" } }
+                            else { button { class: "button primary", onclick: move |_| add_music.set(true), "+ Add your first album" } }
+                        }
+                    }}
                     if page() == "home" {experience::Home {auth,revision:facets_revision,actions, personal_mixes::PersonalMixes {auth,revision:facets_revision,view:listening_view,actions} listening::History {auth,view:listening_view,actions,compact:true}}}
                     if page() == "search" {experience::Search {auth,revision:facets_revision,actions}}
                     if page() == "history" {listening::History {auth,view:listening_view,actions,compact:false}}
                     if page() == "radio" {radio::Radio {auth,seed:radio_seed,actions}}
 
                     if page() == "library" || page() == "favorites" {
-                        if page() == "library" {
-                            section { class: "library-banner", div { span { class: "eyebrow", "BUILT AROUND YOU" } h2 { "A collection worth" br {} "getting lost in." } p { "Every album, every favorite. No noise, just your music." }
-                                if !tracks.read().is_empty() { button { class: "button cream", onclick: move |_| play_queue(tracks.peek().clone(), 0, view_context(page,catalog,selected_playlist), playback), Icon {name:"play"} "Play these tracks" } }
-                                else { button { class: "button cream", onclick: move |_| add_music.set(true), "+ Add your first album" } }
-                            } div { class: "banner-record", div { "v" } }
-                            div { class: "banner-caption", "OWN YOUR SOUND" }
-                            }
-                        }
                         section { class: "library-section",
                             div { class: "section-toolbar", div { h2 { if page() == "favorites" { "Your favorites" } else { "In your collection" } }
                                     if let Some(value) = stats.read().as_ref() { p { "{value.tracks} tracks · {value.albums} albums · {value.artists} artists" } }

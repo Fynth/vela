@@ -1,5 +1,20 @@
 # Authoritative backlog
 
+## Implemented contrast/listening-layout slice2026-10-19
+
+The newer Better Design request authorizes implementation after the earlier MD-only
+planning task. Source UI now has brighter original mint contrast, readable labels,
+one native shell grid, explicit track-action columns,44px main targets, compact
+native create disclosures and a scrolling web sidebar. Existing player/auth/media
+boundaries remain. [Review and exact evidence](DESIGN_REVIEW_2026-10-19.md).
+
+This advances the everyday listening/design slice, not the entire Player Reboot
+plan or Spotify parity. Next: authorized native artwork; broader accessibility/state
+coverage; progressive-source/prefetch design with integrity and cancellation tests;
+device queue/position synchronization and acknowledged handoff. Keep those distinct
+from the complete-file cache already implemented before this UI pass. No runtime
+upgrade, package replacement or public deployment is implied by source verification.
+
 ## User-prioritized player reboot2026-10-19 — planning only
 
 The user's Hyprland/playback screenshots and explicit MD-only request are addressed

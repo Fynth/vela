@@ -1,5 +1,12 @@
 # Current state index
 
+Newer source-only UI increment2026-10-19: original mint high-contrast web/Linux
+native design, shell/control fixes and real fixture regression evidence are recorded
+in [the design review](DESIGN_REVIEW_2026-10-19.md) and latest PROGRESS/QA_EVIDENCE.
+Baseline0170ec5, workspace0.12.6. This did not upgrade the frozen runtime or replace
+release archives; the older dated source/runtime observations below keep their own
+scope and are not evidence of today's installed desktop appearance.
+
 Updated2026-10-19 (documentation reconciliation, docs-only). This page states **which
 state a claim refers to**. It does not re-verify code, tests, browser/native journeys
 or the live service; it indexes existing evidence and records the read-only

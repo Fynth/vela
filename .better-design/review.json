@@ -1,0 +1,143 @@
+{
+  "date": "2026-10-19",
+  "sourceBaseline": "0170ec5",
+  "product": "Vela Music",
+  "scope": "Original Vela contrast and listening layout, existing Dioxus web/Linux native app",
+  "designSystem": "Existing Vela semantic tokens; bright mint/dark and green/light; no catalog kit installed",
+  "principles": [
+    "color/high contrast",
+    "visual hierarchy",
+    "navigation/responsive keyboard flows"
+  ],
+  "comprehension": [
+    {
+      "screen": "vela-copy-library",
+      "result": {
+        "verdict": "pass",
+        "findingCount": 0,
+        "findings": [],
+        "words": 8,
+        "estimatedExplainSeconds": 3
+      }
+    },
+    {
+      "screen": "vela-copy-playlists",
+      "result": {
+        "verdict": "pass",
+        "findingCount": 0,
+        "findings": [],
+        "words": 13,
+        "estimatedExplainSeconds": 10
+      }
+    },
+    {
+      "screen": "vela-copy-web",
+      "result": {
+        "verdict": "pass",
+        "findingCount": 0,
+        "findings": [],
+        "words": 11,
+        "estimatedExplainSeconds": 7
+      }
+    }
+  ],
+  "spacing": [
+    {
+      "platform": "web",
+      "widths": [
+        390,
+        1440,
+        1728
+      ],
+      "summary": {
+        "critical": 0,
+        "serious": 0,
+        "moderate": 10,
+        "total": 10
+      },
+      "remaining": "10 moderate findings: inherited off-scale spacing and2px volume-group gap drift"
+    },
+    {
+      "platform": "Linux native WebKitGTK via X11",
+      "widths": [
+        640,
+        1440,
+        1728
+      ],
+      "summary": {
+        "critical": 0,
+        "serious": 0,
+        "moderate": 4,
+        "total": 4
+      },
+      "remaining": "4 moderate inherited off-scale findings;390px native outside supported test scope"
+    }
+  ],
+  "evidence": {
+    "web": "target/checks/design-contrast-chromium-final/matched/",
+    "native": "target/checks/design-contrast-native-final-evidence/",
+    "finalContrast": "target/checks/design-contrast-all-rows-{chromium,firefox}/"
+  },
+  "limits": [
+    "Text comprehension is not a user study",
+    "Geometry score is not visual approval",
+    "No screen reader, native Wayland tiling, physical sound or mobile verification",
+    "In-app browser unavailable; existing Playwright CLI used",
+    "review-ui-code unavailable; manual source review and executable tests used",
+    "No production data, running runtime or public deployment changed"
+  ],
+  "verification": {
+    "rust": {
+      "passed": 291,
+      "failed": 0,
+      "ignored": 3
+    },
+    "chromium": {
+      "passed": 42,
+      "skipped": 1,
+      "minutes": 2.3
+    },
+    "firefox": {
+      "passed": 42,
+      "skipped": 1,
+      "minutes": 2.6
+    },
+    "finalDesignOnly": {
+      "chromiumSeconds": 5.8,
+      "firefoxSeconds": 7.2,
+      "passed": true,
+      "widths": [
+        320,
+        390,
+        1440,
+        1728
+      ],
+      "readingsPerThemePerEngine": 38,
+      "minima": {
+        "dark": 6.714,
+        "light": 4.536
+      },
+      "scope": "Every visible match of selected library/active navigation/primary button/player text selectors; not a global WCAG audit"
+    },
+    "native": {
+      "checks": 74,
+      "captures": 10,
+      "actualWidths": [
+        640,
+        1280,
+        1440,
+        1728
+      ],
+      "pngDimensionsMatch": true,
+      "audioOutput": "owned null sink"
+    },
+    "pythonPassed": 22,
+    "fmt": true,
+    "strictClippy": {
+      "workspace": true,
+      "wasmWeb": true,
+      "nativeQaExample": true
+    },
+    "builds": "dev WASM, native desktop, opt-in QA example; no release package"
+  }
+}

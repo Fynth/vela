@@ -58,7 +58,7 @@ test('first-run setup, real FLAC upload, artwork, decode, favorites and safe sha
   await page.getByRole('button', { name: 'Create your music space →', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Make room for your first listen', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Library', exact: true }).first().click();
-  await expect(page.getByRole('heading', { name: 'Your music. Your space.' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Your library', exact: true })).toBeVisible();
   await page.getByRole('button', { name: '+ Add music', exact: true }).first().click();
   await page.locator('#audio-files').setInputFiles(fixture);
   await page.getByRole('button', { name: 'Upload to my library', exact: true }).click();

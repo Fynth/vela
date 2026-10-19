@@ -57,6 +57,8 @@ fn Harness() -> Element {
                     if !matches!(
                         name.as_str(),
                         "library-dark"
+                            | "library-wide-dark"
+                            | "library-ultrawide-dark"
                             | "queue-light"
                             | "compact-light"
                             | "favorites-dark"
@@ -69,6 +71,12 @@ fn Harness() -> Element {
                     }
                     let output = report.with_file_name(format!("native-{name}.png"));
                     let pid = std::process::id().to_string();
+                    let viewport = &message["layout"]["viewport"];
+                    let scale = viewport["devicePixelRatio"].as_f64().unwrap_or(1.0);
+                    let expected = (
+                        (viewport["width"].as_f64().unwrap_or(0.0) * scale).round() as u32,
+                        (viewport["height"].as_f64().unwrap_or(0.0) * scale).round() as u32,
+                    );
                     let capture = tokio::task::spawn_blocking(move || {
                         let windows = std::process::Command::new("xdotool")
                             .args(["search", "--onlyvisible", "--pid", &pid])
@@ -84,10 +92,21 @@ fn Harness() -> Element {
                         if !status.success() {
                             return Err("Screenshot failed");
                         }
+                        // X11 capture tools can silently crop a partly off-screen
+                        // window. A cropped image is not full-viewport evidence.
+                        let png = std::fs::read(&output).map_err(|_| "Screenshot unreadable")?;
+                        if png.len() < 24 || &png[..8] != b"\x89PNG\r\n\x1a\n" {
+                            return Err("Screenshot is not PNG");
+                        }
+                        let width = u32::from_be_bytes(png[16..20].try_into().unwrap());
+                        let height = u32::from_be_bytes(png[20..24].try_into().unwrap());
+                        if (width, height) != expected {
+                            return Err("Screenshot was cropped or has an unexpected scale");
+                        }
                         Ok::<_, &str>(output)
                     })
                     .await;
-                    captures.push(json!({"name":name,"passed":matches!(capture,Ok(Ok(_)))}));
+                    captures.push(json!({"name":name,"passed":matches!(capture,Ok(Ok(_))),"layout":message["layout"]}));
                     let _ = eval.send(json!({"continue":true}));
                 }
                 Ok(Ok(message)) if message["handshake"].is_string() => {
@@ -173,6 +192,9 @@ fn resize_owned_window(width: u64, height: u64) {
         let _ = std::process::Command::new("xdotool")
             .args(["windowsize", id, &width.to_string(), &height.to_string()])
             .output();
+        let _ = std::process::Command::new("xdotool")
+            .args(["windowmove", id, "0", "0"])
+            .output();
     }
     std::thread::sleep(std::time::Duration::from_millis(700));
 }
@@ -197,6 +219,7 @@ fn main() {
         .with_cfg(
             Config::new()
                 .with_window(window)
+                .with_menu(None)
                 .with_navigation_handler(|_| false),
         )
         .launch(Harness);

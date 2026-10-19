@@ -1,5 +1,27 @@
 # Verified0.12.0 package and preserved runtime checkpoint
 
+## Current-source Better Design UI — executed2026-10-19
+
+Source baseline0170ec5, workspace0.12.6; separate from the historical packages below.
+Exact changes/commands: [design review](DESIGN_REVIEW_2026-10-19.md).
+
+| Check | Executed evidence | Scope/status |
+| --- | --- | --- |
+| DESIGN01 | Real isolated Rust server; committed FLAC+generated PCM upload; same authoritative browser audio/source through Home→Library; pause; sidebar group geometry and Settings reachability at1440×720; selected rendered text/primary-control contrast≥4.5 and fonts≥12; player/seek targets≥44; no horizontal overflow; real Home/Library/Playlists screenshots in both themes | PASS in Chromium and Firefox; web320/390/1440/1728; no global contrast/screen-reader claim |
+| Full browser regression | Chromium42 pass/1 live-import skip2.3m; Firefox42 pass/1 live-import skip2.6m | `target/checks/design-contrast-{chromium,firefox}-final/run.log`; existing security/media/request-order tests retained |
+| Strengthened DESIGN01 contrast | Every visible match of the selected selectors, including current/ordinary tracks;38 readings/theme/engine at320/390/1440/1728; dark minimum6.714:1, light4.536:1 | Separate Chromium5.8s/Firefox7.2s PASS; `target/checks/design-contrast-all-rows-{chromium,firefox}/`; this is not an all-screen WCAG audit |
+| Native real-window fixture |74 checks,10 complete screenshots, actual DOM widths640/1280/1440/1728, navigation/source/position continuity, queue/favorite/playlist/folder/group/public peer/offline flows,0 abandoned originals | `target/checks/design-contrast-native-final-evidence/report.json`; PASS; X11/XWayland/WebKitGTK/Rodio null sink, not physical sound/native-Wayland certification |
+| Better Design review |3 text comprehension PASS; web0 critical/0 serious/10 moderate, native0 critical/0 serious/4 moderate spacing findings | `.better-design/review.json`; original own tokens, UI/UX/review rules; native390 unsupported scope, inherited moderate spacing retained |
+| Rust/tooling |291 passed/0 failed/3 ignored; fmt; strict workspace and WASM Clippy; native-qa example Clippy; native/WASM dev builds;22 Python tests; JS syntax | Exact logs under `target/checks/design-contrast-*`; builds/platform evidence remain distinct |
+
+G01–G24 mapping: this increment reinforces G05 browser queue/player continuity and
+the320px/theme/keyboard subset of G23. G23 remains PARTIAL: no screen-reader,
+localization or complete reduced-motion/platform certification was added. Native
+and public-catalog checks retain their separately documented scope; no handoff,
+rooms, mobile or whole-product completion follows. No schema/data/runtime migration
+was needed. Initial failed harness/session/selector/capture runs are preserved and
+their corrections explained in the review.
+
 Documentation reconciliation2026-10-19 (docs-only): current deployed server baseline
 is the frozen0.12.6/schema12 runtime and the current native package is0.12.6; the
 0.12.0–0.12.5 sections are dated historical checkpoints, not current state. Golden

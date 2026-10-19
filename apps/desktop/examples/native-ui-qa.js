@@ -6,6 +6,7 @@ window.addEventListener('unhandledrejection', event => runtimeErrors.push(String
 const originalConsoleError = console.error.bind(console);
 console.error = (...args) => { runtimeErrors.push(args.map(String).join(' ')); originalConsoleError(...args); };
 const checks = [];
+const viewportEvidence = [];
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const wait = async (test, name, timeout = 18000) => {
   const end = performance.now() + timeout;
@@ -17,11 +18,37 @@ const el = selector => document.querySelector(selector);
 const button = name => [...document.querySelectorAll('button')].find(node => (node.getAttribute('aria-label') || node.textContent).trim() === name && node.getClientRects().length);
 const click = async name => { await wait(() => button(name) && !button(name).disabled, `button: ${name}`); button(name).click(); await sleep(100); };
 const pageText = selector => [...document.querySelectorAll(selector)].map(node => node.textContent.trim());
-const fill = (selector, value, event = 'input') => { const input = el(selector); if (!input) throw new Error(`Missing input ${selector}`); input.value = value; input.dispatchEvent(new Event(event, { bubbles:true })); };
+const fill = (selector, value, event = 'input') => { const input = el(selector); if (!input) throw new Error(`Missing input ${selector}`); const disclosure = input.closest('details'); if(disclosure && !disclosure.open) disclosure.querySelector('summary').click(); input.value = value; input.dispatchEvent(new Event(event, { bubbles:true })); };
 const phase = () => el('.native-player')?.dataset.audioPhase;
 const position = () => Number(el('#native-seek')?.value || 0);
 const generation = () => el('.native-player')?.dataset.audioGeneration;
-const capture = async name => { await sleep(200); dioxus.send({capture:name}); await dioxus.recv(); };
+const layoutSnapshot = name => {
+  // Inspect the product, excluding Dioxus's off-canvas development/HMR chrome.
+  const nodes = [...document.querySelectorAll('.native-app,.native-app *')].filter(node => {
+    const style = getComputedStyle(node), rect = node.getBoundingClientRect();
+    return !node.closest('svg,.sr-only') && style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+  }).slice(0, 1500);
+  const ids = new Map(nodes.map((node, at) => [node, node.id ? `#${node.id}` : `native-${at}`]));
+  const number = value => parseFloat(value) || 0;
+  const edges = (style, prefix) => Object.fromEntries(['top', 'right', 'bottom', 'left'].map(edge => [edge, number(style[prefix + edge[0].toUpperCase() + edge.slice(1)])]));
+  return {
+    name, title: document.title, viewport: {width: innerWidth, height: innerHeight, devicePixelRatio},
+    elements: nodes.map(node => {
+      const rect = node.getBoundingClientRect(), style = getComputedStyle(node), tag = node.tagName.toLowerCase();
+      const interactive = ['button', 'input', 'select', 'summary', 'a'].includes(tag);
+      return {id: ids.get(node), parentId: ids.get(node.parentElement), tag, role: node.getAttribute('role') || undefined,
+        label: (node.getAttribute('aria-label') || ((interactive || /^h[1-6]$/.test(tag)) ? node.textContent : '')).trim().slice(0, 80) || undefined,
+        interactive, inputType: tag === 'input' ? node.type : undefined,
+        rect: {x: rect.x, y: rect.y, width: rect.width, height: rect.height},
+        clientWidth: node.clientWidth, clientHeight: node.clientHeight, scrollWidth: node.scrollWidth, scrollHeight: node.scrollHeight,
+        style: {display: style.display, position: style.position, flexDirection: style.flexDirection, flexWrap: style.flexWrap,
+          alignItems: style.alignItems, justifyContent: style.justifyContent, rowGap: number(style.rowGap), columnGap: number(style.columnGap),
+          padding: edges(style, 'padding'), margin: edges(style, 'margin'), overflowX: style.overflowX, overflowY: style.overflowY,
+          textOverflow: style.textOverflow, backgroundColor: style.backgroundColor, backgroundImage: style.backgroundImage}};
+    })
+  };
+};
+const capture = async name => { await sleep(200); dioxus.send({capture:name, layout:layoutSnapshot(name)}); await dioxus.recv(); };
 const dpr = () => (Number.isFinite(devicePixelRatio) && devicePixelRatio > 0) ? devicePixelRatio : 1;
 const physical = value => Math.max(320, Math.min(4096, Math.round(value * dpr())));
 const resize = async (width, height) => {
@@ -54,7 +81,7 @@ if (config.sessionPhase === 'resume') {
     }
     await click('Sign out'); await wait(() => button('Sign in'), 'Resume sign-out');
     assert(!el('.native-player') && !document.querySelector('[data-native-track-id]'), 'Resume sign-out clears private state');
-    dioxus.send({ok:true, checks});
+    dioxus.send({ok:true, checks, viewportEvidence});
   } catch(error) { dioxus.send({ok:false, checks, failure:String(error.message)}); }
 } else {
 try {
@@ -79,7 +106,28 @@ try {
   assert(document.querySelectorAll('audio,iframe').length === 0, 'No HTML media or iframe playback substitute');
   fill('#native-volume', '0'); await sleep(400);
   assert(Number(el('#native-volume').value) === 0, 'Native volume acknowledged zero before playback');
+  if (button('Dismiss notification')) await click('Dismiss notification');
+  assert(!el('.native-content>.alert.notice'), 'Notification can be dismissed without changing the library');
   await capture('library-dark');
+  for (const [width, name] of [[1440, 'library-wide-dark'], [1728, 'library-ultrawide-dark']]) {
+    await resize(width, 900);
+    for (let attempt = 0; attempt < 4 && Math.abs(innerWidth - width) > 2; attempt++) {
+      dioxus.send({resize:{width:Math.min(4096, Math.round(physical(width) * width / innerWidth)),height:physical(900)}});
+      await dioxus.recv(); await sleep(350);
+    }
+    const matched = Math.abs(innerWidth - width) <= 2;
+    viewportEvidence.push({requestedWidth:width,actualWidth:innerWidth,status:matched?'PASS':'NOT_RUN'});
+    if (matched) {
+      assert(true, `${name} uses the requested ${width}px viewport (actual ${innerWidth}px)`);
+      await capture(name);
+    }
+  }
+  await resize(1280, 840);
+  const firstNativeRow = el('[data-native-track-id]');
+  const rowTime = firstNativeRow.querySelector('.native-track-time').getBoundingClientRect();
+  const rowActions = firstNativeRow.querySelector('.native-track-actions').getBoundingClientRect();
+  assert(rowActions.left >= rowTime.right - 1, 'Track duration and four action controls do not overlap');
+  assert(el('.native-player').getBoundingClientRect().height <= 160, 'Idle desktop transport does not reserve a large empty status strip');
   await click('Play Native Continuity');
   await wait(() => phase() === 'Playing' && position() > 400, 'Native playback clock advances');
   el('[data-testid="native-player-favorite"]').click();
@@ -140,6 +188,7 @@ try {
   await click('Playlists');
   await wait(() => button('Open playlist Native evening') && button('Create playlist'), 'Real playlist list');
   assert(button('Open playlist Native evening'), 'Playlist list shows the real fixture playlist');
+  assert(el('#native-create-playlist summary') && !el('#native-create-playlist').open, 'Playlist creation starts in a compact native disclosure');
   fill('#native-playlist-name', 'Native draft'); await click('Create playlist');
   await wait(() => button('Open playlist Native draft'), 'Native playlist creation');
   assert(button('Open playlist Native draft'), 'Native playlist creation acknowledged by the API');
@@ -219,7 +268,7 @@ try {
     await wait(() => button('Play Native Continuity'), 'Long track for close during playback');
     await click('Play Native Continuity');
     await wait(() => phase() === 'Playing' && position() > 300, 'Close while real audio is advancing');
-    dioxus.send({ok:true, checks, closeWhilePlaying:true});
+    dioxus.send({ok:true, checks, viewportEvidence, closeWhilePlaying:true});
   } else {
     await click('Playlists');
     await wait(() => button('Open playlist Native evening'), 'Playlist reopen for entry editing');
@@ -346,7 +395,7 @@ try {
     await click(`Confirm remove offline ${offlineTitles[1]}`);
     await wait(() => !button(`Play offline ${offlineTitles[1]}`), 'Offline copy removed');
     assert(document.querySelectorAll('[data-offline-track-id]').length === 1, 'Offline removal leaves the other device copy');
-    dioxus.send({ok:true, checks});
+    dioxus.send({ok:true, checks, viewportEvidence});
   }
 } catch(error) { dioxus.send({ok:false, checks, failure:String(error.message)}); }
 }

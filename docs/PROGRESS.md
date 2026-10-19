@@ -1,5 +1,71 @@
 # Verified progress
 
+## Better Design contrast and listening-layout implementation2026-10-19
+
+The newer explicit UI implementation request supersedes the earlier MD-only task.
+Evolved the existing Dioxus web/Linux desktop from baseline0170ec5. No app data,
+schema, authentication/source contracts, Cargo dependencies, frozen runtime or
+release archives changed; the pre-existing untracked `prompt.txt` is untouched.
+
+Implemented brighter original mint dark/light tokens, readable primary/secondary
+text, visible controls and44px main targets; native shell grid with one sidebar
+inset/content scroll/player row; explicit176px action column; compact create
+disclosures and dismissible notices; concise route titles, real Library Play action
+in the heading and removal of the oversized decorative banner; borderless artwork
+shelves and scrolling web navigation. Playback still has the existing single root
+owner. Native artwork/progressive preparation/prefetch/handoff remain separate work.
+
+Executed evidence:
+
+- `cargo fmt --all -- --check`, strict workspace/all-target Clippy, strict wasm32
+  web Clippy, explicit native-qa example Clippy, native desktop/example builds and
+  pinned wasm-bindgen dev web build PASS. `cargo test --locked --workspace --
+  --test-threads=2`: **291 passed,0 failed,3 ignored**.22 Python tooling tests PASS;
+  JS syntax and diff whitespace PASS. Logs: `target/checks/design-contrast-*.log`;
+  final Rust log `design-contrast-rust-tests-final.log`. No release build/packaging
+  or Docker/platform result is inferred from these debug builds.
+- Final Chromium **42 passed/1 live-import skip in2.3m** and Firefox
+  **42 passed/1 live-import skip in2.6m**, each against an isolated real Rust
+  server/current dev WASM assets. Upload/artwork/decode, navigation continuity,
+  queue/recovery/dialog/favorites/playlist concurrency, private history/recommendation,
+  network authorization and stale-session regressions remain covered. DESIGN01 owns
+  its own temporary server/session to avoid security tests' intentionally revoked
+  cookies and per-IP login budget; production policies were not weakened.
+  Logs/screens: `target/checks/design-contrast-{chromium,firefox}-final/`.
+  Final DESIGN01 was strengthened to measure all visible matches of its selected
+  selectors, not only the first row: separate Chromium5.8s/Firefox7.2s reruns PASS,
+  38 measurements/theme/engine over320/390/1440/1728px, minima6.714:1 dark and
+  4.536:1 light. Exact reports/screens:
+  `target/checks/design-contrast-all-rows-{chromium,firefox}/`.
+- Actual native WebKitGTK/Rodio fixture with `--test-peer`: **74 checks PASS**,
+  ten complete PNG captures,1440/1728 requested widths match actual DOM widths,
+  compact640 layout/queue actions and1280 normal library tested; no temporary
+  originals remain. Source generation/advancing position survive navigation;
+  private favorites/playlist/folder/album/artist/public peer/offline flows pass.
+  `target/checks/design-contrast-native-final-evidence/`. Capture code now validates
+  PNG dimensions; earlier cropped captures and a refused-width run are preserved
+  as intermediate failures, not misreported as full native screenshots.
+- Better Design loaded original tokens, UI/UX principles and review rules; three
+  scoped comprehension checks PASS. Final real DOM spacing: web at390/1440/1728
+  has **0 critical/0 serious/10 moderate**; native640/1440/1728 has
+  **0 critical/0 serious/4 moderate**. Native390 is outside the supported fixture
+  scope. Moderate inherited spacing deviations remain documented. No tool score
+  implies global visual, screen-reader or WCAG certification.
+
+See [review](DESIGN_REVIEW_2026-10-19.md),
+[tokens](DESIGN_SYSTEM.md), [ADR0023](DECISIONS/0023-contrast-and-listening-layout.md)
+and `.better-design/review.json`. Source fingerprints:
+`target/checks/design-contrast-source-manifest.json`.
+
+Checkpoint: source/debug binary `target/debug/vela-desktop` and `dist/` are rebuilt;
+the frozen local service remains active0.12.6/MainPID1178/NRestarts0 at the final
+read-only check. No runtime upgrade or external deployment occurred. Native QA is
+X11/XWayland in an owned floated Hyprland window with a null sink; physical sound,
+native-Wayland tiling, mobile/other desktop OS, screen readers and Safari are NOT_RUN.
+Next: separately authorized native artwork/cache contract and wider accessibility
+coverage, then Player Reboot progressive/prefetch/device work. Do not mark the full
+product mandate complete from this UI increment.
+
 ## Player Reboot specification2026-10-19 — documentation only
 
 Prepared [Player Reboot](PLANS/2026-10-19/PLAYER_REBOOT/README.md) in response to two
@@ -1534,4 +1600,3 @@ of the user data with the rebuilt assets; screenshots in
 `target/checks/ui-audit/`. Wide-window NATIVE visual verification is
 NOT_RUN (the existing native QA window is 1280×840 and no credentials were used
 to open the signed-in screen).
-

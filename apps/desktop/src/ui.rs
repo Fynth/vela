@@ -2632,7 +2632,7 @@ fn library(ui: Ui) -> Element {
         .map(|saved| saved.track.id.clone())
         .collect::<std::collections::HashSet<_>>();
     rsx! {section {class:"native-library","aria-label":if favorites {"Favorite tracks"} else {"Private library"},"data-view":if favorites {"favorites"} else {"library"},"data-query":"{query}","data-loading":"{loading}","data-error":"{error}","data-catalog-items":"{catalog_items}",
-        div {class:"library-intro",div {span {class:"eyebrow",if favorites {"THE ONES YOU KEEP CLOSE"} else {"YOUR COLLECTION, YOUR ORIGINALS"}} h1 {if favorites {"Favorites, kept close"} else {"A library that feels like home"}} p {if favorites {"Only tracks you explicitly favorited, using the same owner-only catalog and audio rights."} else {"Choose a track. Keep the rest of your day in the background."}}}
+        div {class:"library-intro",div {h1 {if favorites {"Your favorites"} else {"Your library"}} p {if favorites {"The tracks you love, all in one place."} else {"Find your next listen."}}}
             button {class:"button secondary",disabled:loading,onclick:move |_|{let query=refresh.query.peek().clone();let cursor=refresh.cursor.peek().clone();let favorites=*refresh.view.peek()=="favorites";load_catalog(refresh.clone(),query,cursor,favorites);},Icon {name:"history"} if favorites {"Refresh favorites"} else {"Refresh library"}}
         }
         form {class:"native-search",onsubmit:move |event|{event.prevent_default();let query=submit.query_draft.peek().trim().to_string();let favorites=*submit.view.peek()=="favorites";load_catalog(submit.clone(),query,None,favorites);},
@@ -2881,7 +2881,7 @@ fn playlists_view(ui: Ui) -> Element {
             .is_some_and(|account| account.user.id == detail.playlist.owner_id)
     });
     rsx! {section {class:"native-library","aria-label":"Playlists",
-        div {class:"library-intro",div {span {class:"eyebrow","YOUR COLLECTIONS"} h1 {"Playlists, ready to play"} p {"Owner-authorized playlist metadata. Audio still needs the same per-track stream rights as the library."}}
+        div {class:"library-intro",div {if detail.is_none() {h1 {"Playlists"} p {"A place for every listening mood."}}}
             button {class:"button secondary",disabled:loading,onclick:move |_|{load_playlists(refresh.clone());},Icon {name:"history"} "Refresh playlists"}
         }
         if loading {div {class:"native-loading",role:"status",span {class:"loading-mark","aria-hidden":"true"} "Loading playlists…"}}
@@ -2889,9 +2889,8 @@ fn playlists_view(ui: Ui) -> Element {
         if let Some(detail) = detail {
             div { class: "library-intro",
                 div {
-                    span { class: "eyebrow", "PLAYLIST" }
                     h1 { "data-testid": "native-playlist-name", "{detail.playlist.name}" }
-                    p { "{detail.items.len()} tracks · Revision {detail.playlist.revision}" if detail.playlist.can_edit { " · editable" } else { " · shared" } }
+                    p { "{detail.items.len()} tracks" if detail.playlist.can_edit { " · You can edit" } else { " · Shared with you" } }
                 }
             }
             div { class: "native-track-actions",
@@ -2957,10 +2956,13 @@ fn playlists_view(ui: Ui) -> Element {
             }
         } else {
             div { class: "catalog-caption", p { "Playlist folders" } span { "PRIVATE GROUPING" } }
-            form { class: "inline-form", onsubmit: move |event| { event.prevent_default(); create_folder(folder_create.clone()); },
+            details { class: "native-create", id: "native-create-folder",
+              summary { "New folder" }
+              form { class: "inline-form", onsubmit: move |event| { event.prevent_default(); create_folder(folder_create.clone()); },
                 label { class: "sr-only", r#for: "native-folder-name", "New folder name" }
                 input { id: "native-folder-name", maxlength: 120, placeholder: "New folder name", value: "{folder_name}", disabled: folder_busy, oninput: move |event| folder_name.set(event.value()) }
                 button { class: "button primary small", r#type: "submit", disabled: folder_busy || folder_name.read().trim().is_empty(), if folder_busy { "Creating…" } else { "Create folder" } }
+              }
             }
             div { class: "inline-form", role: "group", "aria-label": "Folder filters",
                 button { class: if folder_filter_value.is_none() { "button secondary small" } else { "button small" }, "aria-pressed": folder_filter_value.is_none(), onclick: move |_| select_folder(select_all.clone(), None), "All playlists" }
@@ -2995,13 +2997,16 @@ fn playlists_view(ui: Ui) -> Element {
                 small { "Deleting this folder unfiles its playlists; their tracks and shares stay." }
                 if folder_confirm == folder.id { "" }
             }
-            form { class: "inline-form", onsubmit: move |event| { event.prevent_default(); create_playlist_ui(create.clone()); },
+            details { class: "native-create", id: "native-create-playlist",
+              summary { "New playlist" }
+              form { class: "inline-form", onsubmit: move |event| { event.prevent_default(); create_playlist_ui(create.clone()); },
                 label { class: "sr-only", r#for: "native-playlist-name", "New playlist name" }
                 input { id: "native-playlist-name", maxlength: 120, placeholder: "New playlist name", value: "{draft}", disabled: *busy.read(), oninput: move |event| draft.set(event.value()) }
                 button { class: "button primary small", r#type: "submit", disabled: *busy.read() || draft.read().trim().is_empty(), if *busy.read() { "Creating…" } else { "Create playlist" } }
+              }
             }
             if !loading && lists.is_empty() && error.is_empty() {
-                div { class: "native-empty", Icon { name: "queue" } h2 { "No playlists yet" } p { "Create one above with your own account, or create it in the web app." } }
+                div { class: "native-empty", Icon { name: "queue" } h2 { "Your next mix starts here" } p { "Choose New playlist to bring your tracks together." } }
             }
             div { class: "native-queue-list",
                 for list in filtered_lists {
@@ -3938,6 +3943,7 @@ pub fn App() -> Element {
     let theme = *ui.theme.read();
     let view = *ui.view.read();
     let notice = ui.notice.read().clone();
+    let mut notice_signal = ui.notice;
     let mut theme_signal = ui.theme;
     let mut view_signal = ui.view;
     let logout = ui.clone();
@@ -3997,15 +4003,14 @@ pub fn App() -> Element {
             if ui.signed_in(){
                 aside {class:"native-sidebar",div {class:"native-brand",Icon {name:"music"} span {"vela"} small {"NATIVE"}}
                     nav {"aria-label":"Main navigation",button {class:if view=="library"{"native-nav active"}else{"native-nav"},"aria-label":"Library",onclick:move |_|{view_signal.set("library");load_catalog(nav_library.clone(),String::new(),None,false);},Icon {name:"library"}"Library"} button {class:if view=="albums"{"native-nav active"}else{"native-nav"},"aria-label":"Albums",onclick:move |_|{load_groups(nav_albums.clone(),"albums",None);},Icon {name:"albums"}"Albums"} button {class:if view=="artists"{"native-nav active"}else{"native-nav"},"aria-label":"Artists",onclick:move |_|{load_groups(nav_artists.clone(),"artists",None);},Icon {name:"artists"}"Artists"} button {class:if view=="favorites"{"native-nav active"}else{"native-nav"},"aria-label":"Favorites",onclick:move |_|{view_signal.set("favorites");load_catalog(nav_favorites.clone(),String::new(),None,true);},Icon {name:"heart"}"Favorites"} button {class:if view=="playlists"{"native-nav active"}else{"native-nav"},"aria-label":"Playlists",onclick:move |_|{load_playlists(nav_playlists.clone());},Icon {name:"playlists"}"Playlists"} button {class:if view=="public"{"native-nav active"}else{"native-nav"},"aria-label":"Public",onclick:move |_|{view_signal.set("public");explore_public(nav_public.clone());},Icon {name:"network"}"Public"} button {class:if view=="queue"{"native-nav active"}else{"native-nav"},"aria-label":"Queue",onclick:move |_|view_signal.set("queue"),Icon {name:"queue"}"Queue"}}
-                    div {class:"native-private-note",Icon {name:"check"} strong {"Private by default"} p {"Your account and queue stay in this running app. Temporary audio is released on replacement or sign-out."} p {class:"native-mpris-note",role:"status","data-testid":"native-mpris-status","{ui.mpris_note}"}}
+                    div {class:"native-private-note",Icon {name:"check"} strong {"Private by default"} p {"Share only what you choose."} p {class:"native-mpris-note",role:"status","data-testid":"native-mpris-status","{ui.mpris_note}"}}
                 }
                 main {class:"native-content",header {class:"native-topbar",div {span {class:"eyebrow","YOUR PERSONAL MUSIC SPACE"} if let Some(account)=ui.account.read().as_ref(){strong {"{account.user.username}"} small {"{account.origin}"}}}
                     div {class:"topbar-actions",button {class:"icon-button","aria-label":"Change color theme",onclick:move |_|theme_signal.set(if theme=="dark"{"light"}else{"dark"}),if theme=="dark"{Icon {name:"sun"}}else{Icon {name:"moon"}}} button {class:"button secondary small",onclick:move |_|sign_out(logout.clone()),"Sign out"}}
                 }
                     nav {class:"native-compact-nav","aria-label":"Compact navigation",button {class:if view=="library"{"active"}else{""},onclick:move |_|{view_signal.set("library");load_catalog(compact_library.clone(),String::new(),None,false);},"Library"} button {class:if view=="albums"{"active"}else{""},onclick:move |_|{load_groups(compact_albums.clone(),"albums",None);},"Albums"} button {class:if view=="artists"{"active"}else{""},onclick:move |_|{load_groups(compact_artists.clone(),"artists",None);},"Artists"} button {class:if view=="favorites"{"active"}else{""},onclick:move |_|{view_signal.set("favorites");load_catalog(compact_favorites.clone(),String::new(),None,true);},"Favorites"} button {class:if view=="playlists"{"active"}else{""},onclick:move |_|{load_playlists(compact_playlists.clone());},"Playlists"} button {class:if view=="public"{"active"}else{""},onclick:move |_|{view_signal.set("public");explore_public(compact_public.clone());},"Public"} button {class:if view=="queue"{"active"}else{""},onclick:move |_|view_signal.set("queue"),"Queue"}}
-                    if !notice.is_empty(){div {class:"alert notice",role:"status","{notice}"}}
+                    if !notice.is_empty(){div {class:"alert notice",role:"status",span {"{notice}"} button {class:"icon-button","aria-label":"Dismiss notification",onclick:move |_|notice_signal.set(String::new()),Icon {name:"close"}}}}
                     if view=="queue"{{queue_view(ui.clone())}}else if view=="playlists"{{playlists_view(ui.clone())}}else if view=="albums"||view=="artists"{{browse_view(ui.clone())}}else if view=="public"{{public_view(ui.clone())}}else{{library(ui.clone())}}
-                    p {class:"native-preparation-note","Tracks are prepared before playing. This device keeps no offline library; sign in again after closing Vela."}
                 }
                 {player(ui.clone())}
             }else{{sign_in(ui.clone())}}

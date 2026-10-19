@@ -1,5 +1,17 @@
 # Unsupported and unverified functionality
 
+## Contrast UI verification2026-10-19
+
+The newer Better Design implementation replaces the earlier muted current-source
+palette and improves layout/control sizing; see [dated review](DESIGN_REVIEW_2026-10-19.md).
+This is source/debug fixture verification, not a live frozen-runtime upgrade.
+Measured text/control contrast and DOM geometry are scoped regressions, not a WCAG
+or screen-reader certificate. Native artwork still uses neutral placeholders;
+native audio remains complete-original preparation rather than progressive playback.
+Native QA uses X11/XWayland under Hyprland with an owned floated window and null
+sink; native-Wayland tiling, physical audio, iOS/Android/Windows/macOS and Docker
+were not validated by this design pass. Device handoff/prefetch remain roadmap work.
+
 Source audit2026-10-19: [outstanding findings](PLANS/2026-10-19/01_AUDIT.md) and
 [ordered repair regressions](PLANS/2026-10-19/02_REPAIR_PLAN.md) include native
 keyring/lifecycle/offline issues still awaiting fixes. Documentation reconciliation

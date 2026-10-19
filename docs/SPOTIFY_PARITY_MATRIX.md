@@ -1,5 +1,12 @@
 # Music experience parity
 
+## Source contrast/layout2026-10-19
+
+| Feature / priority | Status | Implementation | Acceptance / tests | Platform and limits |
+| --- | --- | --- | --- | --- |
+| Readable original Vela contrast and daily listening layout P0 | VERIFIED for scoped fixture states | apps/web/style.css,src/main.rs; apps/desktop/style.css,src/ui.rs | DESIGN01; selected rendered contrast≥4.5,320/390/1440/1728 web themes, actual playback/navigation, nonoverlapping sidebar; native real-window library/queue/playlists/transport fixture | Web + Linux X11/WebKitGTK only; exact logs in design review/PROGRESS, no global accessibility or product-parity claim |
+| Context menus, persistent right panel, authorized native artwork P1 | PARTIAL / NOT_STARTED per feature | Existing Now Playing modal/root player retained; native covers remain placeholders | Separate future interaction/artwork tests required | No new audio engine, handoff, progressive prefetch or mobile validation in this design pass |
+
 Reconciled2026-10-19 (docs-only): this file is a dated parity ledger, not the current
 state. Current source/deployed/design split is in [CURRENT_STATE.md](CURRENT_STATE.md).
 The0.12.x native package (0.12.6 current) implements Linux desktop, opt-in session

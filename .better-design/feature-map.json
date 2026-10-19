@@ -1,0 +1,126 @@
+{
+  "version": 1,
+  "product": "Vela Music",
+  "mainQuest": {
+    "goal": "Improve Vela contrast, layout and usability without playback regressions.",
+    "starts": "2026-10-19",
+    "ends": "2026-10-26",
+    "initiatives": [
+      {
+        "id": "contrast",
+        "name": "Contrast",
+        "outcome": "Readable text and decisive mint controls in both themes."
+      },
+      {
+        "id": "music-layout",
+        "name": "Music layout",
+        "outcome": "Coherent library, queue and playlist controls."
+      },
+      {
+        "id": "verification",
+        "name": "Verification",
+        "outcome": "Real UI, playback and spacing evidence."
+      }
+    ]
+  },
+  "features": [
+    {
+      "id": "music-library-and-persistent-playback",
+      "name": "Music library and persistent playback",
+      "description": "Existing Dioxus web and Linux native listening interface.",
+      "initiative": "contrast",
+      "flows": [
+        {
+          "id": "browse-and-play-music",
+          "name": "Browse and play music",
+          "steps": [
+            {
+              "name": "Sign in",
+              "screen": "Sign in",
+              "components": [
+                "apps/desktop/src/ui.rs",
+                "apps/web/src/main.rs"
+              ],
+              "data": [
+                "apps/desktop/src/client.rs"
+              ]
+            },
+            {
+              "name": "Browse and search library",
+              "screen": "Library",
+              "components": [
+                "apps/desktop/src/ui.rs",
+                "apps/desktop/style.css",
+                "apps/web/src/main.rs",
+                "apps/web/src/shell.rs",
+                "apps/web/style.css"
+              ],
+              "data": []
+            },
+            {
+              "name": "Play and navigate",
+              "screen": "Persistent player and queue",
+              "components": [
+                "apps/desktop/src/ui.rs",
+                "apps/desktop/src/audio.rs",
+                "apps/web/src/browser_player.rs",
+                "apps/web/src/playback.rs",
+                "apps/web/src/now_playing.rs"
+              ],
+              "data": []
+            }
+          ]
+        }
+      ],
+      "components": []
+    },
+    {
+      "id": "playlists",
+      "name": "Playlists",
+      "description": "Owner-private and explicitly shared playlist management; metadata permissions do not grant media.",
+      "initiative": "music-layout",
+      "flows": [
+        {
+          "id": "create-and-listen-to-a-playlist",
+          "name": "Create and listen to a playlist",
+          "steps": [
+            {
+              "name": "Open playlists",
+              "screen": "Playlists",
+              "components": [
+                "apps/desktop/src/ui.rs",
+                "apps/web/src/main.rs",
+                "apps/desktop/style.css",
+                "apps/web/style.css"
+              ],
+              "data": [
+                "crates/core/src/playlists.rs"
+              ]
+            },
+            {
+              "name": "Create and organize",
+              "screen": "Create playlist and folder forms",
+              "components": [
+                "apps/desktop/src/ui.rs",
+                "apps/web/src/main.rs"
+              ],
+              "data": []
+            },
+            {
+              "name": "Open playlist and play",
+              "screen": "Playlist detail",
+              "components": [
+                "apps/desktop/src/ui.rs",
+                "apps/web/src/main.rs"
+              ],
+              "data": [
+                "apps/server/src/lib.rs"
+              ]
+            }
+          ]
+        }
+      ],
+      "components": []
+    }
+  ]
+}
