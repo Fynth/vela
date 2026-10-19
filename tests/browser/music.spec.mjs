@@ -265,7 +265,10 @@ test('sleep timer pauses the shared player and can be canceled', async ({ page }
   await page.clock.runFor(61 * 1000);
   await expect(page.locator('#vela-audio')).toHaveJSProperty('paused', true);
   await expect(page.getByText('Sleep timer reached zero and paused playback.', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Play', exact: true }).click();
+  // The queue drawer is a modal surface, so the player bar behind it is
+  // inert. The drawer carries its own real transport.
+  const queueDrawer = page.getByRole('complementary', { name: 'Playback queue', exact: true });
+  await queueDrawer.getByRole('button', { name: 'Resume playback', exact: true }).click();
   await expect.poll(() => page.locator('#vela-audio').evaluate(audio => !audio.paused)).toBeTruthy();
   await page.locator('#sleep-timer').selectOption('15');
   await page.getByRole('button', { name: 'Cancel sleep timer', exact: true }).click();
@@ -1412,14 +1415,17 @@ test('explicit next and duplicate occurrence history survive queue reorder and r
   await expect(page.locator('.queue-row .queue-track strong')).toHaveText(['Harbor', 'Drift', 'Drift', 'Harbor']);
   await expect(page.locator('.queue-row').nth(1)).toHaveClass(/current/);
   await expect(page.locator('#vela-audio')).toHaveAttribute('src', drift);
-  await page.getByRole('button', { name: 'Next track', exact: true }).click();
+  // The queue drawer is a modal surface: the player bar behind it is inert,
+  // so the drawer's own transport drives the same root actions.
+  const drawer = page.getByRole('complementary', { name: 'Playback queue', exact: true });
+  await drawer.getByRole('button', { name: 'Next in queue', exact: true }).click();
   await expect(page.locator('.queue-row').first()).toHaveClass(/current/);
   await expect(page.locator('.now-playing strong')).toHaveText('Harbor');
-  await page.getByRole('slider', { name: 'Playback position', exact: true }).evaluate(input => { input.value = '0'; input.dispatchEvent(new Event('input', { bubbles: true })); });
-  await page.getByRole('button', { name: 'Previous track', exact: true }).click();
+  await drawer.getByRole('slider', { name: 'Queue playback position', exact: true }).evaluate(input => { input.value = '0'; input.dispatchEvent(new Event('input', { bubbles: true })); });
+  await drawer.getByRole('button', { name: 'Previous in queue', exact: true }).click();
   await expect(page.locator('.queue-row').nth(1)).toHaveClass(/current/);
   await expect(page.locator('.now-playing strong')).toHaveText('Drift');
-  await page.getByRole('button', { name: 'Next track', exact: true }).click();
+  await drawer.getByRole('button', { name: 'Next in queue', exact: true }).click();
   await expect(page.locator('.queue-row').first()).toHaveClass(/current/);
   await page.reload();
   await page.getByRole('button', { name: 'Show playback queue', exact: true }).click();
@@ -1439,18 +1445,19 @@ test('RES01 restored duplicate occurrence keeps position context and preferences
   await findTrack(page,'Harbor');
   await page.getByRole('button',{name:'Add Harbor to playback queue',exact:true}).click();
   await page.getByRole('button',{name:'Show playback queue',exact:true}).click();
+  const drawer = page.getByRole('complementary', { name: 'Playback queue', exact: true });
   await page.locator('.queue-row').nth(1).getByRole('button',{name:'Drift',exact:false}).first().click();
   await expect(page.locator('#vela-audio')).toHaveJSProperty('paused',false);
   await expect.poll(()=>page.locator('#vela-audio').evaluate(a=>a.readyState)).toBeGreaterThanOrEqual(2);
-  await page.getByRole('slider',{name:'Playback position',exact:true}).evaluate(e=>{e.value='11';e.dispatchEvent(new Event('input',{bubbles:true}));});
-  await page.getByRole('button',{name:'Pause',exact:true}).click();
+  await drawer.getByRole('slider',{name:'Queue playback position',exact:true}).evaluate(e=>{e.value='11';e.dispatchEvent(new Event('input',{bubbles:true}));});
+  await drawer.getByRole('button',{name:'Pause playback',exact:true}).click();
   await page.locator('.queue-row').nth(2).getByRole('button',{name:'Move track up',exact:true}).click();
   await page.locator('.queue-row').first().getByRole('button',{name:'Remove queued track',exact:true}).click();
   await expect(page.locator('.queue-row').nth(1)).toHaveClass(/current/);
   await expect.poll(()=>page.locator('#vela-audio').evaluate(a=>a.currentTime)).toBeGreaterThanOrEqual(11);
-  await page.getByRole('button',{name:'Shuffle',exact:true}).first().click();
-  await page.getByRole('button',{name:'Repeat: off',exact:true}).first().click();
-  await page.getByRole('slider',{name:'Volume',exact:true}).first().evaluate(e=>{e.value='0.37';e.dispatchEvent(new Event('input',{bubbles:true}));});
+  await drawer.getByRole('button',{name:'Shuffle',exact:true}).click();
+  await drawer.getByRole('button',{name:'Repeat in queue: off',exact:true}).click();
+  await drawer.getByRole('slider',{name:'Queue volume',exact:true}).evaluate(e=>{e.value='0.37';e.dispatchEvent(new Event('input',{bubbles:true}));});
   const account=await (await page.request.get('/api/me')).json();
   const key=`vela.${account.user.id}.playback.v1`;
   const bookmark=await page.evaluate(key=>JSON.parse(localStorage.getItem(key)),key);
@@ -1466,17 +1473,17 @@ test('RES01 restored duplicate occurrence keeps position context and preferences
   await expect(page.locator('.queue-row .queue-track strong')).toHaveText(['Harbor','Drift']);
   await expect(page.locator('.queue-row').nth(1)).toHaveClass(/current/);
   await expect(page.locator('.queue-context')).toHaveText('Playing from Search results');
-  await expect(page.getByRole('button',{name:'Shuffle',exact:true}).first()).toHaveAttribute('aria-pressed','true');
-  await page.getByRole('button',{name:'Shuffle',exact:true}).first().click();
+  await expect(drawer.getByRole('button',{name:'Shuffle',exact:true})).toHaveAttribute('aria-pressed','true');
+  await drawer.getByRole('button',{name:'Shuffle',exact:true}).click();
   // A paused restored bookmark has no src: sequential Previous must use its saved elapsed time.
-  await page.getByRole('button',{name:'Previous track',exact:true}).click();
+  await drawer.getByRole('button',{name:'Previous in queue',exact:true}).click();
   await expect(page.locator('.queue-row').nth(1)).toHaveClass(/current/);
   expect(await page.locator('#vela-audio').getAttribute('src')).toBeNull();
-  await expect(page.getByRole('slider',{name:'Playback position',exact:true})).toHaveValue('0');
+  await expect(drawer.getByRole('slider',{name:'Queue playback position',exact:true})).toHaveValue('0');
   expect(streams).toBe(0);
-  await page.getByRole('slider',{name:'Playback position',exact:true}).evaluate(e=>{e.value='11';e.dispatchEvent(new Event('input',{bubbles:true}));});
+  await drawer.getByRole('slider',{name:'Queue playback position',exact:true}).evaluate(e=>{e.value='11';e.dispatchEvent(new Event('input',{bubbles:true}));});
 
-  await page.getByRole('button',{name:'Play',exact:true}).click();
+  await drawer.getByRole('button',{name:'Resume playback',exact:true}).click();
   await expect(page.locator('#vela-audio')).toHaveJSProperty('paused',false);
   await expect.poll(()=>page.locator('#vela-audio').evaluate(a=>a.currentTime)).toBeGreaterThanOrEqual(11);
   expect(await page.locator('#vela-audio').evaluate(a=>a.currentTime)).toBeLessThan(15);
@@ -1647,7 +1654,7 @@ test('RES04 playlist row plays its correct duplicate occurrence in the full auth
   await page.getByRole('button',{name:'Show playback queue',exact:true}).click();
   await expect(page.locator('.queue-row').nth(1)).toHaveClass(/current/);
   await expect(page.locator('.queue-context')).toHaveText('Playing from Resume route');
-  await page.getByRole('button',{name:'Next track',exact:true}).click();
+  await page.getByRole('complementary',{name:'Playback queue',exact:true}).getByRole('button',{name:'Next in queue',exact:true}).click();
   await expect(page.locator('.now-playing strong')).toHaveText('Harbor');
 });
 

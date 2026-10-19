@@ -1108,18 +1108,30 @@ test('TR04a Home composes bounded filter views from real DTOs and keeps one root
       return after;
     };
 
-    // --- Approved Home header, one real filter group, honest absent state.
+    // --- Approved Home header, one real filter group, the real feature pair.
     await expect(page.locator('h1')).toHaveCount(1);
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('In your own rhythm');
     await expect(page.locator('.home-heading .eyebrow')).toHaveText('MUSIC. ONLY YOURS.');
     await expect(page.locator('.home-private')).toContainText('Private space');
     await expect(page.locator('.home-private .vela-icon')).toHaveCount(1);
     await expect(page.locator('.home-title-dot')).toHaveCount(1);
-    const absent = page.locator('[data-image-blocked]');
-    await expect(absent).toHaveCount(1);
-    await expect(absent).toHaveAttribute('data-image-blocked', 'IMAGE_BLOCKED');
-    await expect(absent).toContainText('not part of this build');
-    await expect(absent.locator('img')).toHaveCount(0);
+    // TR04b: the approved coast/wave artwork now ships, so the honest absent
+    // state is gone. With no playlist yet there is no editorial story, and the
+    // card says so instead of showing a decorative image with a dead control.
+    await expect(page.locator('[data-image-blocked]')).toHaveCount(0);
+    await expect(page.locator('.home-features')).toBeVisible();
+    await expect(page.locator('.home-feature-empty')).toHaveCount(1);
+    await expect(page.locator('.home-feature-empty')).toContainText('Выберите музыку для этой подборки.');
+    await expect(page.locator('.home-feature-empty .home-feature-listen')).toHaveCount(0);
+    await expect(page.locator('.home-feature-empty')).toContainText('Открыть плейлисты');
+    await expect(page.locator('.home-wave')).toHaveCount(1);
+    for (const asset of ['/assets/brand/vela-coast.png', '/assets/brand/vela-wave.png']) {
+      const response = await page.request.get(runtime.origin + asset);
+      expect(response.status(), asset).toBe(200);
+      expect(response.headers()['content-type'], asset).toMatch(/^image\//);
+    }
+    // The unlisted provenance note next to the shipped art stays denied.
+    expect((await page.request.get(runtime.origin + '/assets/brand/SOURCE.md')).status()).toBe(404);
 
     const forYou = page.getByRole('tab', { name: 'For you', exact: true });
     const albumsTab = page.getByRole('tab', { name: 'Albums', exact: true });
@@ -1257,7 +1269,7 @@ test('TR04a Home composes bounded filter views from real DTOs and keeps one root
     await page.keyboard.press('Home');
     await expect(forYou).toBeFocused();
     await expect(forYou).toHaveAttribute('aria-selected', 'true');
-    await expect(page.locator('[data-image-blocked]')).toBeVisible();
+    await expect(page.locator('.home-features')).toBeVisible();
     await assertPlayerHeld('keyboard filters', before);
     expect(catalogRequests, 'view switches reuse loaded DTOs').toEqual([]);
     await page.getByRole('button', { name: 'Show playback queue', exact: true }).click();
@@ -1300,6 +1312,51 @@ test('TR04a Home composes bounded filter views from real DTOs and keeps one root
     await expect(page.locator('.playlist-detail')).toBeVisible();
     await expect(page.locator('.playlist-detail h2')).toHaveText('Evening shelf');
 
+    await navigate(page, 'Home');
+    await page.getByRole('tab', { name: 'For you', exact: true }).click();
+
+    // --- TR04b: with a real owned playlist the editorial card becomes the
+    // real feature. Its title is the playlist's own name, the approved coast
+    // artwork paints behind it, and the story indicator counts real targets.
+    const feature = page.locator('.home-feature');
+    await expect(feature).toBeVisible();
+    await expect(page.locator('.home-feature-empty')).toHaveCount(0);
+    await expect(feature.locator('.home-feature-title')).toHaveText('Evening shelf');
+    const brandImages = await page.evaluate(() => {
+      const read = element => {
+        const style = getComputedStyle(element);
+        return {
+          image: style.backgroundImage,
+          position: style.backgroundPosition,
+          size: style.backgroundSize,
+          radius: style.borderRadius,
+          height: element.getBoundingClientRect().height,
+        };
+      };
+      return {
+        feature: read(document.querySelector('.home-feature')),
+        wave: read(document.querySelector('.home-wave')),
+      };
+    });
+    expect(brandImages.feature.image).toContain('/assets/brand/vela-coast.png');
+    expect(brandImages.feature.position).toBe('60% 53%');
+    expect(brandImages.feature.size).toBe('cover');
+    expect(brandImages.feature.radius).toBe('10px');
+    expect(brandImages.feature.height).toBeCloseTo(250, 0.5);
+    expect(brandImages.wave.image).toContain('/assets/brand/vela-wave.png');
+    expect(brandImages.wave.height).toBeCloseTo(250, 0.5);
+    // One real target means exactly one indicator: no dead dots.
+    const indicators = feature.locator('.home-indicator');
+    await expect(indicators).toHaveCount(1);
+    await expect(indicators.first()).toHaveAttribute('aria-current', 'true');
+    await expect(indicators.first()).toHaveAttribute('aria-label', 'Показать Evening shelf');
+    // The Listen control is real: it plays the playlist's own tracks.
+    await expect(feature.locator('.home-feature-listen')).toBeEnabled();
+    await expect(feature.locator('.home-feature-arrow')).toBeEnabled();
+    // The My Wave card is present and its play control reflects the real state.
+    await expect(page.locator('.home-wave')).toBeVisible();
+    await expect(page.locator('.home-wave-play')).toBeVisible();
+
     // --- The shelf stays capped at six even when the library grows past it.
     await addAlbum(6, 4);
     await addAlbum(7, 4);
@@ -1309,7 +1366,7 @@ test('TR04a Home composes bounded filter views from real DTOs and keeps one root
     await expect(page.locator('.home-album-shelf .home-album-card')).toHaveCount(6);
     await expect(page.locator('.home-album-shelf')).toBeVisible();
     expect(await page.locator('.home-album-shelf .home-album-card').count()).toBeLessThanOrEqual(6);
-    expect(imageRequests.some(url => /(coast|your-wave)\.png/i.test(url))).toBe(false);
+    expect(imageRequests.some(url => /(coast|your-wave)\.png/i.test(url))).toBe(true);
     await expect(page.locator('.now-playing strong.player-title')).toHaveText(shelfTracks[0].title);
     const final = await readPlayer();
     expect(final.same).toBe(true);

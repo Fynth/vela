@@ -2447,6 +2447,9 @@ fn App() -> Element {
                     context_label: context.read().label.clone(),
                     shuffle: shuffle(),
                     repeat: repeat(),
+                    position: position(),
+                    duration: duration(),
+                    volume: volume_value,
                     sleep_minutes: sleep_minutes(),
                     sleep_remaining: sleep_remaining(),
                     onclose: move |_| show_queue.set(false),
@@ -2460,6 +2463,7 @@ fn App() -> Element {
                     ontoggle: move |_| toggle_playback(playback),
                     onshuffle: move |_| shuffle.set(!shuffle()),
                     onrepeat: move |_| change_repeat(repeat),
+                    onseek: move |value| engine.peek().seek(value),
                     onvolume: move |value| change_volume(value, volume),
                     onsleep: move |value| {
                         if value == "0" && sleep_minutes.peek().as_str() != "0" {

@@ -96,7 +96,7 @@ fn EditorialCard(
                     p { class: "home-feature-subtitle",
                         "Подборка появляется, когда вы создаёте свой плейлист. Он остаётся приватным." }
                     div { class: "home-feature-actions",
-                        button { class: "button primary home-feature-listen", r#type: "button",
+                        button { class: "button primary home-feature-open", r#type: "button",
                             "aria-label": "Открыть плейлисты",
                             onclick: move |_| actions.navigate.call("playlists".into()), "Открыть плейлисты" }
                     }

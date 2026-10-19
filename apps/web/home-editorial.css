@@ -95,6 +95,13 @@
   padding: 0 15px;
   font-size: 11px;
 }
+.home-feature-open {
+  height: 33px;
+  min-height: 33px;
+  border-radius: 5px;
+  padding: 0 15px;
+  font-size: 11px;
+}
 .home-feature-arrow {
   width: 30px;
   height: 30px;
@@ -374,6 +381,7 @@
 @media (prefers-reduced-motion: reduce) {
   .home-wave-play,
   .home-feature-listen,
+  .home-feature-open,
   .home-feature-arrow,
   .home-wave-open {
     transition: none;

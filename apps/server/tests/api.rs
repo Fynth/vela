@@ -2788,7 +2788,12 @@ async fn shipped_stylesheets_are_allowlisted_and_unlisted_neighbours_stay_denied
     tokio::fs::create_dir_all(&app.state.config.web_dir)
         .await
         .unwrap();
-    for name in ["style.css", "now-playing.css", "home-editorial.css", "queue-drawer.css"] {
+    for name in [
+        "style.css",
+        "now-playing.css",
+        "home-editorial.css",
+        "queue-drawer.css",
+    ] {
         tokio::fs::write(
             app.state.config.web_dir.join(name),
             format!("/* {name} */.marker{{color:red}}").as_bytes(),
@@ -2802,7 +2807,12 @@ async fn shipped_stylesheets_are_allowlisted_and_unlisted_neighbours_stay_denied
     )
     .await
     .unwrap();
-    for name in ["style.css", "now-playing.css", "home-editorial.css", "queue-drawer.css"] {
+    for name in [
+        "style.css",
+        "now-playing.css",
+        "home-editorial.css",
+        "queue-drawer.css",
+    ] {
         let response = app
             .client
             .get(format!("{}/{name}", app.base))
@@ -2829,7 +2839,8 @@ async fn shipped_stylesheets_are_allowlisted_and_unlisted_neighbours_stay_denied
 }
 
 #[tokio::test]
-async fn brand_assets_are_exactly_allowlisted_and_never_expose_their_folder() {    let app = TestApp::new().await;
+async fn brand_assets_are_exactly_allowlisted_and_never_expose_their_folder() {
+    let app = TestApp::new().await;
     let brand = app.state.config.web_dir.join("assets/brand");
     tokio::fs::create_dir_all(&brand).await.unwrap();
     tokio::fs::write(brand.join("vela-coast.png"), b"coast fixture bytes")

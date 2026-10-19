@@ -19,18 +19,6 @@ fn drawer() -> Option<web_sys::HtmlDialogElement> {
         .ok()
 }
 
-/// The root player owns the audible level. The drawer only mirrors the
-/// control it was opened with so the slider never shows a level the root
-/// does not have.
-fn player_volume() -> Option<f64> {
-    let input = web_sys::window()?
-        .document()?
-        .get_element_by_id("player-volume")?
-        .dyn_into::<web_sys::HtmlInputElement>()
-        .ok()?;
-    input.value().parse::<f64>().ok()
-}
-
 /// Format a millisecond duration as `m:ss`.
 fn format_duration(duration_ms: i64) -> String {
     let total_seconds = if duration_ms > 0 {
@@ -51,6 +39,9 @@ pub fn QueueDrawer(
     context_label: String,
     shuffle: bool,
     repeat: String,
+    position: f64,
+    duration: f64,
+    volume: f64,
     sleep_minutes: String,
     sleep_remaining: u64,
     onclose: EventHandler<()>,
@@ -64,20 +55,16 @@ pub fn QueueDrawer(
     ontoggle: EventHandler<()>,
     onshuffle: EventHandler<()>,
     onrepeat: EventHandler<()>,
+    onseek: EventHandler<f64>,
     onvolume: EventHandler<f64>,
     onsleep: EventHandler<String>,
     onchoose: EventHandler<()>,
 ) -> Element {
-    let mut volume_value = use_signal(|| 1.0_f64);
-
     use_effect(move || {
         spawn(async move {
             TimeoutFuture::new(0).await;
             if let Some(dialog) = drawer() {
                 let _ = dialog.show_modal();
-            }
-            if let Some(value) = player_volume() {
-                volume_value.set(value);
             }
         });
     });
@@ -119,6 +106,13 @@ pub fn QueueDrawer(
         "pause"
     } else {
         "play"
+    };
+    // The seek rail uses the real known duration. An unknown duration stays a
+    // zero-length range rather than an invented length.
+    let seek_max = if duration.is_finite() && duration > 0.0 {
+        duration
+    } else {
+        1.0
     };
 
     rsx! {
@@ -213,11 +207,31 @@ pub fn QueueDrawer(
                         min: "0",
                         max: "1",
                         step: "0.01",
-                        value: "{volume_value}",
+                        value: "{volume}",
                         "aria-label": "Queue volume",
                         oninput: move |event| {
                             if let Ok(value) = event.value().parse::<f64>() {
                                 onvolume.call(value);
+                            }
+                        },
+                    }
+                }
+
+                // The modal background is inert, so the drawer carries the seek
+                // itself: transport must stay reachable while it is open.
+                div { class: "queue-seek",
+                    input {
+                        id: "queue-position",
+                        r#type: "range",
+                        min: "0",
+                        max: "{seek_max}",
+                        step: "0.1",
+                        value: "{position}",
+                        "aria-label": "Queue playback position",
+                        disabled: !has_current,
+                        oninput: move |event| {
+                            if let Ok(value) = event.value().parse::<f64>() {
+                                onseek.call(value);
                             }
                         },
                     }
