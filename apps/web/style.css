@@ -812,12 +812,12 @@ input::placeholder { color:var(--quiet); opacity:1; }
 .listening-actions { gap:4px; }
 .listening-actions .icon-button { min-width:36px; min-height:36px; }
 .home-playlist-card { background:var(--surface); border:0; padding:16px; }
-.home-playlist-card strong { font-size:15px; }
-.track-title strong { font-size:15px; font-weight:600; }
-.track-title small { font-size:13px; }
+.home-playlist-card strong { font-size:13px; }
+.track-title strong { font-size:12px; font-weight:550; }
+.track-title small { font-size:12px; margin-top:2px; }
 .track-album,.track-duration,.quality-tag { font-size:12px; }
 .track-header { font-size:11px; letter-spacing:.6px; }
-.track-row { min-height:72px; }
+.track-row { min-height:64px; }
 .track-header,.track-row { grid-template-columns:44px minmax(0,1.7fr) minmax(0,1fr) 90px 48px 176px; gap:12px; }
 .track-play,.track-title,.track-actions .icon-button { min-height:44px; }
 .track-play { min-width:44px; }
