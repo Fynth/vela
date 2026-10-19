@@ -16,6 +16,11 @@ const wait = async (test, name, timeout = 18000) => {
 const assert = (condition, name) => { if (!condition) throw new Error(name); checks.push(name); };
 const el = selector => document.querySelector(selector);
 const button = name => [...document.querySelectorAll('button')].find(node => (node.getAttribute('aria-label') || node.textContent).trim() === name && node.getClientRects().length);
+const near = (actual, expected, tolerance = 1) => Number.isFinite(actual) && Math.abs(actual - expected) <= tolerance;
+const box = selector => el(selector)?.getBoundingClientRect();
+const cssToken = (node, name) => getComputedStyle(node).getPropertyValue(name).trim();
+const cssPx = (node, name) => parseFloat(getComputedStyle(node)[name]) || 0;
+const compactDestinations = ['Library', 'Albums', 'Artists', 'Favorites', 'Playlists', 'Public', 'Queue', 'Settings'];
 const click = async name => { await wait(() => button(name) && !button(name).disabled, `button: ${name}`); button(name).click(); await sleep(100); };
 const pageText = selector => [...document.querySelectorAll(selector)].map(node => node.textContent.trim());
 const fill = (selector, value, event = 'input') => { const input = el(selector); if (!input) throw new Error(`Missing input ${selector}`); const disclosure = input.closest('details'); if(disclosure && !disclosure.open) disclosure.querySelector('summary').click(); input.value = value; input.dispatchEvent(new Event(event, { bubbles:true })); };
@@ -264,7 +269,59 @@ try {
   fill('#native-volume', '0'); await sleep(400);
   assert(Number(el('#native-volume').value) === 0, 'Native volume acknowledged zero before playback');
   if (button('Dismiss notification')) await click('Dismiss notification');
-  assert(!el('.native-content>.alert.notice'), 'Notification can be dismissed without changing the library');
+  assert(!el('.native-scroll-inner>.alert.notice'), 'Notification can be dismissed without changing the library');
+  // TR01/TR02: namespaced roles plus the one-offset, one-reserve desktop shell.
+  const app = el('.native-app'), main = el('.native-main'), sidebar = el('.native-sidebar');
+  const scroll = el('.native-scroll'), player = el('.native-player');
+  const sidebarRect = box('.native-sidebar'), mainRect = box('.native-main');
+  const topbarRect = box('.native-topbar'), scrollRect = box('.native-scroll'), playerRect = box('.native-player');
+  assert(app?.dataset.theme === 'dark', 'Baseline shell geometry is the shipped dark theme');
+  assert(sidebarRect && near(sidebarRect.width, 216), `Desktop sidebar is the approved 216px (actual ${sidebarRect?.width})`);
+  assert(topbarRect && near(topbarRect.height, 75), `Desktop topbar is the approved 75px (actual ${topbarRect?.height})`);
+  assert(playerRect && near(playerRect.height, 88), `Desktop player is the approved 88px (actual ${playerRect?.height})`);
+  assert(playerRect && near(playerRect.left, 0) && near(playerRect.width, innerWidth), `Player spans the full window (${playerRect?.left}..${playerRect?.right} of ${innerWidth})`);
+  assert(sidebarRect && mainRect && topbarRect && scrollRect
+    && near(mainRect.left, sidebarRect.right) && near(topbarRect.left, mainRect.left) && near(scrollRect.left, mainRect.left),
+    `Sidebar offset is applied exactly once (sidebar right ${sidebarRect?.right}, main/topbar/scroll left ${mainRect?.left}/${topbarRect?.left}/${scrollRect?.left})`);
+  assert(scrollRect && playerRect
+    && near(scrollRect.bottom, playerRect.top) && near(playerRect.top + playerRect.height, innerHeight),
+    `The player reserve is one grid band (scroll bottom ${scrollRect?.bottom}, player top ${playerRect?.top}, viewport ${innerHeight})`);
+  assert(getComputedStyle(scroll).overflowY === 'auto' && getComputedStyle(main).overflowY === 'hidden'
+    && document.scrollingElement.scrollHeight <= innerHeight + 1,
+    'The central content column is the only vertical scroller; the document itself does not scroll');
+  assert(!el('.native-content') && document.querySelectorAll('.native-scroll').length === 1
+    && !scroll.contains(el('.native-topbar')),
+    'The old content offset is gone and the fixed topbar is outside the single scroll owner');
+  const inner = el('.native-scroll-inner');
+  const contentLeft = box('.library-intro')?.left;
+  assert(inner && near(cssPx(inner, 'paddingLeft'), 33)
+    && near(contentLeft, mainRect.left + 33),
+    `Content gutter is applied once (inner padding ${inner ? cssPx(inner, 'paddingLeft') : '-'}, first content left ${contentLeft}, main left ${mainRect.left})`);
+  assert(cssPx(inner, 'paddingBottom') < playerRect.height,
+    `Content does not add a second player-height reserve (padding-bottom ${inner ? cssPx(inner, 'paddingBottom') : '-'}, player ${playerRect.height})`);
+  assert(cssToken(app, '--vela-bg') === '#131513'
+    && cssToken(app, '--vela-primary') === '#d3e9a5'
+    && cssToken(app, '--vela-on-primary') === '#1b2511'
+    && cssToken(app, '--vela-muted-text') === '#9aa296'
+    && cssToken(app, '--vela-quiet-text') === '#798372'
+    && cssToken(app, '--vela-sidebar-bg') === '#0e100f'
+    && cssToken(app, '--vela-player-bg') === '#10130f'
+    && cssToken(app, '--vela-player-border') === '#343b2e',
+    'The approved dark role values are exposed under the namespaced --vela-* layer');
+  assert(cssToken(app, '--vela-sidebar-width') === '216px'
+    && cssToken(app, '--vela-topbar-height') === '75px'
+    && cssToken(app, '--vela-player-height') === '88px'
+    && cssToken(app, '--sidebar').includes('216')
+    && cssToken(app, '--player').includes('88'),
+    'Length roles stay separate from text roles and alias the legacy --sidebar/--player names');
+  assert(getComputedStyle(app).backgroundColor === 'rgb(19, 21, 19)'
+    && getComputedStyle(sidebar).backgroundColor === 'rgb(14, 16, 15)'
+    && getComputedStyle(player).backgroundColor === 'rgb(16, 19, 15)'
+    && getComputedStyle(player).borderTopColor === 'rgb(52, 59, 46)'
+    && getComputedStyle(app).color === 'rgb(243, 243, 237)'
+    && getComputedStyle(el('.native-sidebar .native-brand > .vela-icon')).color === 'rgb(211, 233, 165)',
+    'Charcoal canvas, forest sidebar/player, warm-white text and pistachio mark render from those roles');
+  checks.push(`TR01/TR02 desktop shell: ${Math.round(sidebarRect.width)}px sidebar, ${Math.round(topbarRect.height)}px topbar, ${Math.round(playerRect.height)}px player at ${innerWidth}x${innerHeight}, main left ${Math.round(mainRect.left)} = sidebar right ${Math.round(sidebarRect.right)}, content gutter ${cssPx(inner, 'paddingLeft')}px, scroll bottom ${Math.round(scrollRect.bottom)} = player top ${Math.round(playerRect.top)}`);
   await capture('library-dark');
   for (const [width, name] of [[1440, 'library-wide-dark'], [1728, 'library-ultrawide-dark']]) {
     await resize(width, 900);
@@ -323,7 +380,22 @@ try {
   await click('Pause'); await wait(() => phase() === 'Paused', 'Pause before queue edits');
   await click('Use the light theme');
   assert(el('.native-app').dataset.theme === 'light', 'Functional light theme');
+  assert(generation() === gen && phase() === 'Paused', 'Theme change preserves the native source, queue and paused state');
   await capture('queue-light');
+  // Theme/navigation/scale are presentation changes. None may replace the one
+  // AudioEngine source or reset its paused position.
+  const scaleSource = generation(), scalePosition = position();
+  await click('Settings');
+  await wait(() => el('[data-testid="native-app-scale-value"]'), 'Settings opens for the app-scale continuity check');
+  assert(generation() === scaleSource && phase() === 'Paused', 'Navigation to Settings preserves the native source');
+  await click('Increase app size');
+  await wait(() => el('[data-testid="native-app-scale-value"]')?.textContent === '105%', 'App size stepper applies 105%');
+  assert(generation() === scaleSource && phase() === 'Paused' && Math.abs(position() - scalePosition) < 150,
+    'App scale preserves the source, selection and paused position');
+  assert(Number(el('.native-app').dataset.appScale) === 105, 'App scale is applied once on the native-app wrapper');
+  await click('Reset to 100%');
+  await wait(() => el('[data-testid="native-app-scale-value"]')?.textContent === '100%', 'App size reset to 100%');
+  assert(generation() === scaleSource && phase() === 'Paused', 'Scale reset keeps the same native source and paused state');
   await click('Library');
   fill('#native-search', 'Signal'); el('.native-search').requestSubmit();
   await wait(() => document.querySelectorAll('[data-native-track-id]').length === 1 && button('Play Signal'), 'Real API search');
@@ -354,6 +426,33 @@ try {
   assert(queueButtons.every(rect => rect.left >= -1 && rect.right <= innerWidth + 1 && rect.width >= 34), `Compact queue controls remain reachable (${queueButtons.map(rect => Math.round(rect.right)).join(',')})`);
   const compactPlayer = el('.native-player')?.getBoundingClientRect();
   assert(compactPlayer && compactPlayer.right <= innerWidth + 1 && compactPlayer.left >= -1, `Compact player stays inside ${innerWidth}px`);
+  // TR02 narrow shell: the same single scroll owner and player band, with the
+  // desktop sidebar offset removed rather than compounded.
+  const compactApp = el('.native-app'), compactSidebar = el('.native-sidebar'), compactMain = el('.native-main');
+  const compactTopbar = el('.native-topbar'), compactScroll = el('.native-scroll');
+  const compactMainRect = compactMain.getBoundingClientRect(), compactTopbarRect = compactTopbar.getBoundingClientRect();
+  const compactScrollRect = compactScroll.getBoundingClientRect();
+  assert(getComputedStyle(compactSidebar).display === 'none' && cssToken(compactApp, '--vela-sidebar-width') === '0px',
+    'Narrow shell removes the desktop sidebar and zeroes its layout role');
+  assert(near(compactMainRect.left, 0) && near(compactTopbarRect.left, 0) && near(compactScrollRect.left, 0),
+    `Narrow main/topbar/scroll start at 0, not an inherited sidebar offset (${compactMainRect.left}/${compactTopbarRect.left}/${compactScrollRect.left})`);
+  assert(compactPlayer && near(compactPlayer.left, 0) && near(compactPlayer.width, innerWidth) && compactPlayer.height >= 88,
+    `Narrow player stays full-width and at least the 88px baseline (${compactPlayer?.left}..${compactPlayer?.right}, ${compactPlayer?.height}px)`);
+  assert(near(compactPlayer.top + compactPlayer.height, innerHeight) && near(compactScrollRect.bottom, compactPlayer.top),
+    `Narrow player reserve is one band below the scroller (scroll bottom ${compactScrollRect.bottom}, player top ${compactPlayer?.top})`);
+  assert(getComputedStyle(compactScroll).overflowY === 'auto'
+    && document.scrollingElement.scrollHeight <= innerHeight + 1
+    && document.querySelectorAll('.native-scroll').length === 1 && !el('.native-content'),
+    'Narrow shell keeps exactly one central scroll owner and no document overflow');
+  const compactNav = el('.native-compact-nav');
+  const compactNavButtons = compactNav ? [...compactNav.querySelectorAll('button')] : [];
+  assert(compactNav && getComputedStyle(compactNav).display === 'flex'
+    && compactNavButtons.length === compactDestinations.length
+    && compactDestinations.every(name => compactNavButtons.some(node => (node.getAttribute('aria-label') || node.textContent).trim() === name))
+    && compactNavButtons.every(node => node.getBoundingClientRect().height >= 44)
+    && getComputedStyle(compactNav).overflowX === 'auto',
+    'All current native destinations remain reachable in the compact navigation');
+  checks.push(`TR02 narrow shell: ${innerWidth}x${innerHeight}, main left ${Math.round(compactMainRect.left)}, topbar ${Math.round(compactTopbarRect.height)}px, player ${compactPlayer.height.toFixed(1)}px at y=${compactPlayer.top.toFixed(1)}, scroller ${Math.round(compactScrollRect.height)}px, destinations ${compactNavButtons.map(node => (node.getAttribute('aria-label') || node.textContent).trim()).join('/')}`);
   await capture('compact-light');
   assert(document.documentElement.scrollWidth <= innerWidth + 1, 'Compact native window has no horizontal document overflow');
   await click('Clear queue'); await wait(() => phase() === 'Idle', 'Clear queue stops native audio');
