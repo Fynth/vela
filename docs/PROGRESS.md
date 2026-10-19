@@ -1504,6 +1504,18 @@ cards; exact `background-color` transitions on track rows; neutral 1px pure-blac
 Web rebuilt; Chromium41 passed/1 live-import skip (2.1m). Native CSS was not opened in
 a real window in this pass.
 
+## Native chrome cleanup — verified (2026-10-19)
+
+Removed the GTK menu bar (`Config::with_menu(None)`) so no Window/Edit/Help strip
+remains above the app, and deleted the visible `.native-player-status` row,
+preparation progress/bytes, "Preparing original audio", offline-check copy and the
+"Opening public track…" notice. The player now shows only track/controls/seek/volume;
+errors remain visible. Source context is kept as a `hidden` element for the native QA
+harness and screen-reader state, not painted. A→B→A cache hits no longer surface any
+loading/log text; whole-file preparation still disables transport silently while it
+runs. Rebuilt `target/release/vela-desktop`; native peer/session/offline QA passed
+(`target/checks/ui-clean-player5/`). Wide native visual inspection remains NOT_RUN.
+
 ## Native wide-window layout + inline forms — CSS fixed (2026-10-19)
 
 The 2288×937 native screenshot showed a large empty left band and stacked,

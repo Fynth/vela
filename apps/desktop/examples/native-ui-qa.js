@@ -264,14 +264,10 @@ try {
     const publicRow = el('[data-public-track-id]');
     const publicTitle = publicRow.querySelector('.native-queue-select strong')?.textContent;
     const publicButtons = [...document.querySelectorAll('[data-public-track-id] button')];
-    let clicked = null;
-    for (const candidate of publicButtons) {
-      candidate.dispatchEvent(new MouseEvent('click', { bubbles:true, cancelable:true, view:window }));
-      await sleep(250);
-      if ((el('.alert.notice')?.textContent || '').includes('Opening public track')) { clicked = candidate; break; }
-    }
-    if (!clicked) throw new Error(`Public play handler missing rows=${publicButtons.length} disabled=${publicButtons.map(b => b.disabled).join(',')} aria=${publicButtons.map(b => b.getAttribute('aria-label')).join('|')} form=${!!publicButtons[0]?.closest('form')} type=${publicButtons[0]?.type} button=${publicButtons[0]?.outerHTML.slice(0, 300)} errors=${JSON.stringify(runtimeErrors.slice(-4))}`);
-    await sleep(300);
+    const clicked = publicButtons.find(candidate => !candidate.disabled);
+    if (!clicked) throw new Error(`Public play handler missing rows=${publicButtons.length} disabled=${publicButtons.map(b => b.disabled).join(',')} errors=${JSON.stringify(runtimeErrors.slice(-4))}`);
+    clicked.dispatchEvent(new MouseEvent('click', { bubbles:true, cancelable:true, view:window }));
+    await wait(() => (el('.player-track strong')?.textContent || '') === publicTitle, 'Public track selection');
     const selectedTitle = el('.player-track strong')?.textContent;
     if (selectedTitle !== publicTitle) throw new Error(`Public track selection failed expected=${publicTitle} actual=${selectedTitle} phase=${phase()} status=${el('.native-player-status small')?.textContent || '-'} error=${el('.player-error')?.textContent?.trim() || '-'}`);
     try { await wait(() => ['Playing','Ended'].includes(phase()) && position() > 0 && (el('.native-player-status small')?.textContent || '').includes('Public ·'), 'Public track playback'); }

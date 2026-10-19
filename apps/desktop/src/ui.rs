@@ -2076,15 +2076,6 @@ fn time_label(milliseconds: u64) -> String {
     let seconds = milliseconds / 1000;
     format!("{}:{:02}", seconds / 60, seconds % 60)
 }
-fn byte_label(bytes: u64) -> String {
-    if bytes >= 1_048_576 {
-        format!("{:.1} MiB", bytes as f64 / 1_048_576.0)
-    } else if bytes >= 1024 {
-        format!("{:.1} KiB", bytes as f64 / 1024.0)
-    } else {
-        format!("{bytes} B")
-    }
-}
 
 fn sign_in(ui: Ui) -> Element {
     let origin = ui.origin.read().clone();
@@ -2291,14 +2282,6 @@ fn offline_queue_added(mut ui: Ui, track_id: &str) {
     } else {
         sync_offline_queue(ui);
     }
-}
-
-fn cancel_offline_check(mut ui: Ui) {
-    // Physical cancellation: the blocking worker stops at its next verified
-    // block and its late result is dropped with the descriptor lease.
-    ui.offline_play_gate.cancel();
-    ui.offline_checking.set(None);
-    ui.notice.set("Offline copy check canceled.".into());
 }
 
 fn download_offline(mut ui: Ui, track: Track) {
@@ -3077,7 +3060,6 @@ fn play_public(mut ui: Ui, track: PublicTrack, origin: String) {
     if !track.can_stream || !ui.signed_in() {
         return;
     }
-    ui.notice.set("Opening public track…".into());
     ui.remote_queue
         .set(vec![crate::remote::RemoteItem { origin, track }]);
     ui.remote_index.set(0);
@@ -3102,7 +3084,6 @@ fn play_public_result(mut ui: Ui, origin: String, track_id: String) {
     else {
         return;
     };
-    ui.notice.set("Opening public track…".into());
     ui.remote_queue.set(items);
     ui.remote_index.set(index);
     start_remote(ui);
@@ -3688,7 +3669,6 @@ fn player(ui: Ui) -> Element {
     let snapshot = ui.snapshot.read().clone();
     let preparing = *ui.preparing.read();
     let checking = ui.offline_checking.read().clone();
-    let progress = *ui.progress.read();
     let error = ui.source_error.read().clone();
     let shuffle = *ui.shuffle.read();
     let repeat = *ui.repeat.read();
@@ -3700,8 +3680,6 @@ fn player(ui: Ui) -> Element {
     let audio_alive = ui.audio_alive();
     let seek_ui = ui.clone();
     let volume_ui = ui.clone();
-    let cancel = ui.clone();
-    let cancel_check = ui.clone();
     let shuffle_ui = ui.clone();
     let repeat_ui = ui.clone();
     // A copy under verification is a pending transport action: the decoder keeps
@@ -3716,20 +3694,6 @@ fn player(ui: Ui) -> Element {
             snapshot.phase,
             AudioPhase::Playing | AudioPhase::Paused | AudioPhase::Ended
         );
-    let status = if preparing {
-        "Preparing original audio"
-    } else if checking.is_some() {
-        "Checking the offline copy"
-    } else {
-        match snapshot.phase {
-            AudioPhase::Idle => "Ready when you are",
-            AudioPhase::Loading => "Opening native audio",
-            AudioPhase::Playing => "Playing through native audio",
-            AudioPhase::Paused => "Paused",
-            AudioPhase::Ended => "Playback finished",
-            AudioPhase::Error => "Playback needs attention",
-        }
-    };
     let repeat_label = match repeat {
         Repeat::Off => "Repeat off",
         Repeat::All => "Repeat all",
@@ -3758,11 +3722,8 @@ fn player(ui: Ui) -> Element {
         }
             div {class:"native-seek",span {"{time_label(snapshot.position_ms)}"} label {class:"sr-only",r#for:"native-seek","Playback position"} input {id:"native-seek",r#type:"range",min:0,max:snapshot.duration_ms.max(1),step:100,value:snapshot.position_ms,disabled:!can_seek,onchange:move |event|seek(seek_ui.clone(),event.value())} span {"{time_label(snapshot.duration_ms)}"}}
         }
+        div { class: "native-player-status", hidden: true, "data-testid": "native-playback-status", small { "{context}" } }
         div {class:"player-volume",Icon {name:"volume"} label {class:"sr-only",r#for:"native-volume","Volume"} input {id:"native-volume",r#type:"range",min:0,max:100,step:1,value:(snapshot.volume*100.0).round(),disabled:!ui.audio_ready(),oninput:move |event|volume(volume_ui.clone(),event.value())}}
-        div {class:"native-player-status",role:"status","data-testid":"native-playback-status",span {"{status}"} if !context.is_empty(){small {"Playing from {context}"}}
-            if preparing {div {class:"preparation-progress",if progress.total_bytes>0 {progress {max:progress.total_bytes,value:progress.received_bytes.min(progress.total_bytes)} small {"{byte_label(progress.received_bytes)} / {byte_label(progress.total_bytes)}"}}else{progress {} small {"Waiting for audio bytes…"}} button {class:"text-button",onclick:move |_|{let mut ui=cancel.clone();ui.new_selection();ui.prepared.set(None);ui.source_error.set("Preparation canceled. Press Play to try again.".into());},"Cancel preparation"}}}
-            if let Some(checking)=checking.clone() {div {class:"preparation-progress","data-testid":"native-offline-check",span {"Verifying · {checking.track.title}"} small {"The saved copy is verified off this thread before it replaces the current audio."} button {class:"text-button","aria-label":"Cancel offline check",onclick:move |_|cancel_offline_check(cancel_check.clone()),"Cancel offline check"}}}
-        }
         if !ui.audio_error.read().is_empty(){div {class:"player-error",role:"alert","{ui.audio_error}"}}
         if !error.is_empty(){div {class:"player-error",role:"alert","{error} Press Play to retry."}}
         if let Some(error)=snapshot.error{div {class:"player-error",role:"alert","{error}"}}

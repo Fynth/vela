@@ -13,6 +13,7 @@ fn main() {
         .with_cfg(
             Config::new()
                 .with_window(window)
+                .with_menu(None)
                 .with_navigation_handler(|_| false),
         )
         .launch(vela_desktop::ui::App);
