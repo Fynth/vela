@@ -3598,7 +3598,7 @@ fn playlists_view(ui: Ui) -> Element {
                         let list_id = list.id.clone();
                         rsx! { article { class: "native-queue-row", key: "{list.id}",
                             button { class: "native-queue-select", "aria-label": "Open playlist {list.name}", onclick: move |_| open_playlist(open.clone(), list_id.clone()),
-                                div { class: "neutral-cover", "aria-hidden": "true", Icon { name: "queue" } }
+                                ArtworkCover { ui:ui.clone(), artwork_id:list.artwork_id.clone(), class:"neutral-cover", icon:"queue" }
                                 div { strong { "{list.name}" } small { "{list.item_count} tracks" if !list.can_edit { " · shared" } } }
                             }
                         } }
