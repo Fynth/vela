@@ -23,6 +23,7 @@ serde_json.workspace = true
 url.workspace = true
 uuid.workspace = true
 blake3.workspace = true
+base64 = "=0.22.1"
 futures-util.workspace = true
 tempfile.workspace = true
 rodio = { version = "=0.22.2", default-features = false, features = ["playback", "flac", "mp3", "mp4", "vorbis", "wav"] }

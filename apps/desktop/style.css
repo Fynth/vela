@@ -193,3 +193,10 @@ input::placeholder { color:var(--quiet); opacity:1; }
 .native-window-controls .window-close:hover { background:var(--danger); color:var(--bg); }
 .native-window-drag { flex:1; align-self:stretch; display:flex; flex-direction:column; justify-content:center; cursor:grab; user-select:none; }
 .signin-window-controls { position:absolute; top:16px; right:16px; z-index:10; }
+
+/* Authorized native cover art. An <img> exists only after the native client validated
+   the image bytes; every other cover state keeps the neutral Vela glyph above. */
+img.neutral-cover {
+  display:block; padding:0; overflow:hidden;
+  object-fit:cover; object-position:center; background:var(--raised);
+}

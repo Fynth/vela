@@ -1,6 +1,7 @@
 //! Native presentation. HTTP credentials and the one audio output stay in Rust.
 use crate::{
     AudioPhase, AudioSnapshot, DownloadProgress, PreparedAudio,
+    artwork::{ArtworkDecision, ArtworkKey, ArtworkStatus},
     audio::AudioEngine,
     client::VelaClient,
     mpris::{self, Mpris, RepeatKind as SystemRepeat},
@@ -89,6 +90,14 @@ impl Gate {
             cancel,
         }
     }
+    /// A token that ends with the current session/operation. Cover requests use it so a
+    /// sign-out cancels every in-flight fetch without touching the audio source gate.
+    fn child(&self) -> Option<CancellationToken> {
+        self.cancel
+            .borrow()
+            .as_ref()
+            .map(CancellationToken::child_token)
+    }
 }
 #[derive(Clone)]
 struct Ticket {
@@ -145,10 +154,15 @@ struct Ui {
     offline_play_gate: Gate,
     source_gate: Gate,
     logout_gate: Gate,
+    /// One app session of cover requests. Sign-out and account/origin changes cancel it,
+    /// so old-account art is never still loading into the new session.
+    artwork_gate: Gate,
     epoch: Signal<u64>,
     selection: Signal<u64>,
     generation_clock: Rc<Cell<u64>>,
     account: Signal<Option<Account>>,
+    /// Bounded, deduplicated native cover presentation state (no credentials).
+    artwork: Signal<crate::artwork::ArtworkStore>,
     origin: Signal<String>,
     username: Signal<String>,
     password: Signal<String>,
@@ -268,6 +282,28 @@ impl Ui {
             && *self.selection.peek() == selection
             && self.current_track().is_some_and(|track| track.id == id)
     }
+    /// The cover key of the current account/origin/session generation, or `None` when
+    /// the id is absent/invalid or no account is current. Lists only pass the server's
+    /// artwork id; the renderer never derives a URL, path or credential.
+    fn artwork_key(&self, artwork_id: Option<&str>) -> Option<ArtworkKey> {
+        if !self.signed_in() {
+            return None;
+        }
+        let account = self.account.peek();
+        let account = account
+            .as_ref()
+            .filter(|account| account.epoch == *self.epoch.peek())?;
+        ArtworkKey::new(
+            &account.origin,
+            &account.user.id,
+            *self.epoch.peek(),
+            artwork_id,
+        )
+    }
+    fn artwork_status(&self, key: &ArtworkKey) -> Option<ArtworkStatus> {
+        // `read` subscribes the calling component to cover updates; `peek` cannot.
+        self.artwork.read().status(key).cloned()
+    }
     fn cancel_all(&self) {
         self.login_gate.cancel();
         self.catalog_gate.cancel();
@@ -282,6 +318,7 @@ impl Ui {
         self.offline_play_gate.cancel();
         self.source_gate.cancel();
         self.logout_gate.cancel();
+        self.artwork_gate.cancel();
     }
     fn new_selection(&mut self) -> u64 {
         self.source_gate.cancel();
@@ -314,6 +351,9 @@ impl Ui {
         self.cancel_all();
         let epoch = self.epoch.peek().wrapping_add(1);
         self.epoch.set(epoch);
+        // Every cover of the previous account is dropped, not merely hidden: no data
+        // URL of a signed-out account survives in this session's presentation state.
+        self.artwork.write().reset(epoch);
         self.new_selection();
         self.account.set(None);
         // The in-memory copy of the saved session ends with the account. The
@@ -469,6 +509,99 @@ impl Ui {
             && !*self.catalog_loading.peek()
             && self.catalog_error.peek().is_empty()
     }
+    /// True only for a key of the exact account, origin and session generation that is
+    /// current now. A stale row can never start a fetch for a previous account.
+    fn artwork_key_is_current(&self, key: &ArtworkKey) -> bool {
+        if !self.signed_in() {
+            return false;
+        }
+        let account = self.account.peek();
+        account.as_ref().is_some_and(|account| {
+            key.belongs_to(&account.origin, &account.user.id, *self.epoch.peek())
+        })
+    }
+}
+/// Component props only need identity: every native surface shares this one live state
+/// by reference. The cover's own `artwork_id` prop still compares by value, so a
+/// recycled row with different artwork is never memoized away.
+impl PartialEq for Ui {
+    fn eq(&self, other: &Self) -> bool {
+        std::rc::Rc::ptr_eq(&self.generation_clock, &other.generation_clock)
+    }
+}
+
+/// One native cover slot. Only already-authorized image bytes reach the renderer, as a
+/// self-contained `data:` URL with no cookie, token or origin; every other state keeps
+/// the existing neutral Vela cover, so there is no broken-image glyph and no retry
+/// storm. The request key is the artwork's own id, never a row index.
+#[component]
+fn ArtworkCover(
+    ui: Ui,
+    artwork_id: Option<String>,
+    class: &'static str,
+    icon: &'static str,
+) -> Element {
+    let key = ui.artwork_key(artwork_id.as_deref());
+    let status = key.as_ref().and_then(|key| ui.artwork_status(key));
+    let request_ui = ui.clone();
+    let dependency = key.clone();
+    use_effect(use_reactive((&dependency,), move |(key,)| {
+        if let Some(key) = key {
+            request_artwork(request_ui.clone(), key);
+        }
+    }));
+    let state = cover_state(key.is_some(), status.as_ref());
+    if let Some(ArtworkStatus::Ready(url)) = status {
+        return rsx! { img {class: class, src: "{url}", alt: "", "data-native-artwork": "ready", loading: "lazy", decoding: "async"} };
+    }
+    rsx! { div {class: class, "aria-hidden": "true", "data-native-artwork": "{state}", Icon {name: icon}} }
+}
+
+/// The renderer state of one cover slot: an absent/invalid artwork id is `missing`, a
+/// known presentation state keeps its own name, and a key that has not answered yet is
+/// `pending`. Every non-`ready` state renders the existing neutral Vela cover.
+fn cover_state(has_key: bool, status: Option<&ArtworkStatus>) -> &'static str {
+    match (has_key, status) {
+        (false, _) => "missing",
+        (true, Some(status)) => status.label(),
+        (true, None) => "pending",
+    }
+}
+
+/// Ask the bounded presentation store for one cover. Repeated renders, duplicate rows
+/// and already-answered ids never spawn another request.
+fn request_artwork(mut ui: Ui, key: ArtworkKey) {
+    if !ui.artwork_key_is_current(&key) {
+        return;
+    }
+    if ui.artwork.peek().status(&key).is_some() {
+        return;
+    }
+    if ui.artwork.write().request(key.clone()) == ArtworkDecision::Fetch {
+        spawn_artwork(ui, key);
+    }
+}
+
+/// The one network task of one admitted cover request. The fetch shares the artwork
+/// session token, so sign-out cancels it; a late answer is rejected by the store's
+/// generation, and a cover failure never touches the audio source.
+fn spawn_artwork(mut ui: Ui, key: ArtworkKey) {
+    let Some(account) = ui.account.peek().clone() else {
+        return;
+    };
+    let Some(cancel) = ui.artwork_gate.child() else {
+        return;
+    };
+    spawn(async move {
+        let result = account.client.artwork(key.artwork_id(), cancel).await;
+        let status = result.map(|art| std::sync::Arc::<str>::from(art.data_url()));
+        let mut store = ui.artwork.write();
+        let next = store.complete(&key, status);
+        drop(store);
+        if let Some(next) = next {
+            spawn_artwork(ui.clone(), next);
+        }
+    });
 }
 
 fn default_origin() -> String {
@@ -577,6 +710,10 @@ fn adopt_account(
         origin,
     }));
     ui.offline.set(Vec::new());
+    // A fresh account/origin/session starts with no cover state and one cancel token
+    // for every cover request that belongs to it.
+    ui.artwork.write().reset(epoch);
+    ui.artwork_gate.begin(epoch);
     // AUD-08: the saved-copy list is read and verified off this thread, and only
     // the account that started the read may publish its result.
     let ticket = ui.offline_list_gate.begin(epoch);
@@ -2798,7 +2935,7 @@ fn library(ui: Ui) -> Element {
                     let active=*ui.offline_active.read() && ui.current_track().is_some_and(|t|t.id==saved.track.id) && *ui.wants_play.read();
                     let verb=if active {"Pause"}else{"Play"};
                     rsx! { article {class:"native-queue-row",key:"offline-{offline_id.clone()}","data-offline-track-id":"{offline_id.clone()}",
-                        div {class:"neutral-cover","aria-hidden":"true",Icon {name:"down"}}
+                        ArtworkCover {ui:ui.clone(),artwork_id:saved.track.artwork_id.clone(),class:"neutral-cover",icon:"down"}
                         div {class:"native-queue-select",div {strong {"{saved.track.title}"} small {"{saved.track.artist} · {saved.length_bytes / 1024} KiB on this device"} small {if offline_removing_this {"Removing this device copy…"} else if offline_damaged {"Integrity check failed · save it again"} else {"Private offline copy"}}}}
                         button {class:"button primary small",disabled:offline_damaged||offline_removing_this,"aria-label":"{verb} offline {title}",onclick:move |_|play_offline(play_handler.clone(),play_saved.clone()),if active {Icon {name:"pause"}}else{Icon {name:"play"}} "{verb} offline"}
                         if offline_confirm == offline_id {
@@ -2826,7 +2963,7 @@ fn library(ui: Ui) -> Element {
                     let row_action=if row_playing {"Pause"}else{"Play"};
                     rsx! {article {class:if current {"native-track current"} else {"native-track"},key:"{track.id}","data-native-track-id":"{track.id}",
                         button {class:"icon-button track-start",disabled:!ui.audio_ready(),title:if !ui.audio_ready() {"Native audio output is unavailable"} else {"Play original"},"aria-label":"{row_action} {track.title}","aria-pressed":row_playing,onclick:move |_|play_catalog(play_ui.clone(),played_catalog.clone(),at),if row_playing {Icon {name:"pause"}}else{Icon {name:"play"}}}
-                        div {class:"native-track-name",div {class:"neutral-cover","aria-hidden":"true",Icon {name:"music"}} div {strong {"{track.title}"} small {"{track.artist}"}}}
+                        div {class:"native-track-name",ArtworkCover {ui:ui.clone(),artwork_id:track.artwork_id.clone(),class:"neutral-cover",icon:"music"} div {strong {"{track.title}"} small {"{track.artist}"}}}
                         span {class:"native-track-album","{track.album}"}
                         span {class:"native-track-time","{time_label(track.duration_ms.max(0) as u64)}"}
                         div {class:"native-track-actions",
@@ -3105,8 +3242,8 @@ fn playlists_view(ui: Ui) -> Element {
                                             play_owned_context(play_entry.clone(),tracks,at,format!("Playlist · {}",detail.playlist.name));
                                         }
                                     }
-                                },if active {Icon {name:"pause"}}else{Icon {name:"play"}}}}else{div {class:"neutral-cover", "aria-hidden":"true",Icon {name:"music"}}}
-                                div { class: "native-queue-select", div { strong { "{entry.track.title}" } small { "{entry.track.artist}" } } }
+                                },if active {Icon {name:"pause"}}else{Icon {name:"play"}}}}
+                                div { class: "native-queue-select", ArtworkCover {ui:ui.clone(),artwork_id:entry.track.artwork_id.clone(),class:"neutral-cover",icon:"music"}, div { strong { "{entry.track.title}" } small { "{entry.track.artist}" } } }
                                 if entry.can_stream { span { class: "queue-current", "Playable" } } else { small { "Metadata only" } }
                                 if detail.playlist.can_edit {
                                     button { class: "icon-button", disabled: at == 0 || *busy.read(), "aria-label": "Move playlist entry {at + 1} up", title: if at == 0 { "Already the first playlist entry." } else { "Move this entry one place earlier." }, onclick: move |_| move_playlist_entry(up.clone(), at, -1), Icon { name: "up" } }
@@ -3808,19 +3945,19 @@ fn browse_view(ui: Ui) -> Element {
         if selected {
             div {class:"native-track-actions",button {class:"button secondary small",onclick:move |_|{let mut ui=back.clone();ui.browse_id.set(None);ui.browse_title.set(String::new());ui.browse_tracks.set(Vec::new());},"Back to {group_label}s"} button {class:"button primary small",disabled:!ui.audio_ready()||tracks.is_empty(),onclick:move |_|play_group(play.clone()),Icon {name:"play"} "Play {group_label}"}}
             if !tracks.is_empty() {div {class:"native-queue-list",for (at, track) in tracks.iter().cloned().enumerate() {{let play=ui.clone();let active=ui.current_track().is_some_and(|t|t.id==track.id) && *ui.wants_play.read();let verb=if active {"Pause"}else{"Play"}; rsx!{article {class:"native-queue-row",key:"{at}-{track.id}",
-                button {class:"icon-button", "aria-label":"{verb} {track.title} from {group_label}",onclick:move |_|{let tracks=play.browse_tracks.peek().clone();let title=play.browse_title.peek().clone();play_owned_context(play.clone(),tracks,at,title);},if active{Icon {name:"pause"}}else{Icon {name:"play"}}} div {class:"neutral-cover","aria-hidden":"true",Icon {name:"music"}} div {class:"native-queue-select",div {strong {"{track.title}"} small {"{track.artist}"}}}
+                button {class:"icon-button", "aria-label":"{verb} {track.title} from {group_label}",onclick:move |_|{let tracks=play.browse_tracks.peek().clone();let title=play.browse_title.peek().clone();play_owned_context(play.clone(),tracks,at,title);},if active{Icon {name:"pause"}}else{Icon {name:"play"}}} ArtworkCover {ui:ui.clone(),artwork_id:track.artwork_id.clone(),class:"neutral-cover",icon:"music"} div {class:"native-queue-select",div {strong {"{track.title}"} small {"{track.artist}"}}}
                 span {class:"native-track-time","{time_label(track.duration_ms.max(0) as u64)}"}
             } } }} } }
         } else {
             if kind == "albums" {
                 if albums.is_empty() && !loading && error.is_empty() {div {class:"native-empty",Icon {name:"albums"} h2 {"No album groups yet"} p {"Uploaded or scanned tracks with album metadata will appear here."}}}
                 div {class:"native-queue-list",for album in albums { { let open=ui.clone(); let id=album.id.clone(); rsx! { article {class:"native-queue-row",key:"{album.id}",
-                    button {class:"native-queue-select","aria-label":"Open album {album.title} by {album.artist}",onclick:move |_|open_group(open.clone(),"albums",id.clone()),div {class:"neutral-cover","aria-hidden":"true",Icon {name:"albums"}} div {strong {"{album.title}"} small {"{album.artist} · {album.track_count} tracks"} }}
+                    button {class:"native-queue-select","aria-label":"Open album {album.title} by {album.artist}",onclick:move |_|open_group(open.clone(),"albums",id.clone()),ArtworkCover {ui:ui.clone(),artwork_id:album.artwork_id.clone(),class:"neutral-cover",icon:"albums"} div {strong {"{album.title}"} small {"{album.artist} · {album.track_count} tracks"} }}
                 } } } } }
             } else {
                 if artists.is_empty() && !loading && error.is_empty() {div {class:"native-empty",Icon {name:"artists"} h2 {"No artist groups yet"} p {"Uploaded or scanned tracks with artist metadata will appear here."}}}
                 div {class:"native-queue-list",for artist in artists { { let open=ui.clone(); let id=artist.id.clone(); rsx! { article {class:"native-queue-row",key:"{artist.id}",
-                    button {class:"native-queue-select","aria-label":"Open artist {artist.name}",onclick:move |_|open_group(open.clone(),"artists",id.clone()),div {class:"neutral-cover","aria-hidden":"true",Icon {name:"artists"}} div {strong {"{artist.name}"} small {"{artist.track_count} tracks · {artist.album_count} albums"} }}
+                    button {class:"native-queue-select","aria-label":"Open artist {artist.name}",onclick:move |_|open_group(open.clone(),"artists",id.clone()),ArtworkCover {ui:ui.clone(),artwork_id:artist.artwork_id.clone(),class:"neutral-cover",icon:"artists"} div {strong {"{artist.name}"} small {"{artist.track_count} tracks · {artist.album_count} albums"} }}
                 } } } } }
             }
         }
@@ -3843,7 +3980,7 @@ fn queue_view(ui: Ui) -> Element {
         else {div {class:"native-queue-list",for (at,track) in queue.into_iter().enumerate() { {
             let select=ui.clone();let up=ui.clone();let down=ui.clone();let remove=ui.clone();
             rsx! {article {class:if current==Some(at){"native-queue-row current"}else{"native-queue-row"},key:"{at}-{track.id}","data-native-queue-index":"{at}",
-                button {class:"native-queue-select",disabled:!ui.audio_ready(),"aria-label":format!("{} queue occurrence {at}: {}",if current==Some(at) && *ui.wants_play.read(){"Pause"}else{"Play"},track.title),onclick:move |_|select_queue(select.clone(),at),span {class:"queue-number","{at+1}"} div {class:"neutral-cover","aria-hidden":"true",Icon {name:"music"}} div {strong {"{track.title}"} small {"{track.artist}"}} if current==Some(at){span {class:"queue-current","Current"}}}
+                button {class:"native-queue-select",disabled:!ui.audio_ready(),"aria-label":format!("{} queue occurrence {at}: {}",if current==Some(at) && *ui.wants_play.read(){"Pause"}else{"Play"},track.title),onclick:move |_|select_queue(select.clone(),at),span {class:"queue-number","{at+1}"} ArtworkCover {ui:ui.clone(),artwork_id:track.artwork_id.clone(),class:"neutral-cover",icon:"music"} div {strong {"{track.title}"} small {"{track.artist}"}} if current==Some(at){span {class:"queue-current","Current"}}}
                 button {class:"icon-button",disabled:at==0,"aria-label":"Move queue occurrence {at} up",title:"Move up",onclick:move |_|queue_edit(up.clone(),at,false),Icon {name:"up"}}
                 button {class:"icon-button",disabled:at+1>=queue_len,"aria-label":"Move queue occurrence {at} down",title:if at+1>=queue_len {"Already the last queued occurrence."} else {"Move down"},onclick:move |_|queue_move_down(down.clone(),at),Icon {name:"down"}}
                 button {class:"icon-button",disabled:current==Some(at),"aria-label":"Remove queue occurrence {at}",title:if current==Some(at){"Current occurrence cannot be removed; clear the queue to stop it"}else{"Remove from queue"},onclick:move |_|queue_edit(remove.clone(),at,true),Icon {name:"close"}}
@@ -3915,7 +4052,7 @@ fn player(ui: Ui) -> Element {
         .is_some_and(|track| ui.favorite_busy.read().as_str() == track.id);
     rsx! {footer {class:"native-player","aria-label":"Native music player","data-audio-phase":"{snapshot.phase:?}","data-audio-generation":"{snapshot.generation}",
         div {class:"player-track",
-            div {class:"neutral-cover player-cover","aria-hidden":"true",Icon {name:"music"}}
+            ArtworkCover {ui:ui.clone(),artwork_id:track.as_ref().and_then(|track|track.artwork_id.clone()),class:"neutral-cover player-cover",icon:"music"}
             div {if let Some(remote)=remote.clone() {strong {"{remote.title}"} small {"{remote.artist} · public"} } else if let Some(track)=track.clone() {strong {"{track.title}"} small {"{track.artist}"}}else{strong {"Ready when you are"} small {"Choose something you love"}}}
             if remote.is_none() && let Some(favorite_track)=track.clone() {
                 {
@@ -3962,10 +4099,12 @@ pub fn App() -> Element {
         offline_play_gate: use_hook(Gate::default),
         source_gate: use_hook(Gate::default),
         logout_gate: use_hook(Gate::default),
+        artwork_gate: use_hook(Gate::default),
         epoch: use_signal(|| 1),
         selection: use_signal(|| 0),
         generation_clock: use_hook(|| Rc::new(Cell::new(0))),
         account: use_signal(|| None),
+        artwork: use_signal(|| crate::artwork::ArtworkStore::new(0)),
         origin: use_signal(default_origin),
         username: use_signal(String::new),
         password: use_signal(String::new),
@@ -4231,6 +4370,34 @@ pub fn App() -> Element {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cover_slots_fall_back_for_missing_pending_denied_and_failed_states() {
+        assert_eq!(cover_state(false, None), "missing");
+        assert_eq!(
+            cover_state(
+                false,
+                Some(&ArtworkStatus::Ready("data:image/jpeg;base64,AA".into()))
+            ),
+            "missing",
+            "an absent artwork id never renders bytes, even if a stale state existed"
+        );
+        assert_eq!(cover_state(true, None), "pending");
+        assert_eq!(cover_state(true, Some(&ArtworkStatus::Loading)), "loading");
+        assert_eq!(cover_state(true, Some(&ArtworkStatus::Denied)), "denied");
+        assert_eq!(cover_state(true, Some(&ArtworkStatus::Failed)), "failed");
+        assert_eq!(
+            cover_state(
+                true,
+                Some(&ArtworkStatus::Ready("data:image/jpeg;base64,AA".into()))
+            ),
+            "ready"
+        );
+        // Only `Ready` exposes a renderer source; nothing else may reach an `<img>`.
+        assert!(ArtworkStatus::Denied.data_url().is_none());
+        assert!(ArtworkStatus::Failed.data_url().is_none());
+        assert!(ArtworkStatus::Loading.data_url().is_none());
+    }
 
     #[test]
     fn source_modes_do_not_apply_owned_shuffle_or_repeat_all_to_other_adapters() {

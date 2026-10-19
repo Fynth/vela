@@ -6,7 +6,7 @@
 //! strong validator and the cached file still hashes to it from the descriptor the
 //! decoder receives. Cached bytes are never a grant: a denial, a changed validator or
 //! a local digest mismatch falls back to the existing authorized full GET.
-use crate::{DownloadProgress, PreparedAudio, media_cache};
+use crate::{DownloadProgress, PreparedAudio, artwork_cache, media_cache};
 use futures_util::StreamExt;
 use reqwest::{Client, Method, Response, StatusCode, header};
 use serde::de::DeserializeOwned;
@@ -39,6 +39,133 @@ const REVALIDATE_TIMEOUT: Duration = Duration::from_secs(20);
 pub(crate) const MAX_MEDIA_BYTES: u64 = 250 * 1024 * 1024;
 const MAX_JSON_BYTES: usize = 4 * 1024 * 1024;
 const FILE_CHUNK: usize = 64 * 1024;
+/// Cover art is user-visible presentation, never an audio source. One response is
+/// capped independently of the 250 MiB original-audio path.
+pub(crate) const MAX_ARTWORK_BYTES: u64 = 8 * 1024 * 1024;
+/// A cover transfer is bounded end to end, including its body.
+const ARTWORK_TIMEOUT: Duration = Duration::from_secs(20);
+/// The closed raster allowlist. SVG/HTML is never accepted from an origin.
+const ARTWORK_ACCEPT: &str = "image/jpeg,image/png,image/webp";
+
+/// The raster formats the native renderer accepts as cover art.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ArtworkMime {
+    Jpeg,
+    Png,
+    Webp,
+}
+impl ArtworkMime {
+    pub fn content_type(self) -> &'static str {
+        match self {
+            Self::Jpeg => "image/jpeg",
+            Self::Png => "image/png",
+            Self::Webp => "image/webp",
+        }
+    }
+    pub(crate) fn extension(self) -> &'static str {
+        match self {
+            Self::Jpeg => "jpg",
+            Self::Png => "png",
+            Self::Webp => "webp",
+        }
+    }
+    /// Strict allowlist parse of the media type, before any parameters.
+    fn from_content_type(value: &str) -> Option<Self> {
+        let media = value.split(';').next()?.trim();
+        if media.eq_ignore_ascii_case("image/jpeg") {
+            Some(Self::Jpeg)
+        } else if media.eq_ignore_ascii_case("image/png") {
+            Some(Self::Png)
+        } else if media.eq_ignore_ascii_case("image/webp") {
+            Some(Self::Webp)
+        } else {
+            None
+        }
+    }
+    /// The raster magic prefix that must agree with the declared content type.
+    fn matches(self, bytes: &[u8]) -> bool {
+        match self {
+            Self::Jpeg => bytes.starts_with(&[0xFF, 0xD8, 0xFF]),
+            Self::Png => bytes.starts_with(b"\x89PNG\r\n\x1A\n"),
+            Self::Webp => {
+                bytes.len() >= 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP"
+            }
+        }
+    }
+}
+
+/// One bounded cover response: already-authorized raster bytes only.
+///
+/// Its `Debug` redacts the payload: these bytes are private user content, not
+/// diagnostic output. The renderer only ever receives [`ArtworkBytes::data_url`],
+/// which contains no cookie, token or origin and cannot become a general
+/// authenticated URL.
+pub struct ArtworkBytes {
+    mime: ArtworkMime,
+    bytes: Vec<u8>,
+}
+impl std::fmt::Debug for ArtworkBytes {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ArtworkBytes")
+            .field("mime", &self.mime)
+            .field("length", &self.bytes.len())
+            .finish()
+    }
+}
+impl ArtworkBytes {
+    /// Validate a complete image body: non-empty, within the 8 MiB cap and carrying a
+    /// raster magic prefix that agrees with the declared content type. Anything else
+    /// is rejected before a byte can reach the WebView.
+    pub(crate) fn new(mime: ArtworkMime, bytes: Vec<u8>) -> Option<Self> {
+        if bytes.is_empty() || bytes.len() as u64 > MAX_ARTWORK_BYTES || !mime.matches(&bytes) {
+            return None;
+        }
+        Some(Self { mime, bytes })
+    }
+    pub fn mime(&self) -> ArtworkMime {
+        self.mime
+    }
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+    pub fn len(&self) -> usize {
+        self.bytes.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.bytes.is_empty()
+    }
+    /// The only renderer representation: a self-contained `data:` URL of the image
+    /// bytes that were just authorized. It carries no credentials and never points at
+    /// the origin.
+    pub fn data_url(&self) -> String {
+        use base64::Engine as _;
+        format!(
+            "data:{};base64,{}",
+            self.mime.content_type(),
+            base64::engine::general_purpose::STANDARD.encode(&self.bytes)
+        )
+    }
+}
+
+/// Why a cover was not produced. Every variant keeps the existing neutral fallback in
+/// the renderer; only [`ArtworkError::Failed`] is worth a later user-initiated retry,
+/// and [`ArtworkError::Denied`] never is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ArtworkError {
+    /// 401/403/404 or an already-closed session: the origin did not authorize this
+    /// artwork for this account now. Cached bytes are not returned.
+    Denied,
+    /// The request was canceled or its app session/lifetime ended.
+    Canceled,
+    /// Transport, redirect, MIME, size, magic or cache failure.
+    Failed,
+}
+impl ArtworkError {
+    pub fn retryable(self) -> bool {
+        matches!(self, Self::Failed)
+    }
+}
 
 // Intentionally no Debug implementation: neither request headers nor the
 // selected origin/query are diagnostic output for the native UI.
@@ -443,6 +570,228 @@ impl VelaClient {
             },
         )
         .await
+    }
+
+    /// Resolve one owner-authorized cover image for the native renderer.
+    ///
+    /// Order: (a) one bounded HEAD re-authorizes this artwork for the current session
+    /// and reports its content type; (b) only that answer may unlock cached bytes of
+    /// this exact origin/account/artwork; (c) otherwise a bounded GET verifies the
+    /// content type, the 8 MiB cap and the raster magic prefix before returning bytes.
+    /// A 401/403/404 is `Denied` and never reads or returns cached bytes, so a foreign
+    /// or revoked artwork cannot leak through the disk cache. Nothing here touches the
+    /// audio engine: a cover failure has no transport path.
+    pub async fn artwork(
+        &self,
+        id: &str,
+        cancel: CancellationToken,
+    ) -> Result<Arc<ArtworkBytes>, ArtworkError> {
+        if !canonical_uuid(id) {
+            // Arbitrary paths, traversal attempts and non-canonical ids never reach a
+            // request or a cache lookup.
+            return Err(ArtworkError::Failed);
+        }
+        if self.inner.lifetime.is_cancelled() {
+            return Err(ArtworkError::Canceled);
+        }
+        let session = self.session().map_err(|_| ArtworkError::Denied)?;
+        // The reusable cache is optional: without a private cache root the client keeps
+        // the authorized GET only, sends no revalidation request and never trusts cached
+        // bytes.
+        let scope = self.artwork_scope(id);
+        if let Some(scope) = &scope {
+            match self.artwork_revalidate(id, &session, &cancel).await {
+                Ok(mime) => {
+                    if let Some(cached) = scope.read(mime, &cancel).await? {
+                        return Ok(Arc::new(cached));
+                    }
+                }
+                Err(ArtworkError::Canceled) => return Err(ArtworkError::Canceled),
+                Err(ArtworkError::Denied) => return Err(ArtworkError::Denied),
+                // A HEAD the origin cannot answer is not a rejection: the authorized GET
+                // below is the authoritative check and reports the honest result.
+                Err(ArtworkError::Failed) => {}
+            }
+        }
+        if cancel.is_cancelled() {
+            return Err(ArtworkError::Canceled);
+        }
+        if self.inner.lifetime.is_cancelled() {
+            return Err(ArtworkError::Denied);
+        }
+        let art = Arc::new(self.fetch_artwork(id, &session, &cancel).await?);
+        if let Some(scope) = &scope {
+            // Best effort: the caller already holds verified bytes, so a canceled or
+            // failed private copy can never fail the cover.
+            scope.store(&art, &cancel).await;
+        }
+        Ok(art)
+    }
+
+    /// Ask the origin, for the current session, whether this artwork may be shown.
+    /// The answer's content type is the only claim a cached file may be reused for.
+    async fn artwork_revalidate(
+        &self,
+        id: &str,
+        session: &Session,
+        cancel: &CancellationToken,
+    ) -> Result<ArtworkMime, ArtworkError> {
+        let request = self.artwork_request(
+            Method::HEAD,
+            endpoint(&self.inner.origin, &format!("/api/artwork/{id}")),
+            session,
+        );
+        let sent = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => return Err(ArtworkError::Canceled),
+            _ = self.inner.lifetime.cancelled() => return Err(ArtworkError::Denied),
+            result = tokio::time::timeout(REVALIDATE_TIMEOUT, request.send()) => result,
+        };
+        let response = match sent {
+            Ok(Ok(response)) => response,
+            // Transport failures and deadlines are not a rejection: the full GET below
+            // is the authoritative check and reports the honest error.
+            Ok(Err(_)) | Err(_) => return Err(ArtworkError::Failed),
+        };
+        let status = response.status();
+        if matches!(
+            status,
+            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN | StatusCode::NOT_FOUND
+        ) {
+            return Err(ArtworkError::Denied);
+        }
+        if status != StatusCode::OK {
+            return Err(ArtworkError::Failed);
+        }
+        if response.headers().contains_key(header::CONTENT_RANGE)
+            || response
+                .headers()
+                .get(header::CONTENT_ENCODING)
+                .is_some_and(|encoding| encoding != "identity")
+            || response
+                .headers()
+                .get(header::CONTENT_LENGTH)
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| value.parse::<u64>().ok())
+                // A HEAD answer may legitimately declare no body; only an oversized
+                // declaration is disqualifying here. The GET below caps the real body.
+                .is_some_and(|length| length > MAX_ARTWORK_BYTES)
+        {
+            return Err(ArtworkError::Failed);
+        }
+        response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .and_then(ArtworkMime::from_content_type)
+            .ok_or(ArtworkError::Failed)
+    }
+
+    /// One bounded authorized GET. The body is capped while streaming, so a lying or
+    /// endless response cannot exhaust UI memory, and the magic prefix must match the
+    /// allowlisted content type before the bytes become [`ArtworkBytes`].
+    async fn fetch_artwork(
+        &self,
+        id: &str,
+        session: &Session,
+        cancel: &CancellationToken,
+    ) -> Result<ArtworkBytes, ArtworkError> {
+        let request = self.artwork_request(
+            Method::GET,
+            endpoint(&self.inner.origin, &format!("/api/artwork/{id}")),
+            session,
+        );
+        let result = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => return Err(ArtworkError::Canceled),
+            _ = self.inner.lifetime.cancelled() => return Err(ArtworkError::Denied),
+            result = tokio::time::timeout(ARTWORK_TIMEOUT, self.artwork_body(request)) => result,
+        };
+        match result {
+            Ok(result) => result,
+            Err(_) => Err(ArtworkError::Failed),
+        }
+    }
+
+    async fn artwork_body(
+        &self,
+        request: reqwest::RequestBuilder,
+    ) -> Result<ArtworkBytes, ArtworkError> {
+        let response = request.send().await.map_err(|_| ArtworkError::Failed)?;
+        let status = response.status();
+        if matches!(
+            status,
+            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN | StatusCode::NOT_FOUND
+        ) {
+            return Err(ArtworkError::Denied);
+        }
+        if status != StatusCode::OK {
+            // Redirects are disabled for every native request; a 3xx answer is a
+            // failure, not a second origin to fetch the image from.
+            return Err(ArtworkError::Failed);
+        }
+        if response.headers().contains_key(header::CONTENT_RANGE)
+            || response
+                .headers()
+                .get(header::CONTENT_ENCODING)
+                .is_some_and(|encoding| encoding != "identity")
+            || response
+                .content_length()
+                .is_some_and(|length| length == 0 || length > MAX_ARTWORK_BYTES)
+        {
+            return Err(ArtworkError::Failed);
+        }
+        let mime = response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .and_then(ArtworkMime::from_content_type)
+            .ok_or(ArtworkError::Failed)?;
+        let mut bytes = Vec::new();
+        let mut stream = response.bytes_stream();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|_| ArtworkError::Failed)?;
+            if bytes.len().saturating_add(chunk.len()) as u64 > MAX_ARTWORK_BYTES {
+                return Err(ArtworkError::Failed);
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        ArtworkBytes::new(mime, bytes).ok_or(ArtworkError::Failed)
+    }
+
+    /// A cover request carries only the current in-memory session cookie, a strict
+    /// raster allowlist and identity encoding. `http` already disables redirects.
+    fn artwork_request(
+        &self,
+        method: Method,
+        url: Url,
+        session: &Session,
+    ) -> reqwest::RequestBuilder {
+        self.inner
+            .http
+            .request(method, url)
+            .header(header::COOKIE, session.cookie.clone())
+            .header(header::ACCEPT, ARTWORK_ACCEPT)
+            .header(header::ACCEPT_ENCODING, "identity")
+    }
+
+    /// The reusable cover namespace of this client, or `None` when no private cache
+    /// root exists. `None` keeps the authorized GET as the only path.
+    fn artwork_scope(&self, artwork_id: &str) -> Option<ArtworkScope> {
+        let key =
+            artwork_cache::Key::new(self.inner.origin.as_str(), &self.inner.user_id, artwork_id)?;
+        Some(ArtworkScope {
+            root: self.artwork_cache_root().ok()?,
+            key,
+        })
+    }
+
+    fn artwork_cache_root(&self) -> Result<PathBuf, String> {
+        #[cfg(test)]
+        if let Some(directory) = &self.inner.cache_directory {
+            return Ok(directory.join("artwork"));
+        }
+        artwork_cache::default_root()
     }
 
     pub async fn albums(
@@ -1379,6 +1728,54 @@ impl VelaClient {
     }
 }
 
+/// One account's cover cache on one origin. Never shared across accounts or origins,
+/// and only consulted after the origin re-authorized the current session.
+struct ArtworkScope {
+    root: PathBuf,
+    key: artwork_cache::Key,
+}
+
+impl ArtworkScope {
+    /// A revalidated hit, or an honest miss. A denial never reaches this method, and an
+    /// unreadable, tampered or mismatched file is a miss rather than an error.
+    async fn read(
+        &self,
+        mime: ArtworkMime,
+        cancel: &CancellationToken,
+    ) -> Result<Option<ArtworkBytes>, ArtworkError> {
+        let root = self.root.clone();
+        let key = self.key.clone();
+        let probe = cancel.clone();
+        // Blocking worker: reading a private file never runs on the UI thread.
+        let read = tokio::task::spawn_blocking(move || {
+            artwork_cache::read(&root, &key, mime, &|| probe.is_cancelled())
+        })
+        .await;
+        match read {
+            Ok(Ok(bytes)) => Ok(bytes),
+            Ok(Err(_)) | Err(_) => {
+                if cancel.is_cancelled() {
+                    Err(ArtworkError::Canceled)
+                } else {
+                    Ok(None)
+                }
+            }
+        }
+    }
+
+    /// Warm this namespace from bytes that were just verified by the authorized GET.
+    async fn store(&self, art: &Arc<ArtworkBytes>, cancel: &CancellationToken) {
+        let root = self.root.clone();
+        let key = self.key.clone();
+        let payload = art.clone();
+        let probe = cancel.clone();
+        let _ = tokio::task::spawn_blocking(move || {
+            artwork_cache::store(&root, &key, &payload, &|| probe.is_cancelled())
+        })
+        .await;
+    }
+}
+
 /// One account's reusable complete-file cache on one origin.
 struct CacheScope {
     root: PathBuf,
@@ -1721,6 +2118,7 @@ mod tests {
     use axum::{
         Router,
         body::Body,
+        extract::Path,
         http::{HeaderMap, Response as HttpResponse},
         routing::{get, post},
     };
@@ -3041,6 +3439,455 @@ mod tests {
             counters.gets.load(Ordering::SeqCst),
             3,
             "a self-consistent tampered pair must still be re-downloaded"
+        );
+    }
+
+    const ARTWORK_ID: &str = "30000000-0000-4000-8000-000000000001";
+    const OTHER_ARTWORK_ID: &str = "30000000-0000-4000-8000-000000000002";
+    const OTHER_USER_ID: &str = "10000000-0000-4000-8000-000000000009";
+    /// A structurally valid JPEG header/footer. The native client never re-decodes art;
+    /// it only proves the bytes are the declared raster type.
+    const COVER: &[u8] = &[
+        0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, b'J', b'F', b'I', b'F', 0x00, 0x01, 0x01, 0x00, 0x00,
+        0x01, 0x00, 0x01, 0x00, 0x00, 0xFF, 0xD9,
+    ];
+    const PNG_COVER: &[u8] = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR";
+    const WEBP_COVER: &[u8] = b"RIFF\x24\x00\x00\x00WEBPVP8 ";
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum ArtworkMode {
+        Cover,
+        HeadOnly,
+        NoHead,
+        JsonContentType,
+        MismatchedMagic,
+        Oversized,
+        Redirect,
+        Denied,
+        PngCover,
+        WebpCover,
+    }
+
+    /// A fixture origin for the artwork route that records GET/HEAD counts, so a test can
+    /// prove a revalidated cache hit transfers no body.
+    struct ArtworkServer {
+        mode: Mutex<ArtworkMode>,
+        gets: AtomicUsize,
+        heads: AtomicUsize,
+    }
+    impl ArtworkServer {
+        fn new(mode: ArtworkMode) -> Arc<Self> {
+            Arc::new(Self {
+                mode: Mutex::new(mode),
+                gets: AtomicUsize::new(0),
+                heads: AtomicUsize::new(0),
+            })
+        }
+        fn set_mode(&self, mode: ArtworkMode) {
+            *self.mode.lock().unwrap() = mode;
+            self.gets.store(0, Ordering::SeqCst);
+            self.heads.store(0, Ordering::SeqCst);
+        }
+        fn router(self: &Arc<Self>) -> Router {
+            let server = self.clone();
+            with_login(Router::new().route(
+                "/api/artwork/{id}",
+                get(
+                    move |method: axum::http::Method,
+                          Path(id): Path<String>,
+                          headers: HeaderMap| {
+                        let server = server.clone();
+                        async move { server.answer(method, &id, &headers) }
+                    },
+                ),
+            ))
+        }
+        fn answer(
+            &self,
+            method: axum::http::Method,
+            id: &str,
+            headers: &HeaderMap,
+        ) -> HttpResponse<Body> {
+            // The route only ever accepts the current in-memory session and a raster
+            // Accept; no test request may carry credentials anywhere else.
+            if headers
+                .get(header::COOKIE)
+                .and_then(|value| value.to_str().ok())
+                != Some(format!("vela_session={}", "a".repeat(64)).as_str())
+            {
+                return status_response(StatusCode::UNAUTHORIZED);
+            }
+            let accept = headers
+                .get(header::ACCEPT)
+                .and_then(|value| value.to_str().ok())
+                .unwrap_or_default();
+            if !accept.contains("image/jpeg") || accept.contains("application/json") {
+                return status_response(StatusCode::NOT_ACCEPTABLE);
+            }
+            if !canonical_uuid(id) {
+                return status_response(StatusCode::NOT_FOUND);
+            }
+            let mode = *self.mode.lock().unwrap();
+            let head = method == axum::http::Method::HEAD;
+            if head {
+                self.heads.fetch_add(1, Ordering::SeqCst);
+            } else {
+                self.gets.fetch_add(1, Ordering::SeqCst);
+            }
+            match mode {
+                ArtworkMode::Cover => cover_response(StatusCode::OK, "image/jpeg", COVER, head),
+                // A cache hit must be served by the revalidating HEAD alone.
+                ArtworkMode::HeadOnly if head => {
+                    cover_response(StatusCode::OK, "image/jpeg", COVER, true)
+                }
+                ArtworkMode::HeadOnly => status_response(StatusCode::INTERNAL_SERVER_ERROR),
+                ArtworkMode::NoHead if head => status_response(StatusCode::METHOD_NOT_ALLOWED),
+                ArtworkMode::NoHead => cover_response(StatusCode::OK, "image/jpeg", COVER, false),
+                ArtworkMode::PngCover => {
+                    cover_response(StatusCode::OK, "image/png", PNG_COVER, head)
+                }
+                ArtworkMode::WebpCover => {
+                    cover_response(StatusCode::OK, "image/webp", WEBP_COVER, head)
+                }
+                ArtworkMode::JsonContentType => {
+                    let body = if head {
+                        Body::empty()
+                    } else {
+                        Body::from(COVER.to_vec())
+                    };
+                    mime_response(StatusCode::OK, "application/json", body)
+                }
+                ArtworkMode::MismatchedMagic => {
+                    let mut bytes = b"\x89PNG\r\n\x1a\n".to_vec();
+                    bytes.extend_from_slice(COVER);
+                    cover_response(StatusCode::OK, "image/jpeg", &bytes, head)
+                }
+                ArtworkMode::Oversized => {
+                    let mut bytes = COVER.to_vec();
+                    bytes.resize(MAX_ARTWORK_BYTES as usize + 1, 0);
+                    cover_response(StatusCode::OK, "image/jpeg", &bytes, head)
+                }
+                ArtworkMode::Redirect => HttpResponse::builder()
+                    .status(StatusCode::TEMPORARY_REDIRECT)
+                    .header(header::LOCATION, "/api/login")
+                    .body(Body::empty())
+                    .unwrap(),
+                ArtworkMode::Denied => status_response(StatusCode::NOT_FOUND),
+            }
+        }
+    }
+    fn status_response(status: StatusCode) -> HttpResponse<Body> {
+        HttpResponse::builder()
+            .status(status)
+            .body(Body::empty())
+            .unwrap()
+    }
+    fn mime_response(status: StatusCode, mime: &'static str, body: Body) -> HttpResponse<Body> {
+        HttpResponse::builder()
+            .status(status)
+            .header(header::CONTENT_TYPE, mime)
+            .body(body)
+            .unwrap()
+    }
+    fn cover_response(
+        status: StatusCode,
+        mime: &'static str,
+        body: &[u8],
+        head: bool,
+    ) -> HttpResponse<Body> {
+        let body = if head {
+            Body::empty()
+        } else {
+            Body::from(body.to_vec())
+        };
+        mime_response(status, mime, body)
+    }
+    fn artwork_key(origin: &str, account: &str, artwork: &str) -> artwork_cache::Key {
+        artwork_cache::Key::new(canonical_origin(origin).unwrap().as_str(), account, artwork)
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn authorized_artwork_is_bounded_typed_private_and_cached() {
+        let server = ArtworkServer::new(ArtworkMode::Cover);
+        let http = HttpFixture::start(server.router()).await;
+        let directory = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let client = fixture_client(&http, &directory, &cache).await;
+
+        let art = client
+            .artwork(ARTWORK_ID, CancellationToken::new())
+            .await
+            .unwrap();
+        assert_eq!(art.mime(), ArtworkMime::Jpeg);
+        assert_eq!(art.bytes(), COVER);
+        assert!(art.len() <= MAX_ARTWORK_BYTES as usize);
+        let data_url = art.data_url();
+        assert!(data_url.starts_with("data:image/jpeg;base64,"));
+        assert!(!data_url.contains("vela_session"));
+        assert!(!data_url.contains(&http.origin));
+        {
+            use base64::Engine as _;
+            let encoded = data_url
+                .strip_prefix("data:image/jpeg;base64,")
+                .expect("a cover data URL carries its media type");
+            assert_eq!(
+                base64::engine::general_purpose::STANDARD
+                    .decode(encoded)
+                    .unwrap(),
+                COVER,
+                "the renderer receives exactly the authorized image bytes"
+            );
+        }
+        assert_eq!(server.heads.load(Ordering::SeqCst), 1);
+        assert_eq!(server.gets.load(Ordering::SeqCst), 1);
+
+        // The private cache lives in this account/origin namespace only.
+        let key = artwork_key(&http.origin, USER_ID, ARTWORK_ID);
+        let file = artwork_cache::path(&cache.path().join("artwork"), &key, ArtworkMime::Jpeg);
+        assert_eq!(std::fs::read(&file).unwrap(), COVER);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = |path: &std::path::Path| {
+                std::fs::metadata(path).unwrap().permissions().mode() & 0o777
+            };
+            assert_eq!(mode(&file), 0o600);
+            assert_eq!(mode(file.parent().unwrap()), 0o700);
+            assert_eq!(
+                mode(&artwork_cache::origin_root(
+                    &cache.path().join("artwork"),
+                    &key
+                )),
+                0o700
+            );
+        }
+        let foreign_account = artwork_key(&http.origin, OTHER_USER_ID, ARTWORK_ID);
+        assert_ne!(
+            artwork_cache::path(&cache.path().join("artwork"), &key, ArtworkMime::Jpeg),
+            artwork_cache::path(
+                &cache.path().join("artwork"),
+                &foreign_account,
+                ArtworkMime::Jpeg
+            )
+        );
+        assert!(
+            artwork_cache::read(
+                &cache.path().join("artwork"),
+                &foreign_account,
+                ArtworkMime::Jpeg,
+                &|| false
+            )
+            .unwrap()
+            .is_none(),
+            "another account can never read this cover"
+        );
+
+        // Arbitrary paths, non-canonical ids and uppercase UUIDs never reach a request.
+        let non_canonical = "30000000-0000-4000-8000-00000000000a".to_ascii_uppercase();
+        for invalid in ["../private", "not-a-uuid", non_canonical.as_str()] {
+            assert_eq!(
+                client
+                    .artwork(invalid, CancellationToken::new())
+                    .await
+                    .unwrap_err(),
+                ArtworkError::Failed
+            );
+        }
+        assert_eq!(server.heads.load(Ordering::SeqCst), 1);
+        assert_eq!(server.gets.load(Ordering::SeqCst), 1);
+        assert!(!ArtworkError::Denied.retryable());
+        assert!(!ArtworkError::Canceled.retryable());
+        assert!(ArtworkError::Failed.retryable());
+
+        // A canceled request is canceled, not denied and never served from cache.
+        let canceled = CancellationToken::new();
+        canceled.cancel();
+        assert_eq!(
+            client.artwork(ARTWORK_ID, canceled).await.unwrap_err(),
+            ArtworkError::Canceled
+        );
+    }
+
+    #[tokio::test]
+    async fn cached_artwork_is_revalidated_and_denial_never_returns_bytes() {
+        let server = ArtworkServer::new(ArtworkMode::Cover);
+        let http = HttpFixture::start(server.router()).await;
+        let directory = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let client = fixture_client(&http, &directory, &cache).await;
+
+        let first = client
+            .artwork(ARTWORK_ID, CancellationToken::new())
+            .await
+            .unwrap();
+        assert_eq!(server.gets.load(Ordering::SeqCst), 1);
+
+        // (b) The origin re-authorizes with HEAD; the cached body is reused without a GET.
+        server.set_mode(ArtworkMode::HeadOnly);
+        let cached = client
+            .artwork(ARTWORK_ID, CancellationToken::new())
+            .await
+            .unwrap();
+        assert_eq!(cached.bytes(), first.bytes());
+        assert_eq!(server.gets.load(Ordering::SeqCst), 0);
+        assert_eq!(server.heads.load(Ordering::SeqCst), 1);
+
+        // (c) A denial is never answered from the disk cache.
+        server.set_mode(ArtworkMode::Denied);
+        assert_eq!(
+            client
+                .artwork(ARTWORK_ID, CancellationToken::new())
+                .await
+                .unwrap_err(),
+            ArtworkError::Denied
+        );
+        assert_eq!(server.gets.load(Ordering::SeqCst), 0);
+        assert!(
+            artwork_cache::path(
+                &cache.path().join("artwork"),
+                &artwork_key(&http.origin, USER_ID, ARTWORK_ID),
+                ArtworkMime::Jpeg
+            )
+            .exists(),
+            "the denied cover stays cache-only and is never returned"
+        );
+
+        // (d) An origin that cannot answer HEAD still gets the authorized GET.
+        server.set_mode(ArtworkMode::NoHead);
+        let fresh = client
+            .artwork(ARTWORK_ID, CancellationToken::new())
+            .await
+            .unwrap();
+        assert_eq!(fresh.bytes(), COVER);
+        assert_eq!(server.gets.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn artwork_rejects_wrong_type_bad_magic_redirect_and_oversize() {
+        for (mode, expected) in [
+            (ArtworkMode::JsonContentType, ArtworkError::Failed),
+            (ArtworkMode::MismatchedMagic, ArtworkError::Failed),
+            (ArtworkMode::Redirect, ArtworkError::Failed),
+            (ArtworkMode::Denied, ArtworkError::Denied),
+        ] {
+            let server = ArtworkServer::new(mode);
+            let http = HttpFixture::start(server.router()).await;
+            let directory = tempfile::tempdir().unwrap();
+            let cache = tempfile::tempdir().unwrap();
+            let client = fixture_client(&http, &directory, &cache).await;
+            assert_eq!(
+                client
+                    .artwork(OTHER_ARTWORK_ID, CancellationToken::new())
+                    .await
+                    .unwrap_err(),
+                expected,
+                "{mode:?}"
+            );
+            let published = std::fs::read_dir(cache.path().join("artwork"))
+                .map(|entries| entries.count())
+                .unwrap_or(0);
+            assert_eq!(published, 0, "{mode:?} must not publish any cache file");
+        }
+
+        // An endless or lying response trips the 8 MiB stream cap and is never cached.
+        let server = ArtworkServer::new(ArtworkMode::Oversized);
+        let http = HttpFixture::start(server.router()).await;
+        let directory = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let client = fixture_client(&http, &directory, &cache).await;
+        assert_eq!(
+            client
+                .artwork(OTHER_ARTWORK_ID, CancellationToken::new())
+                .await
+                .unwrap_err(),
+            ArtworkError::Failed
+        );
+        assert!(
+            !artwork_cache::path(
+                &cache.path().join("artwork"),
+                &artwork_key(&http.origin, USER_ID, OTHER_ARTWORK_ID),
+                ArtworkMime::Jpeg
+            )
+            .exists()
+        );
+    }
+
+    #[tokio::test]
+    async fn artwork_allowlist_accepts_png_and_webp_with_matching_magic() {
+        for (mode, mime, bytes) in [
+            (ArtworkMode::PngCover, ArtworkMime::Png, PNG_COVER),
+            (ArtworkMode::WebpCover, ArtworkMime::Webp, WEBP_COVER),
+        ] {
+            let server = ArtworkServer::new(mode);
+            let http = HttpFixture::start(server.router()).await;
+            let directory = tempfile::tempdir().unwrap();
+            let cache = tempfile::tempdir().unwrap();
+            let client = fixture_client(&http, &directory, &cache).await;
+            let art = client
+                .artwork(OTHER_ARTWORK_ID, CancellationToken::new())
+                .await
+                .unwrap();
+            assert_eq!(art.mime(), mime, "{mode:?}");
+            assert_eq!(art.bytes(), bytes, "{mode:?}");
+            assert!(
+                art.data_url()
+                    .starts_with(&format!("data:{};base64,", mime.content_type())),
+                "{mode:?}"
+            );
+            let key = artwork_key(&http.origin, USER_ID, OTHER_ARTWORK_ID);
+            let file = artwork_cache::path(&cache.path().join("artwork"), &key, mime);
+            assert_eq!(std::fs::read(&file).unwrap(), bytes, "{mode:?}");
+            assert_eq!(file.extension().unwrap(), mime.extension(), "{mode:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn real_artwork_route_is_owner_authorized_and_native_cached() {
+        let node = Node::new().await;
+        let (mut client, auth) = node.connect().await;
+        let cache = tempfile::tempdir().unwrap();
+        Arc::get_mut(&mut client.inner).unwrap().cache_directory = Some(cache.path().to_owned());
+        let artwork_id = node
+            .own
+            .artwork_id
+            .clone()
+            .expect("the committed FLAC fixture embeds cover art");
+        let art = client
+            .artwork(&artwork_id, CancellationToken::new())
+            .await
+            .unwrap();
+        assert_eq!(art.mime(), ArtworkMime::Jpeg);
+        assert!(art.len() > 3 && art.len() <= MAX_ARTWORK_BYTES as usize);
+        assert_eq!(&art.bytes()[..3], &[0xFF, 0xD8, 0xFF]);
+
+        let key = artwork_key(&node.http.origin, &auth.user.id, &artwork_id);
+        let file = artwork_cache::path(&cache.path().join("artwork"), &key, ArtworkMime::Jpeg);
+        assert_eq!(std::fs::read(&file).unwrap(), art.bytes());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&file).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+
+        // The same cover is served by a revalidated cache hit.
+        let again = client
+            .artwork(&artwork_id, CancellationToken::new())
+            .await
+            .unwrap();
+        assert_eq!(again.bytes(), art.bytes());
+
+        // An unknown/foreign artwork id is a denial, not an error page or cached bytes.
+        let missing = uuid::Uuid::new_v4().to_string();
+        assert_eq!(
+            client
+                .artwork(&missing, CancellationToken::new())
+                .await
+                .unwrap_err(),
+            ArtworkError::Denied
         );
     }
 }

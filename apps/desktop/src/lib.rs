@@ -1,4 +1,8 @@
 //! Native client services. Server/database policy stays in the existing server.
+pub mod artwork;
+/// Crate-internal: the private account/origin-scoped cover cache. It owns no grant,
+/// no session and no renderer representation on its own.
+mod artwork_cache;
 pub mod audio;
 pub mod client;
 /// Crate-internal: the account/origin-scoped complete-file playback cache used by

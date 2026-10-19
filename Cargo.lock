@@ -7061,6 +7061,7 @@ name = "vela-desktop"
 version = "0.12.6"
 dependencies = [
  "axum",
+ "base64 0.22.1",
  "blake3",
  "dioxus",
  "futures-util",
