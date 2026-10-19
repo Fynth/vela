@@ -1342,3 +1342,7 @@ input::placeholder { color:var(--quiet); opacity:1; }
 }
 /* Range sliders keep a visible focus ring across engines/modalities. */
 input[type="range"]:focus { outline:2px solid var(--accent); outline-offset:3px; }
+
+.playlist-detail-cover { width:168px; max-width:38%; margin-bottom:18px; }
+.playlist-detail-cover .catalog-cover { border-radius:9px; }
+@media(max-width:620px){.playlist-detail-cover{width:120px;max-width:50%;margin-bottom:14px}}
