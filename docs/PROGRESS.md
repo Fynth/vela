@@ -1663,6 +1663,26 @@ cards; exact `background-color` transitions on track rows; neutral 1px pure-blac
 Web rebuilt; Chromium41 passed/1 live-import skip (2.1m). Native CSS was not opened in
 a real window in this pass.
 
+## Product expansion first slices — artwork + device scale (2026-10-19)
+
+- `0f9f12b` native authorized artwork: authenticated HEAD+GET, 8MiB/MIME/magic
+  bounds, private origin/account artwork cache (0600/0700, atomic, 200 files/64MiB),
+  bounded presentation store (4 inflight/32 queued/512 entries/32MiB data URLs),
+  data-URL covers + neutral fallback in Library/search/favorites/player/queue/
+  album/artist/playlist rows, logout clears. Desktop96 passed/3 ignored incl. real
+  server authorization/cache-reuse tests. ART09/12/14 and native visual runs NOT_RUN.
+- `1618e63` web device appearance: versioned `vela.device.presentation.v1`
+  (80–150% scale, System/Dark/Light), boot-time application before first frame,
+  Settings → Appearance with stepper/slider/reset/status, one CSS zoom composing
+  with browser zoom, malformed-store recovery, no credential/token storage.
+  Web27 tests; targeted Chromium SCALE01 passed (4.2s) incl. reload persistence,
+  same audio element/src/queue and storage-denied recovery. Full browsers/Firefox/
+  screen reader/native scale NOT_RUN.
+
+Both source slices postdate frozen runtime0.12.6; no schema/server migration and no
+live data/runtime access. Plan deviation: scale range80–150 selected instead of the
+proposal's75–200.
+
 ## Native 144 Hz diagnosis — cap attributed to WebKitGTK (2026-10-19)
 
 User reports ~50 Hz. Measured with a real WebKitGTK window on the 3440×1440@144
