@@ -38,7 +38,13 @@ def main():
     parser.add_argument('--close-while-playing', action='store_true', help='Close the real window during active native playback and check original cleanup')
     parser.add_argument('--test-peer', action='store_true', help='Start a second isolated Vela server and exercise its explicit public catalog')
     parser.add_argument('--test-session', action='store_true', help='Also verify opt-in Secret Service session save/resume/delete across two native processes')
+    parser.add_argument('--backend', choices=['x11', 'wayland'], default='x11', help='Actual GTK backend for the isolated window')
+    parser.add_argument('--window-only', action='store_true', help='Verify normal tiled geometry and transport without resizing or offline/peer scenarios')
     args = parser.parse_args()
+    if args.backend == 'wayland' and not args.window_only:
+        parser.error('Wayland currently requires --window-only; full resize/peer/offline QA uses --backend x11')
+    if args.window_only and (args.backend != 'wayland' or args.test_peer or args.test_session or args.close_while_playing):
+        parser.error('--window-only requires --backend wayland and cannot be combined with peer/session/close scenarios')
     evidence = args.evidence.resolve()
     if evidence.exists() and any(evidence.iterdir()):
         raise RuntimeError('Use a new/empty evidence directory; earlier evidence is preserved')
@@ -299,7 +305,7 @@ def main():
                         'VELA_NATIVE_QA_CACHED_ORIGIN': cached_origin,
                     })
                 # Per-process ALSA and Pulse routing, never a global default change.
-                environment.update({'TMPDIR': str(private / 'temporary'), 'ALSA_CONFIG_PATH': str(alsa), 'PULSE_SINK': SINK, 'GDK_BACKEND': 'x11', 'VELA_NATIVE_TEST_SINK': SINK, 'VELA_DESKTOP_SERVER_URL': origin, 'VELA_NATIVE_QA_USERNAME': 'nativefixture', 'VELA_NATIVE_QA_PASSWORD': password, 'VELA_NATIVE_QA_REPORT': str(report), 'XDG_DATA_HOME': str(private / 'home'), 'XDG_CONFIG_HOME': str(private / 'home'), 'XDG_CACHE_HOME': str(private / 'home/cache'), 'CARGO_BUILD_JOBS': '2'})
+                environment.update({'TMPDIR': str(private / 'temporary'), 'ALSA_CONFIG_PATH': str(alsa), 'PULSE_SINK': SINK, 'GDK_BACKEND': args.backend, 'VELA_NATIVE_QA_BACKEND': args.backend, 'VELA_NATIVE_QA_WINDOW_ONLY': '1' if args.window_only else '0', 'VELA_NATIVE_TEST_SINK': SINK, 'VELA_DESKTOP_SERVER_URL': origin, 'VELA_NATIVE_QA_USERNAME': 'nativefixture', 'VELA_NATIVE_QA_PASSWORD': password, 'VELA_NATIVE_QA_REPORT': str(report), 'XDG_DATA_HOME': str(private / 'home'), 'XDG_CONFIG_HOME': str(private / 'home'), 'XDG_CACHE_HOME': str(private / 'home/cache'), 'CARGO_BUILD_JOBS': '2'})
                 if args.test_session:
                     session_service = 'org.vela.music.desktop.qa.' + secrets.token_hex(8)
                     environment.update({'VELA_NATIVE_KEYRING_SERVICE': session_service, 'VELA_NATIVE_QA_TEST_SESSION': '1'})
@@ -330,6 +336,11 @@ def main():
                 report.write_text(json.dumps(result, indent=2) + '\n')
                 if originals:
                     raise RuntimeError('Native process left a completed temporary original after exit')
+                if args.window_only:
+                    result['backend'] = args.backend
+                    report.write_text(json.dumps(result, indent=2) + '\n')
+                    print(json.dumps(result, indent=2))
+                    return
                 offline_audio = list((private / 'home' / 'vela' / 'offline').glob('*/*.audio'))
                 offline_json = list((private / 'home' / 'vela' / 'offline').glob('*/*.json'))
                 if len(offline_audio) != 1 or len(offline_json) != 1:

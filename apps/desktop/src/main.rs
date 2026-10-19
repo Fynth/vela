@@ -1,14 +1,11 @@
-use dioxus::desktop::{Config, LogicalSize, WindowBuilder};
+use dioxus::desktop::Config;
 
 fn main() {
     if std::env::args().any(|argument| argument == "--version") {
         println!("vela-desktop {}", env!("CARGO_PKG_VERSION"));
         return;
     }
-    let window = WindowBuilder::new()
-        .with_title("Vela Music")
-        .with_inner_size(LogicalSize::new(1280.0, 840.0))
-        .with_min_inner_size(LogicalSize::new(640.0, 480.0));
+    let window = vela_desktop::window::builder("Vela Music");
     dioxus::LaunchBuilder::desktop()
         .with_cfg(
             Config::new()

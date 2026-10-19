@@ -14,6 +14,9 @@ use vela_domain::*;
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct Actions {
+    pub active_track: Memo<Option<String>>,
+    pub requested: Signal<bool>,
+    pub start: EventHandler<(Vec<Track>, usize, PlaybackContext)>,
     pub play: EventHandler<(Vec<Track>, usize, PlaybackContext)>,
     pub queue: EventHandler<(Track, bool)>,
     pub favorite: EventHandler<Track>,
@@ -23,6 +26,19 @@ pub struct Actions {
     pub playlist: EventHandler<String>,
     pub navigate: EventHandler<String>,
     pub add: EventHandler<()>,
+}
+
+impl Actions {
+    pub fn is_playing(self, id: &str) -> bool {
+        let requested = *self.requested.read();
+        self.active_track.read().as_deref() == Some(id) && requested
+    }
+    pub fn play_label(self, id: &str, title: &str) -> String {
+        format!(
+            "{} {title}",
+            if self.is_playing(id) { "Pause" } else { "Play" }
+        )
+    }
 }
 
 #[component]
@@ -53,8 +69,8 @@ fn TrackCards(tracks: Vec<Track>, origin: PlaybackContext, actions: Actions) -> 
     rsx! { div { class: "home-track-grid", for (at, track) in tracks.iter().cloned().enumerate() {
         { let origin=origin.clone(); let context = tracks.clone(); let play = track.clone(); rsx! {
             article { class: "listening-card", key: "{track.id}",
-                button { class: "listening-card-play", "aria-label": "Play {track.title}", onclick: move |_| actions.play.call((context.clone(), at, origin.clone())),
-                    div { class: "listening-cover", Art { track: play } span { class: "cover-play", Icon { name: "play" } } }
+                button { class: "listening-card-play", "aria-label": actions.play_label(&track.id, &track.title), onclick: move |_| actions.play.call((context.clone(), at, origin.clone())),
+                    div { class: "listening-cover", Art { track: play } span { class: "cover-play", if actions.is_playing(&track.id) {Icon {name:"pause"}} else {Icon {name:"play"}} } }
                     strong { "{track.title}" } small { "{track.artist}" }
                 }
                 TrackActions { track:track.clone(), actions }
@@ -153,7 +169,7 @@ pub fn Home(
     rsx! { section { class: "home-page", "aria-label": "Home",
         div { class: "home-hero",
             div { span { class: "eyebrow", "YOURS TO DISCOVER" } h1 { "Hello, {name}." } p { "A little closer to the music you love." }
-                if !playable.is_empty() { button { class: "button cream", onclick: move |_| actions.play.call((playable.clone(), 0, PlaybackContext::new(ContextKind::Home,"New in your library"))), Icon { name: "play" } "Play new additions" } }
+                if !playable.is_empty() { button { class: "button cream", onclick: move |_| actions.start.call((playable.clone(), 0, PlaybackContext::new(ContextKind::Home,"New in your library"))), Icon { name: "play" } "Play new additions" } }
                 else if !loading() { button { class: "button cream", onclick: move |_| actions.add.call(()), Icon { name: "plus" } "Add your first music" } }
             }
             div { class: "home-artwork", "aria-hidden": "true", if let Some(track) = snapshot.recent.first() { Art { track: track.clone() } } else { div { class: "home-vinyl", span { "v" } } } }
@@ -282,7 +298,7 @@ pub fn Search(
         if let Some(found) = found {
             if count == 0 { div { class: "empty-state", h2 { "No search results" } p { "Try another title or name, or choose a different category." } } }
             if matches!(selected_category,"all"|"tracks") && !found.tracks.is_empty() { section { class: "search-result-section", "aria-label": "Track results", h2 { "Tracks" } for (at,track) in found.tracks.iter().cloned().enumerate() {
-                { let context = found.tracks.clone(); let row = track.clone(); rsx! { article { class: "search-track-row", key: "{track.id}", button { class: "search-track-main", "aria-label": "Play {track.title}", onclick: move |_| actions.play.call((context.clone(),at,PlaybackContext::new(ContextKind::Search,"Search results"))), Art { track: row } div { strong { "{track.title}" } small { "{track.artist} · {track.album}" } } Icon { name: "play" } } TrackActions { track:track.clone(), actions } } } }
+                { let context = found.tracks.clone(); let row = track.clone(); rsx! { article { class: "search-track-row", key: "{track.id}", button { class: "search-track-main", "aria-label": actions.play_label(&track.id, &track.title), onclick: move |_| actions.play.call((context.clone(),at,PlaybackContext::new(ContextKind::Search,"Search results"))), Art { track: row } div { strong { "{track.title}" } small { "{track.artist} · {track.album}" } } if actions.is_playing(&track.id) {Icon {name:"pause"}} else {Icon {name:"play"}} } TrackActions { track:track.clone(), actions } } } }
             } } }
             if matches!(selected_category,"all"|"albums") && !found.albums.is_empty() { section { class: "search-result-section", "aria-label": "Album results", h2 { "Albums" } div { class: "home-album-grid", for album in found.albums {
                 { let open=album.clone(); rsx! { button { class: "listening-card collection-card", "aria-label": "Open album {album.title} by {album.artist}", onclick: move |_| actions.album.call(open.clone()), CatalogCover { artwork_id: album.artwork_id } strong { "{album.title}" } small { "{album.artist}" } } } }

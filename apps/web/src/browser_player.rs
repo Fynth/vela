@@ -12,6 +12,7 @@ use web_sys::{AbortController, HtmlAudioElement};
 pub struct View {
     pub auth: Signal<Option<vela_domain::AuthResponse>>,
     pub playing: Signal<bool>,
+    pub requested: Signal<bool>,
     pub position: Signal<f64>,
     pub duration: Signal<f64>,
     pub status: Signal<String>,
@@ -116,6 +117,7 @@ impl BrowserPlayer {
             s.source.clear();
             s.element = None;
             s.intent = false;
+            s.view.requested.set(false);
             s.loaded = false;
             s.pending = None;
             s.retries.reset();
@@ -244,6 +246,7 @@ impl BrowserPlayer {
             s.generation = s.generation.wrapping_add(1);
             s.loaded = false;
             s.intent = true;
+            s.view.requested.set(true);
             s.position = clamp_position(position, track.duration_ms as f64 / 1000.0);
             s.pending = Some(s.position);
             s.progress_at = js_sys::Date::now();
@@ -298,7 +301,11 @@ impl BrowserPlayer {
                 self.0.borrow_mut().retries.reset();
                 self.load(&track, position);
             } else {
-                self.0.borrow_mut().intent = true;
+                {
+                    let mut s = self.0.borrow_mut();
+                    s.intent = true;
+                    s.view.requested.set(true);
+                }
                 self.0.borrow_mut().view.status.set(String::new());
                 self.play(generation);
                 self.arm_stall();
@@ -310,6 +317,7 @@ impl BrowserPlayer {
         {
             let mut s = self.0.borrow_mut();
             s.intent = false;
+            s.view.requested.set(false);
             Self::cancel(&mut s);
             s.generation = s.generation.wrapping_add(1);
             if let Some(e) = audio() {
@@ -468,6 +476,7 @@ impl BrowserPlayer {
             s.position = 0.0;
             s.view.position.set(0.0);
             s.intent = false;
+            s.view.requested.set(false);
             Self::cancel(&mut s);
         }
         self.checkpoint(true);
@@ -520,6 +529,7 @@ impl BrowserPlayer {
             s.stall = None;
             let Some(delay) = s.retries.next_delay() else {
                 s.intent = false;
+                s.view.requested.set(false);
                 s.view.playing.set(false);
                 s.view.status.set(
                     "Connection interrupted. Press Play to retry from your saved position.".into(),

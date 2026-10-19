@@ -1,3 +1,14 @@
+# Row transport and Linux window repair2026-10-19
+
+Root audio/auth/cancellation ownership remains unchanged. Current-row actions pause/
+resume; explicit context Play starts context. Native requested intent survives
+preparation and governs final autoplay. Duplicate occurrences remain distinct.
+Source modes reflect adapter capabilities; offline repeat-one keeps its descriptor/
+domain at EOF. Production/QA share a Linux frameless builder. Exact policy/limits:
+[ADR0024](DECISIONS/0024-row-transport-and-linux-window.md),
+[native contract](NATIVE_CLIENT_CONTRACTS.md), [review](UX_INTERACTION_REVIEW_2026-10-19.md).
+No database, media-storage, API, user-data or frozen-runtime migration is required.
+
 # Native Linux client0.12 (verified bounded increment)
 
 Main owns workspace Cargo/lock, this contract, `apps/desktop/src/lib.rs`/`main.rs`, tests/builds/docs; audio contributor owns `audio.rs`, client contributor `client.rs`+tests, UI contributor `ui.rs`+`style.css`, MPRIS contributor `mpris.rs`. No contributor runs Cargo/commits/changes original runtime/data; main schedules max2 compiler jobs. No schema, migration or server HTTP change. Frozen0.11 original-data runtime remains live and untouched during this source slice.

@@ -24,6 +24,37 @@ use vela_domain::{AlbumSummary, ArtistSummary, PublicTrack, Track, TrackPage, Us
 mod icons;
 use icons::Icon;
 
+// Preferences belong to the owned online queue. Other source adapters expose
+// only modes they actually execute, without silently discarding preferences.
+fn playback_modes(offline: bool, remote: bool, shuffle: bool, repeat: Repeat) -> (bool, Repeat) {
+    if remote {
+        (false, Repeat::Off)
+    } else if offline {
+        (
+            false,
+            if repeat == Repeat::One {
+                Repeat::One
+            } else {
+                Repeat::Off
+            },
+        )
+    } else {
+        (shuffle, repeat)
+    }
+}
+
+#[component]
+fn WindowControls() -> Element {
+    if !cfg!(target_os = "linux") {
+        return rsx! {};
+    }
+    rsx! { div {class:"native-window-controls", role:"group", "aria-label":"Window controls",
+        button {class:"icon-button", "aria-label":"Minimize window", title:"Minimize", onclick:move |_|dioxus::desktop::window().set_minimized(true), Icon {name:"minimize"}}
+        button {class:"icon-button", "aria-label":"Maximize or restore window", title:"Maximize or restore", onclick:move |_|dioxus::desktop::window().toggle_maximized(), Icon {name:"maximize"}}
+        button {class:"icon-button window-close", "aria-label":"Close window", title:"Close", onclick:move |_|dioxus::desktop::window().close(), Icon {name:"close"}}
+    } }
+}
+
 #[derive(Clone)]
 struct Lifetime(Arc<AtomicBool>);
 impl Lifetime {
@@ -196,6 +227,8 @@ struct Ui {
     context: Signal<String>,
     snapshot: Signal<AudioSnapshot>,
     preparing: Signal<bool>,
+    /// Requested transport state; independent of delayed decoder snapshots.
+    wants_play: Signal<bool>,
     progress: Signal<DownloadProgress>,
     prepared: Signal<Option<Arc<PreparedAudio>>>,
     source_error: Signal<String>,
@@ -261,6 +294,7 @@ impl Ui {
         self.selection.set(selection);
         self.ended.set(None);
         self.preparing.set(false);
+        self.wants_play.set(false);
         self.progress.set(DownloadProgress::default());
         self.source_error.set(String::new());
         let volume = self.snapshot.peek().volume;
@@ -361,7 +395,7 @@ impl Ui {
                 track: None,
                 position_ms: 0,
                 volume: self.snapshot.peek().volume as f64,
-                shuffle: *self.shuffle.peek(),
+                shuffle: false,
                 repeat: SystemRepeat::Off,
                 can_play: false,
                 can_pause: false,
@@ -375,7 +409,13 @@ impl Ui {
         let track = self.current_track();
         let snapshot = self.snapshot.peek().clone();
         let preparing = *self.preparing.peek();
-        let repeat = match *self.repeat.peek() {
+        let (shuffle, effective_repeat) = playback_modes(
+            *self.offline_active.peek(),
+            false,
+            *self.shuffle.peek(),
+            *self.repeat.peek(),
+        );
+        let repeat = match effective_repeat {
             Repeat::Off => SystemRepeat::Off,
             Repeat::All => SystemRepeat::All,
             Repeat::One => SystemRepeat::One,
@@ -409,7 +449,7 @@ impl Ui {
             }),
             position_ms: if can_play { snapshot.position_ms } else { 0 },
             volume: snapshot.volume as f64,
-            shuffle: *self.shuffle.peek(),
+            shuffle,
             repeat,
             can_play,
             can_pause: can_play
@@ -865,6 +905,8 @@ fn start_source(mut ui: Ui, reuse: bool, autoplay: bool, position_ms: u64) {
     ui.remote_now.set(None);
     ui.remote_queue.set(Vec::new());
     ui.remote_index.set(0);
+    let (shuffle, repeat) = (*ui.shuffle.peek(), *ui.repeat.peek());
+    ui.order.write().configure(shuffle, repeat);
     let Some(account) = ui.account.peek().clone().filter(|_| ui.signed_in()) else {
         return;
     };
@@ -880,6 +922,7 @@ fn start_source(mut ui: Ui, reuse: bool, autoplay: bool, position_ms: u64) {
         None
     };
     let selection = ui.new_selection();
+    ui.wants_play.set(autoplay);
     ui.prepared.set(None);
     if !ui.source_error.peek().is_empty() {
         return;
@@ -887,7 +930,10 @@ fn start_source(mut ui: Ui, reuse: bool, autoplay: bool, position_ms: u64) {
     if let Some(prepared) = prepared {
         match audio.load(selection, prepared.clone(), autoplay, position_ms) {
             Ok(()) => ui.prepared.set(Some(prepared)),
-            Err(error) => ui.source_error.set(error),
+            Err(error) => {
+                ui.wants_play.set(false);
+                ui.source_error.set(error);
+            }
         }
         return;
     }
@@ -920,13 +966,18 @@ fn start_source(mut ui: Ui, reuse: bool, autoplay: bool, position_ms: u64) {
             return;
         }
         ui.preparing.set(false);
+        let requested = *ui.wants_play.peek();
         match result {
-            Ok(prepared) => match audio.load(selection, prepared.clone(), autoplay, position_ms) {
+            Ok(prepared) => match audio.load(selection, prepared.clone(), requested, position_ms) {
                 Ok(()) => ui.prepared.set(Some(prepared)),
-                Err(error) => ui.source_error.set(error),
+                Err(error) => {
+                    ui.wants_play.set(false);
+                    ui.source_error.set(error);
+                }
             },
             Err(error) => {
                 if !expired(ui.clone(), &error) {
+                    ui.wants_play.set(false);
                     ui.source_error.set(error);
                 }
             }
@@ -1529,11 +1580,12 @@ fn play_playlist(mut ui: Ui) {
             .set("This playlist has no tracks your account may stream.".into());
         return;
     }
-    ui.order.write().reset(tracks.len(), 0);
-    ui.queue.set(tracks);
-    ui.context
-        .set(format!("Playlist · {}", detail.playlist.name));
-    start_source(ui, false, true, 0);
+    queue_owned_context(
+        ui,
+        tracks,
+        0,
+        format!("Playlist · {}", detail.playlist.name),
+    );
 }
 
 fn toggle_favorite(mut ui: Ui, catalog: Catalog, track: Track) {
@@ -1674,6 +1726,13 @@ fn play_catalog(mut ui: Ui, catalog: Catalog, at: usize) {
     if at >= catalog.page.items.len() || ui.audio.peek().is_none() {
         return;
     }
+    if ui
+        .current_track()
+        .is_some_and(|track| track.id == catalog.page.items[at].id)
+    {
+        toggle(ui);
+        return;
+    }
     let mut tracks = catalog.page.items.clone();
     tracks.truncate(MAX_QUEUE);
     ui.order.write().reset(tracks.len(), at);
@@ -1683,6 +1742,47 @@ fn play_catalog(mut ui: Ui, catalog: Catalog, at: usize) {
     } else {
         "Search results".into()
     });
+    start_source(ui, false, true, 0);
+}
+
+fn owned_target_current(ui: &Ui, tracks: &[Track], at: usize, context: &str) -> bool {
+    let Some(target) = tracks.get(at) else {
+        return false;
+    };
+    let active = ui
+        .current_track()
+        .is_some_and(|track| track.id == target.id);
+    let duplicate = tracks.iter().filter(|track| track.id == target.id).count() > 1;
+    let same_occurrence = ui.order.peek().current() == Some(at)
+        && ui.context.peek().as_str() == context
+        && ui
+            .queue
+            .peek()
+            .iter()
+            .map(|t| &t.id)
+            .eq(tracks.iter().map(|t| &t.id));
+    active && (!duplicate || same_occurrence)
+}
+
+fn play_owned_context(ui: Ui, mut tracks: Vec<Track>, at: usize, context: String) {
+    tracks.truncate(MAX_QUEUE);
+    if at >= tracks.len() {
+        return;
+    }
+    if !ui.signed_in() || !ui.audio_ready() {
+        return;
+    }
+    if owned_target_current(&ui, &tracks, at, &context) {
+        toggle(ui);
+        return;
+    }
+    queue_owned_context(ui, tracks, at, context);
+}
+
+fn queue_owned_context(mut ui: Ui, tracks: Vec<Track>, at: usize, context: String) {
+    ui.order.write().reset(tracks.len(), at);
+    ui.queue.set(tracks);
+    ui.context.set(context);
     start_source(ui, false, true, 0);
 }
 
@@ -1725,6 +1825,22 @@ fn select_queue(mut ui: Ui, at: usize) {
     if !ui.signed_in() || at >= ui.queue.peek().len() || ui.audio.peek().is_none() {
         return;
     }
+    if ui.order.peek().current() == Some(at) {
+        toggle(ui);
+        return;
+    }
+    if *ui.offline_active.peek() {
+        let id = ui.queue.peek()[at].id.clone();
+        let saved = ui
+            .offline
+            .peek()
+            .iter()
+            .position(|item| item.track.id == id);
+        if let Some(saved) = saved {
+            start_offline_at(ui, saved);
+        }
+        return;
+    }
     ui.order.write().reset(ui.queue.peek().len(), at);
     start_source(ui, false, true, 0);
 }
@@ -1736,8 +1852,14 @@ fn advance(mut ui: Ui, command: Command) {
     // Natural EOF during offline playback must stay on the device queue; the
     // generic transition would route to server prepare and fail with the server
     // stopped. Repeat-one keeps the existing replay path.
-    if command == Command::Ended && *ui.offline_active.peek() && *ui.repeat.peek() != Repeat::One {
-        offline_step(ui, 1);
+    if command == Command::Ended && *ui.offline_active.peek() {
+        if *ui.repeat.peek() == Repeat::One {
+            // Replay the already verified descriptor and retain the offline
+            // source domain; server preparation must never enter this path.
+            set_playing(ui, true);
+        } else {
+            offline_step(ui, 1);
+        }
         return;
     }
     let elapsed = ui.snapshot.peek().position_ms as f64 / 1000.0;
@@ -1759,6 +1881,7 @@ fn advance(mut ui: Ui, command: Command) {
             }
         }
         Transition::Stop => {
+            ui.wants_play.set(false);
             if *ui.preparing.peek() {
                 ui.new_selection();
                 ui.prepared.set(None);
@@ -1805,8 +1928,13 @@ fn reconnect_audio(mut ui: Ui) {
         }
     });
 }
-fn toggle(mut ui: Ui) {
-    if !ui.signed_in() || *ui.preparing.peek() {
+fn toggle(ui: Ui) {
+    let desired = !*ui.wants_play.peek();
+    set_playing(ui, desired);
+}
+
+fn set_playing(mut ui: Ui, desired: bool) {
+    if !ui.signed_in() || ui.offline_checking.peek().is_some() {
         return;
     }
     let Some(audio) = ui.audio.peek().clone() else {
@@ -1815,22 +1943,37 @@ fn toggle(mut ui: Ui) {
     if ui.current_track().is_none() && ui.remote_now.peek().is_none() {
         return;
     }
-    let snapshot = ui.snapshot.peek().clone();
-    if ui.remote_now.peek().is_some() && snapshot.phase == AudioPhase::Ended {
-        start_remote(ui);
+    if *ui.preparing.peek() {
+        // A second click pauses the pending selection. Its bounded download may
+        // finish, but its late result must not start audio against this intent.
+        ui.wants_play.set(desired);
         return;
     }
-    let result = match snapshot.phase {
-        AudioPhase::Playing => audio.pause(*ui.selection.peek()),
-        AudioPhase::Paused if ui.prepared.peek().is_some() => audio.resume(*ui.selection.peek()),
-        AudioPhase::Loading => return,
-        _ => {
-            start_source(ui, true, true, 0);
-            return;
+    let phase = ui.snapshot.peek().phase;
+    let prepared = ui.prepared.peek().clone();
+    let result = if desired
+        && matches!(phase, AudioPhase::Ended | AudioPhase::Error)
+        && let Some(prepared) = prepared.as_ref()
+    {
+        let selection = ui.new_selection();
+        let prepared = prepared.clone();
+        ui.prepared.set(Some(prepared.clone()));
+        audio.load(selection, prepared, true, 0)
+    } else if desired && prepared.is_none() {
+        if ui.remote_now.peek().is_some() {
+            start_remote(ui);
+        } else {
+            start_source(ui, false, true, 0);
         }
+        return;
+    } else if desired {
+        audio.resume(*ui.selection.peek())
+    } else {
+        audio.pause(*ui.selection.peek())
     };
-    if let Err(error) = result {
-        ui.source_error.set(error);
+    match result {
+        Ok(()) => ui.wants_play.set(desired),
+        Err(error) => ui.source_error.set(error),
     }
 }
 
@@ -1867,40 +2010,12 @@ fn system_controls_note(state: mpris::State) -> &'static str {
     }
 }
 
-fn play_system(mut ui: Ui) {
-    if !ui.signed_in()
-        || ui.current_track().is_none()
-        || !ui.source_error.peek().is_empty()
-        || *ui.preparing.peek()
-    {
-        return;
-    }
-    let phase = ui.snapshot.peek().phase;
-    if phase == AudioPhase::Playing {
-        return;
-    }
-    if phase == AudioPhase::Paused
-        && ui.prepared.peek().is_some()
-        && let Some(audio) = ui.audio.peek().clone()
-        && let Err(error) = audio.resume(*ui.selection.peek())
-    {
-        ui.source_error.set(error);
-        return;
-    }
-    if phase != AudioPhase::Paused || ui.prepared.peek().is_none() {
-        start_source(ui, true, true, 0);
-    }
+fn play_system(ui: Ui) {
+    set_playing(ui, true);
 }
 
-fn pause_system(mut ui: Ui) {
-    if !ui.signed_in() || ui.snapshot.peek().phase != AudioPhase::Playing {
-        return;
-    }
-    if let Some(audio) = ui.audio.peek().clone()
-        && let Err(error) = audio.pause(*ui.selection.peek())
-    {
-        ui.source_error.set(error);
-    }
+fn pause_system(ui: Ui) {
+    set_playing(ui, false);
 }
 
 fn stop_system(mut ui: Ui) {
@@ -1958,11 +2073,7 @@ fn apply_system_control(mut ui: Ui, command: mpris::Command) -> bool {
             }
         }
         mpris::Command::SetShuffle(shuffle) => {
-            if ui.signed_in() && *ui.shuffle.peek() != shuffle {
-                ui.shuffle.set(shuffle);
-                let repeat = *ui.repeat.peek();
-                ui.order.write().configure(shuffle, repeat);
-            }
+            set_shuffle(ui, shuffle);
         }
         mpris::Command::SetRepeat(repeat) => {
             if !ui.signed_in() {
@@ -1973,14 +2084,33 @@ fn apply_system_control(mut ui: Ui, command: mpris::Command) -> bool {
                 SystemRepeat::All => Repeat::All,
                 SystemRepeat::One => Repeat::One,
             };
-            if *ui.repeat.peek() != repeat {
-                ui.repeat.set(repeat);
-                let shuffle = *ui.shuffle.peek();
-                ui.order.write().configure(shuffle, repeat);
-            }
+            set_repeat(ui, repeat);
         }
     }
     false
+}
+
+fn set_shuffle(mut ui: Ui, shuffle: bool) {
+    if !ui.signed_in() || *ui.offline_active.peek() || ui.remote_now.peek().is_some() {
+        return;
+    }
+    if *ui.shuffle.peek() != shuffle {
+        ui.shuffle.set(shuffle);
+        let repeat = *ui.repeat.peek();
+        ui.order.write().configure(shuffle, repeat);
+    }
+}
+
+fn set_repeat(mut ui: Ui, repeat: Repeat) {
+    let offline = *ui.offline_active.peek();
+    if !ui.signed_in() || ui.remote_now.peek().is_some() || (offline && repeat == Repeat::All) {
+        return;
+    }
+    if *ui.repeat.peek() != repeat {
+        ui.repeat.set(repeat);
+        let (shuffle, repeat) = playback_modes(offline, false, *ui.shuffle.peek(), repeat);
+        ui.order.write().configure(shuffle, repeat);
+    }
 }
 
 fn volume(mut ui: Ui, value: String) {
@@ -2048,11 +2178,14 @@ fn clear_queue(mut ui: Ui) {
     }
     ui.new_selection();
     ui.prepared.set(None);
+    ui.remote_now.set(None);
+    ui.remote_queue.set(Vec::new());
+    ui.remote_index.set(0);
+    ui.offline_active.set(false);
     ui.queue.set(Vec::new());
     ui.order.write().reset(0, 0);
     ui.context.set(String::new());
-    ui.notice
-        .set("Queue cleared. Temporary audio released.".into());
+    ui.notice.set("Queue cleared.".into());
 }
 
 fn cached_age_label(fetched_at: u64) -> String {
@@ -2381,7 +2514,11 @@ fn play_offline(ui: Ui, saved: crate::offline::OfflineTrack) {
     else {
         return;
     };
-    start_offline_at(ui, index);
+    if *ui.offline_active.peek() && ui.current_track().is_some_and(|t| t.id == saved.track.id) {
+        toggle(ui);
+    } else {
+        start_offline_at(ui, index);
+    }
 }
 
 fn start_offline_at(mut ui: Ui, index: usize) {
@@ -2452,14 +2589,17 @@ fn start_offline_at(mut ui: Ui, index: usize) {
         let length = queue.len();
         let selection = ui.new_selection();
         ui.offline_active.set(true);
+        ui.wants_play.set(true);
         ui.remote_now.set(None);
         ui.remote_queue.set(Vec::new());
         ui.remote_index.set(0);
         ui.queue.set(queue);
         ui.order.write().reset(length, at);
+        let (shuffle, repeat) = playback_modes(true, false, *ui.shuffle.peek(), *ui.repeat.peek());
+        ui.order.write().configure(shuffle, repeat);
         ui.context.set(format!("Offline · {title}"));
         ui.prepared.set(None);
-        match audio.load(selection, prepared.clone(), true, 0) {
+        match audio.load(selection, prepared.clone(), *ui.wants_play.peek(), 0) {
             Ok(()) => ui.prepared.set(Some(prepared)),
             Err(error) => {
                 ui.offline_active.set(false);
@@ -2655,10 +2795,12 @@ fn library(ui: Ui) -> Element {
                     let set_confirm_id = offline_id.clone();
                     let play_saved = saved.clone();
                     let title = saved.track.title.clone();
+                    let active=*ui.offline_active.read() && ui.current_track().is_some_and(|t|t.id==saved.track.id) && *ui.wants_play.read();
+                    let verb=if active {"Pause"}else{"Play"};
                     rsx! { article {class:"native-queue-row",key:"offline-{offline_id.clone()}","data-offline-track-id":"{offline_id.clone()}",
                         div {class:"neutral-cover","aria-hidden":"true",Icon {name:"down"}}
                         div {class:"native-queue-select",div {strong {"{saved.track.title}"} small {"{saved.track.artist} · {saved.length_bytes / 1024} KiB on this device"} small {if offline_removing_this {"Removing this device copy…"} else if offline_damaged {"Integrity check failed · save it again"} else {"Private offline copy"}}}}
-                        button {class:"button primary small",disabled:offline_damaged||offline_removing_this,"aria-label":"Play offline {title}",onclick:move |_|play_offline(play_handler.clone(),play_saved.clone()),Icon {name:"play"} "Play offline"}
+                        button {class:"button primary small",disabled:offline_damaged||offline_removing_this,"aria-label":"{verb} offline {title}",onclick:move |_|play_offline(play_handler.clone(),play_saved.clone()),if active {Icon {name:"pause"}}else{Icon {name:"play"}} "{verb} offline"}
                         if offline_confirm == offline_id {
                             button {class:"button danger small",disabled:offline_removing_this,"aria-label":"Confirm remove offline {title}",onclick:move |_|remove_offline(confirm_ui.clone(),confirm_id.clone()),if offline_removing_this {"Removing…"} else {"Confirm remove"}}
                             button {class:"button secondary small",disabled:offline_removing_this,"aria-label":"Cancel remove offline {title}",onclick:move |_|{let mut ui=cancel_ui.clone();ui.offline_confirm.set(String::new());},"Cancel"}
@@ -2680,8 +2822,10 @@ fn library(ui: Ui) -> Element {
                     let play_ui=ui.clone();let played_catalog=catalog.clone();let next_ui=ui.clone();let next_catalog=catalog.clone();let last_ui=ui.clone();let last_catalog=catalog.clone();let next_track=track.clone();let last_track=track.clone();let favorite_ui=ui.clone();let favorite_catalog=catalog.clone();let favorite_track=track.clone();let offline_ui=ui.clone();let offline_track=track.clone();let offline_saved=offline_ids.contains(&track.id);let offline_working=offline_busy==track.id;let offline_title=track.title.clone();
                     let current=ui.current_track().is_some_and(|current|current.id==track.id);
                     let favorite_disabled=ui.favorite_busy.read().as_str()==track.id;
+                    let row_playing=current && *ui.wants_play.read();
+                    let row_action=if row_playing {"Pause"}else{"Play"};
                     rsx! {article {class:if current {"native-track current"} else {"native-track"},key:"{track.id}","data-native-track-id":"{track.id}",
-                        button {class:"icon-button track-start",disabled:!ui.audio_ready(),title:if !ui.audio_ready() {"Native audio output is unavailable"} else {"Play original"},"aria-label":"Play {track.title}",onclick:move |_|play_catalog(play_ui.clone(),played_catalog.clone(),at),Icon {name:"play"}}
+                        button {class:"icon-button track-start",disabled:!ui.audio_ready(),title:if !ui.audio_ready() {"Native audio output is unavailable"} else {"Play original"},"aria-label":"{row_action} {track.title}","aria-pressed":row_playing,onclick:move |_|play_catalog(play_ui.clone(),played_catalog.clone(),at),if row_playing {Icon {name:"pause"}}else{Icon {name:"play"}}}
                         div {class:"native-track-name",div {class:"neutral-cover","aria-hidden":"true",Icon {name:"music"}} div {strong {"{track.title}"} small {"{track.artist}"}}}
                         span {class:"native-track-album","{track.album}"}
                         span {class:"native-track-time","{time_label(track.duration_ms.max(0) as u64)}"}
@@ -2821,7 +2965,7 @@ fn open_group(mut ui: Ui, kind: &'static str, id: String) {
     });
 }
 
-fn play_group(mut ui: Ui) {
+fn play_group(ui: Ui) {
     if !ui.signed_in() || ui.audio.peek().is_none() || ui.browse_id.peek().is_none() {
         return;
     }
@@ -2830,10 +2974,7 @@ fn play_group(mut ui: Ui) {
         return;
     }
     let title = ui.browse_title.peek().clone();
-    ui.order.write().reset(tracks.len(), 0);
-    ui.queue.set(tracks);
-    ui.context.set(title);
-    start_source(ui, false, true, 0);
+    queue_owned_context(ui, tracks, 0, title);
 }
 
 fn playlists_view(ui: Ui) -> Element {
@@ -2860,6 +3001,16 @@ fn playlists_view(ui: Ui) -> Element {
     let mut folder_name = ui.folder_name_draft;
     let mut folder_rename = ui.folder_rename_draft;
     let detail = ui.playlist.read().clone();
+    let playable_tracks = detail
+        .as_ref()
+        .map(|d| {
+            d.items
+                .iter()
+                .filter(|i| i.can_stream)
+                .map(|i| i.track.clone())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
     let refresh = ui.clone();
     let back = ui.clone();
     let play = ui.clone();
@@ -2935,13 +3086,26 @@ fn playlists_view(ui: Ui) -> Element {
                 div { class: "native-queue-list",
                     for (at, entry) in detail.items.iter().cloned().enumerate() {
                         {
+                            let play_entry = ui.clone();
+                            let played_id=entry.id.clone();
+                            let playable_at=detail.items.iter().filter(|i|i.can_stream).position(|i|i.id==entry.id);
+                            let active=*ui.wants_play.read() && playable_at.is_some_and(|index|owned_target_current(&ui,&playable_tracks,index,&format!("Playlist · {}",detail.playlist.name)));
+                            let verb=if active {"Pause"}else{"Play"};
                             let up = ui.clone();
                             let down = ui.clone();
                             let remove = ui.clone();
                             let item_id = entry.id.clone();
                             const LAST_HINT: &str = "Already the last playlist entry.";
                             rsx! { article { class: "native-queue-row", key: "{entry.id}",
-                                div { class: "neutral-cover", "aria-hidden": "true", Icon { name: "music" } }
+                                if entry.can_stream {button {class:"icon-button", "aria-label":"{verb} playlist entry {at + 1}: {entry.track.title}", onclick:move |_|{
+                                    if let Some(detail)=play_entry.playlist.peek().clone() {
+                                        let items=detail.items.iter().filter(|i|i.can_stream).collect::<Vec<_>>();
+                                        if let Some(at)=items.iter().position(|i|i.id==played_id) {
+                                            let tracks=items.into_iter().map(|i|i.track.clone()).collect();
+                                            play_owned_context(play_entry.clone(),tracks,at,format!("Playlist · {}",detail.playlist.name));
+                                        }
+                                    }
+                                },if active {Icon {name:"pause"}}else{Icon {name:"play"}}}}else{div {class:"neutral-cover", "aria-hidden":"true",Icon {name:"music"}}}
                                 div { class: "native-queue-select", div { strong { "{entry.track.title}" } small { "{entry.track.artist}" } } }
                                 if entry.can_stream { span { class: "queue-current", "Playable" } } else { small { "Metadata only" } }
                                 if detail.playlist.can_edit {
@@ -3065,6 +3229,15 @@ fn play_public(mut ui: Ui, track: PublicTrack, origin: String) {
     if !track.can_stream || !ui.signed_in() {
         return;
     }
+    if ui
+        .remote_now
+        .peek()
+        .as_ref()
+        .is_some_and(|now| now.origin == origin && now.id == track.id)
+    {
+        toggle(ui);
+        return;
+    }
     ui.remote_queue
         .set(vec![crate::remote::RemoteItem { origin, track }]);
     ui.remote_index.set(0);
@@ -3072,6 +3245,15 @@ fn play_public(mut ui: Ui, track: PublicTrack, origin: String) {
 }
 
 fn play_public_result(mut ui: Ui, origin: String, track_id: String) {
+    if ui
+        .remote_now
+        .peek()
+        .as_ref()
+        .is_some_and(|now| now.origin == origin && now.id == track_id)
+    {
+        toggle(ui);
+        return;
+    }
     let mut items = Vec::new();
     for peer in ui.remote_results.peek().clone() {
         for track in peer.items {
@@ -3095,7 +3277,7 @@ fn play_public_result(mut ui: Ui, origin: String, track_id: String) {
 }
 
 fn start_remote(mut ui: Ui) {
-    if !ui.signed_in() || *ui.view.peek() != "public" {
+    if !ui.signed_in() {
         return;
     }
     ui.offline_active.set(false);
@@ -3126,6 +3308,7 @@ fn start_remote(mut ui: Ui) {
         origin: origin.clone(),
     }));
     ui.context.set(format!("Public · {origin}"));
+    ui.wants_play.set(true);
     ui.preparing.set(true);
     let ticket = ui.source_gate.begin(account.epoch);
     spawn(async move {
@@ -3148,19 +3331,20 @@ fn start_remote(mut ui: Ui) {
             return;
         }
         ui.preparing.set(false);
+        let requested = *ui.wants_play.peek();
         match result {
-            Ok(prepared) => match audio.load(selection, prepared.clone(), true, 0) {
+            Ok(prepared) => match audio.load(selection, prepared.clone(), requested, 0) {
                 Ok(()) => ui.prepared.set(Some(prepared)),
                 Err(error) => {
+                    ui.wants_play.set(false);
                     ui.source_error.set(error);
-                    ui.remote_now.set(None);
                 }
             },
             Err(error) => {
                 if !expired(ui.clone(), &error) {
+                    ui.wants_play.set(false);
                     ui.source_error.set(error);
                 }
-                ui.remote_now.set(None);
             }
         }
     });
@@ -3507,13 +3691,15 @@ fn public_view(ui: Ui) -> Element {
                                         let play_ui = ui.clone();
                                         let play_track = track.clone();
                                         let play_origin = peer_origin.clone();
+                                        let active=ui.remote_now.read().as_ref().is_some_and(|n|n.id==track.id && n.origin==play_origin) && *ui.wants_play.read();
+                                        let verb=if active {"Pause"}else{"Play"};
                                         let track_title = track.title.clone();
                                         rsx! { article { class: "native-queue-row", key: "{peer.origin}-{track.id}", "data-public-track-id": "{track.id}", "data-public-origin": "{peer.origin}", "data-public-cached": "{peer_cached}",
                                             div { class: "neutral-cover", "aria-hidden": "true", Icon { name: "music" } }
                                             div { class: "native-queue-select", div { strong { "{track.title}" } small { "{track.artist} · {track.album}" } small { "{peer.origin}" } } }
                                             span { class: "native-track-time", "{time_label(track.duration_ms.max(0) as u64)}" }
                                             if track.can_stream && !peer_cached {
-                                                button { class: "button primary small", disabled: !ui.audio_ready(), "aria-label": "Play public track {track_title}", onclick: move |_| play_public_result(play_ui.clone(), play_origin.clone(), play_track.id.clone()), Icon { name: "play" } "Play public track" }
+                                                button { class: "button primary small", disabled: !ui.audio_ready(), "aria-label": "{verb} public track {track_title}", onclick: move |_| play_public_result(play_ui.clone(), play_origin.clone(), play_track.id.clone()), if active {Icon {name:"pause"}}else{Icon {name:"play"}} "{verb} public track" }
                                             } else if peer_cached { small { "Cached metadata only" } } else { small { "Metadata only" } }
                                         } }
                                     }
@@ -3562,6 +3748,8 @@ fn public_view(ui: Ui) -> Element {
                             let track_title = track.title.clone();
                             let origin_label = preview.origin.clone();
                             let play_origin = preview.origin.clone();
+                            let active=ui.remote_now.read().as_ref().is_some_and(|n|n.id==track.id && n.origin==play_origin) && *ui.wants_play.read();
+                            let verb=if active {"Pause"}else{"Play"};
                             rsx! { article { class: "native-queue-row", key: "{track.id}", "data-public-track-id": "{track.id}",
                                 div { class: "neutral-cover", "aria-hidden": "true", Icon { name: "music" } }
                                 div { class: "native-queue-select",
@@ -3573,7 +3761,7 @@ fn public_view(ui: Ui) -> Element {
                                 }
                                 span { class: "native-track-time", "{time_label(track.duration_ms.max(0) as u64)}" }
                                 if track.can_stream {
-                                    button { class: "button primary small", disabled: !ui.audio_ready(), "aria-label": "Play public track {track_title}", onclick: move |_| play_public(play_ui.clone(), play_track.clone(), play_origin.clone()), Icon { name: "play" } "Play public track" }
+                                    button { class: "button primary small", disabled: !ui.audio_ready(), "aria-label": "{verb} public track {track_title}", onclick: move |_| play_public(play_ui.clone(), play_track.clone(), play_origin.clone()), if active {Icon {name:"pause"}}else{Icon {name:"play"}} "{verb} public track" }
                                 } else {
                                     small { "Metadata only" }
                                 }
@@ -3619,10 +3807,10 @@ fn browse_view(ui: Ui) -> Element {
         if !error.is_empty() {div {class:"alert error",role:"alert","{error}"}}
         if selected {
             div {class:"native-track-actions",button {class:"button secondary small",onclick:move |_|{let mut ui=back.clone();ui.browse_id.set(None);ui.browse_title.set(String::new());ui.browse_tracks.set(Vec::new());},"Back to {group_label}s"} button {class:"button primary small",disabled:!ui.audio_ready()||tracks.is_empty(),onclick:move |_|play_group(play.clone()),Icon {name:"play"} "Play {group_label}"}}
-            if !tracks.is_empty() {div {class:"native-queue-list",for (at, track) in tracks.iter().cloned().enumerate() { article {class:"native-queue-row",key:"{at}-{track.id}",
-                span {class:"queue-number","{at+1}"} div {class:"neutral-cover","aria-hidden":"true",Icon {name:"music"}} div {class:"native-queue-select",div {strong {"{track.title}"} small {"{track.artist}"}}}
+            if !tracks.is_empty() {div {class:"native-queue-list",for (at, track) in tracks.iter().cloned().enumerate() {{let play=ui.clone();let active=ui.current_track().is_some_and(|t|t.id==track.id) && *ui.wants_play.read();let verb=if active {"Pause"}else{"Play"}; rsx!{article {class:"native-queue-row",key:"{at}-{track.id}",
+                button {class:"icon-button", "aria-label":"{verb} {track.title} from {group_label}",onclick:move |_|{let tracks=play.browse_tracks.peek().clone();let title=play.browse_title.peek().clone();play_owned_context(play.clone(),tracks,at,title);},if active{Icon {name:"pause"}}else{Icon {name:"play"}}} div {class:"neutral-cover","aria-hidden":"true",Icon {name:"music"}} div {class:"native-queue-select",div {strong {"{track.title}"} small {"{track.artist}"}}}
                 span {class:"native-track-time","{time_label(track.duration_ms.max(0) as u64)}"}
-            } } } }
+            } } }} } }
         } else {
             if kind == "albums" {
                 if albums.is_empty() && !loading && error.is_empty() {div {class:"native-empty",Icon {name:"albums"} h2 {"No album groups yet"} p {"Uploaded or scanned tracks with album metadata will appear here."}}}
@@ -3655,13 +3843,13 @@ fn queue_view(ui: Ui) -> Element {
         else {div {class:"native-queue-list",for (at,track) in queue.into_iter().enumerate() { {
             let select=ui.clone();let up=ui.clone();let down=ui.clone();let remove=ui.clone();
             rsx! {article {class:if current==Some(at){"native-queue-row current"}else{"native-queue-row"},key:"{at}-{track.id}","data-native-queue-index":"{at}",
-                button {class:"native-queue-select",disabled:!ui.audio_ready(),"aria-label":"Play queue occurrence {at}: {track.title}",onclick:move |_|select_queue(select.clone(),at),span {class:"queue-number","{at+1}"} div {class:"neutral-cover","aria-hidden":"true",Icon {name:"music"}} div {strong {"{track.title}"} small {"{track.artist}"}} if current==Some(at){span {class:"queue-current","Current"}}}
+                button {class:"native-queue-select",disabled:!ui.audio_ready(),"aria-label":format!("{} queue occurrence {at}: {}",if current==Some(at) && *ui.wants_play.read(){"Pause"}else{"Play"},track.title),onclick:move |_|select_queue(select.clone(),at),span {class:"queue-number","{at+1}"} div {class:"neutral-cover","aria-hidden":"true",Icon {name:"music"}} div {strong {"{track.title}"} small {"{track.artist}"}} if current==Some(at){span {class:"queue-current","Current"}}}
                 button {class:"icon-button",disabled:at==0,"aria-label":"Move queue occurrence {at} up",title:"Move up",onclick:move |_|queue_edit(up.clone(),at,false),Icon {name:"up"}}
                 button {class:"icon-button",disabled:at+1>=queue_len,"aria-label":"Move queue occurrence {at} down",title:if at+1>=queue_len {"Already the last queued occurrence."} else {"Move down"},onclick:move |_|queue_move_down(down.clone(),at),Icon {name:"down"}}
                 button {class:"icon-button",disabled:current==Some(at),"aria-label":"Remove queue occurrence {at}",title:if current==Some(at){"Current occurrence cannot be removed; clear the queue to stop it"}else{"Remove from queue"},onclick:move |_|queue_edit(remove.clone(),at,true),Icon {name:"close"}}
             } }
         } } } }
-        p {class:"queue-explanation","Shuffle follows a temporary fair deck and playback history. The visible list is saved queue order, not a prediction of shuffled playback."}
+        p {class:"queue-explanation",if *ui.offline_active.read() {"Saved tracks play in order. You can repeat one track."} else {"Shuffle follows a temporary fair deck and playback history. The visible list is saved queue order, not a prediction of shuffled playback."}}
     } }
 }
 
@@ -3675,8 +3863,12 @@ fn player(ui: Ui) -> Element {
     let preparing = *ui.preparing.read();
     let checking = ui.offline_checking.read().clone();
     let error = ui.source_error.read().clone();
-    let shuffle = *ui.shuffle.read();
-    let repeat = *ui.repeat.read();
+    let (shuffle, repeat) = playback_modes(
+        offline_active,
+        remote.is_some(),
+        *ui.shuffle.read(),
+        *ui.repeat.read(),
+    );
     let context = ui.context.read().clone();
     let toggle_ui = ui.clone();
     let previous = ui.clone();
@@ -3690,7 +3882,7 @@ fn player(ui: Ui) -> Element {
     // A copy under verification is a pending transport action: the decoder keeps
     // what it has and every control that would replace or seek it waits.
     let blocked = (track.is_none() && remote.is_none()) || !ui.audio_ready() || checking.is_some();
-    let playing = snapshot.phase == AudioPhase::Playing;
+    let playing = *ui.wants_play.read();
     let can_seek = !blocked
         && !preparing
         && ui.prepared.peek().is_some()
@@ -3703,6 +3895,20 @@ fn player(ui: Ui) -> Element {
         Repeat::Off => "Repeat off",
         Repeat::All => "Repeat all",
         Repeat::One => "Repeat one",
+    };
+    let shuffle_help = if remote.is_some() {
+        "Shuffle is unavailable for public sources"
+    } else if offline_active {
+        "Shuffle is unavailable for offline sources"
+    } else {
+        "Shuffle"
+    };
+    let repeat_help = if remote.is_some() {
+        "Repeat is unavailable for public sources"
+    } else if offline_active {
+        "Offline repeat cycles between off and one track"
+    } else {
+        "Cycle repeat off, all and one"
     };
     let favorite_disabled = track
         .as_ref()
@@ -3719,11 +3925,11 @@ fn player(ui: Ui) -> Element {
             }
         }
         div {class:"player-controls",div {class:"transport",
-            button {class:if shuffle{"icon-button selected"}else{"icon-button"},"aria-label":"Shuffle","aria-pressed":shuffle,disabled:blocked,onclick:move |_|{let mut ui=shuffle_ui.clone();let next=!*ui.shuffle.peek();ui.shuffle.set(next);let repeat=*ui.repeat.peek();ui.order.write().configure(next,repeat);},Icon {name:"shuffle"}}
+            button {class:if shuffle{"icon-button selected"}else{"icon-button"},"aria-label":"Shuffle",title:shuffle_help,"aria-description":shuffle_help,"aria-pressed":shuffle,disabled:blocked||offline_active||remote.is_some(),onclick:move |_|{let ui=shuffle_ui.clone();let next=!*ui.shuffle.peek();set_shuffle(ui,next);},Icon {name:"shuffle"}}
             button {class:"icon-button","aria-label":"Previous",disabled:blocked||(offline_active&&offline_current.is_none_or(|current|current==0))||(remote.is_some()&&*ui.remote_index.read()==0),onclick:move |_|player_previous(previous.clone()),Icon {name:"previous"}}
-            button {class:"native-play-toggle","aria-label":if playing{"Pause"}else{"Play"},disabled:blocked||preparing||snapshot.phase==AudioPhase::Loading,onclick:move |_|toggle(toggle_ui.clone()),if playing{Icon {name:"pause"}}else{Icon {name:"play"}}}
+            button {class:"native-play-toggle","aria-label":if playing{"Pause"}else{"Play"},disabled:blocked,onclick:move |_|toggle(toggle_ui.clone()),if playing{Icon {name:"pause"}}else{Icon {name:"play"}}}
             button {class:"icon-button","aria-label":"Next",disabled:blocked||(offline_active&&offline_current.is_none_or(|current|current+1>=offline_len))||(remote.is_some()&&*ui.remote_index.read()+1>=ui.remote_queue.read().len()),onclick:move |_|player_next(next.clone()),Icon {name:"next"}}
-            button {class:if repeat!=Repeat::Off{"icon-button selected"}else{"icon-button"},"aria-label":repeat_label,"aria-pressed":repeat!=Repeat::Off,disabled:blocked,onclick:move |_|{let mut ui=repeat_ui.clone();let next=match *ui.repeat.peek(){Repeat::Off=>Repeat::All,Repeat::All=>Repeat::One,Repeat::One=>Repeat::Off};ui.repeat.set(next);let shuffle=*ui.shuffle.peek();ui.order.write().configure(shuffle,next);},if repeat==Repeat::One{Icon {name:"repeat-one"}}else{Icon {name:"repeat"}}}
+            button {class:if repeat!=Repeat::Off{"icon-button selected"}else{"icon-button"},"aria-label":repeat_label,title:repeat_help,"aria-description":repeat_help,"aria-pressed":repeat!=Repeat::Off,disabled:blocked||remote.is_some(),onclick:move |_|{let next=match repeat{Repeat::Off if offline_active=>Repeat::One,Repeat::Off=>Repeat::All,Repeat::All=>Repeat::One,Repeat::One=>Repeat::Off};set_repeat(repeat_ui.clone(),next);},if repeat==Repeat::One{Icon {name:"repeat-one"}}else{Icon {name:"repeat"}}}
         }
             div {class:"native-seek",span {"{time_label(snapshot.position_ms)}"} label {class:"sr-only",r#for:"native-seek","Playback position"} input {id:"native-seek",r#type:"range",min:0,max:snapshot.duration_ms.max(1),step:100,value:snapshot.position_ms,disabled:!can_seek,onchange:move |event|seek(seek_ui.clone(),event.value())} span {"{time_label(snapshot.duration_ms)}"}}
         }
@@ -3837,6 +4043,7 @@ pub fn App() -> Element {
         context: use_signal(String::new),
         snapshot: use_signal(AudioSnapshot::default),
         preparing: use_signal(|| false),
+        wants_play: use_signal(|| false),
         progress: use_signal(DownloadProgress::default),
         prepared: use_signal(|| None),
         source_error: use_signal(String::new),
@@ -3922,6 +4129,9 @@ pub fn App() -> Element {
                     continue;
                 }
                 let ended = snapshot.phase == AudioPhase::Ended;
+                if ended || snapshot.phase == AudioPhase::Error {
+                    observer.wants_play.set(false);
+                }
                 observer.snapshot.set(snapshot);
                 observer.publish_system_controls();
                 if ended && observer.ended.get() != Some(generation) {
@@ -4005,15 +4215,15 @@ pub fn App() -> Element {
                     nav {"aria-label":"Main navigation",button {class:if view=="library"{"native-nav active"}else{"native-nav"},"aria-label":"Library",onclick:move |_|{view_signal.set("library");load_catalog(nav_library.clone(),String::new(),None,false);},Icon {name:"library"}"Library"} button {class:if view=="albums"{"native-nav active"}else{"native-nav"},"aria-label":"Albums",onclick:move |_|{load_groups(nav_albums.clone(),"albums",None);},Icon {name:"albums"}"Albums"} button {class:if view=="artists"{"native-nav active"}else{"native-nav"},"aria-label":"Artists",onclick:move |_|{load_groups(nav_artists.clone(),"artists",None);},Icon {name:"artists"}"Artists"} button {class:if view=="favorites"{"native-nav active"}else{"native-nav"},"aria-label":"Favorites",onclick:move |_|{view_signal.set("favorites");load_catalog(nav_favorites.clone(),String::new(),None,true);},Icon {name:"heart"}"Favorites"} button {class:if view=="playlists"{"native-nav active"}else{"native-nav"},"aria-label":"Playlists",onclick:move |_|{load_playlists(nav_playlists.clone());},Icon {name:"playlists"}"Playlists"} button {class:if view=="public"{"native-nav active"}else{"native-nav"},"aria-label":"Public",onclick:move |_|{view_signal.set("public");explore_public(nav_public.clone());},Icon {name:"network"}"Public"} button {class:if view=="queue"{"native-nav active"}else{"native-nav"},"aria-label":"Queue",onclick:move |_|view_signal.set("queue"),Icon {name:"queue"}"Queue"}}
                     div {class:"native-private-note",Icon {name:"check"} strong {"Private by default"} p {"Share only what you choose."} p {class:"native-mpris-note",role:"status","data-testid":"native-mpris-status","{ui.mpris_note}"}}
                 }
-                main {class:"native-content",header {class:"native-topbar",div {span {class:"eyebrow","YOUR PERSONAL MUSIC SPACE"} if let Some(account)=ui.account.read().as_ref(){strong {"{account.user.username}"} small {"{account.origin}"}}}
-                    div {class:"topbar-actions",button {class:"icon-button","aria-label":"Change color theme",onclick:move |_|theme_signal.set(if theme=="dark"{"light"}else{"dark"}),if theme=="dark"{Icon {name:"sun"}}else{Icon {name:"moon"}}} button {class:"button secondary small",onclick:move |_|sign_out(logout.clone()),"Sign out"}}
+                main {class:"native-content",header {class:"native-topbar",div {class:"native-window-drag",onmousedown:move |event|{if event.trigger_button()==Some(dioxus::html::input_data::MouseButton::Primary){dioxus::desktop::window().drag();}},ondoubleclick:move |_|dioxus::desktop::window().toggle_maximized(),span {class:"eyebrow","YOUR PERSONAL MUSIC SPACE"} if let Some(account)=ui.account.read().as_ref(){strong {"{account.user.username}"} small {"{account.origin}"}}}
+                    div {class:"topbar-actions",button {class:"icon-button","aria-label":"Change color theme",onclick:move |_|theme_signal.set(if theme=="dark"{"light"}else{"dark"}),if theme=="dark"{Icon {name:"sun"}}else{Icon {name:"moon"}}} button {class:"button secondary small",onclick:move |_|sign_out(logout.clone()),"Sign out"} WindowControls {}}
                 }
                     nav {class:"native-compact-nav","aria-label":"Compact navigation",button {class:if view=="library"{"active"}else{""},onclick:move |_|{view_signal.set("library");load_catalog(compact_library.clone(),String::new(),None,false);},"Library"} button {class:if view=="albums"{"active"}else{""},onclick:move |_|{load_groups(compact_albums.clone(),"albums",None);},"Albums"} button {class:if view=="artists"{"active"}else{""},onclick:move |_|{load_groups(compact_artists.clone(),"artists",None);},"Artists"} button {class:if view=="favorites"{"active"}else{""},onclick:move |_|{view_signal.set("favorites");load_catalog(compact_favorites.clone(),String::new(),None,true);},"Favorites"} button {class:if view=="playlists"{"active"}else{""},onclick:move |_|{load_playlists(compact_playlists.clone());},"Playlists"} button {class:if view=="public"{"active"}else{""},onclick:move |_|{view_signal.set("public");explore_public(compact_public.clone());},"Public"} button {class:if view=="queue"{"active"}else{""},onclick:move |_|view_signal.set("queue"),"Queue"}}
                     if !notice.is_empty(){div {class:"alert notice",role:"status",span {"{notice}"} button {class:"icon-button","aria-label":"Dismiss notification",onclick:move |_|notice_signal.set(String::new()),Icon {name:"close"}}}}
                     if view=="queue"{{queue_view(ui.clone())}}else if view=="playlists"{{playlists_view(ui.clone())}}else if view=="albums"||view=="artists"{{browse_view(ui.clone())}}else if view=="public"{{public_view(ui.clone())}}else{{library(ui.clone())}}
                 }
                 {player(ui.clone())}
-            }else{{sign_in(ui.clone())}}
+            }else{div {class:"signin-window-controls",WindowControls {}} {sign_in(ui.clone())}}
         }
     }
 }
@@ -4021,6 +4231,46 @@ pub fn App() -> Element {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn source_modes_do_not_apply_owned_shuffle_or_repeat_all_to_other_adapters() {
+        let preferences = (true, Repeat::All);
+        assert_eq!(
+            playback_modes(true, false, preferences.0, preferences.1),
+            (false, Repeat::Off)
+        );
+        assert_eq!(
+            playback_modes(false, true, preferences.0, preferences.1),
+            (false, Repeat::Off)
+        );
+        let (shuffle, repeat) = playback_modes(false, false, preferences.0, preferences.1);
+        let mut order = PlaybackOrder::default();
+        order.reset(2, 1);
+        order.configure(shuffle, repeat);
+        assert_eq!(
+            order.transition(Command::Ended, 30.0, 0),
+            Transition::Play(0),
+            "returning to owned playback retains the original queue preferences"
+        );
+    }
+
+    #[test]
+    fn offline_repeat_one_is_an_available_mode_without_claiming_shuffle() {
+        let (shuffle, repeat) = playback_modes(true, false, true, Repeat::One);
+        assert!(!shuffle);
+        let mut order = PlaybackOrder::default();
+        order.reset(2, 0);
+        order.configure(shuffle, repeat);
+        assert_eq!(
+            order.transition(Command::Ended, 30.0, 0),
+            Transition::SeekStart { resume: true }
+        );
+        assert_eq!(
+            order.transition(Command::Next, 0.0, 0),
+            Transition::Play(1),
+            "repeat one does not capture manual Next"
+        );
+    }
 
     #[test]
     fn saved_session_failures_are_classified_by_exact_client_message() {

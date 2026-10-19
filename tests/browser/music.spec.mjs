@@ -1347,8 +1347,13 @@ test('NET02 pause and a newer duplicate occurrence cancel held recovery and retr
   await page.getByRole('button',{name:'Play',exact:true}).click();await held;expect(gets).toBeGreaterThan(0);
   await page.getByRole('button',{name:'Pause',exact:true}).click();
   await expect(page.locator('#vela-audio')).toHaveJSProperty('paused',true);
+  // Select the *other* queued Drift occurrence. The current library row now
+  // correctly resumes its paused occurrence instead of resetting it to zero.
   await findTrack(page,'Drift');
-  await page.getByRole('button',{name:'Play Drift',exact:true}).click();
+  await page.getByRole('button',{name:'Add Drift to playback queue',exact:true}).click();
+  await page.getByRole('button',{name:'Show playback queue',exact:true}).click();
+  await page.locator('.queue-row').last().locator('.queue-track').click();
+  await page.getByRole('button',{name:'Close playback queue',exact:true}).click();
   await expect(page.locator('#vela-audio')).toHaveJSProperty('paused',false);
   expect(await page.locator('#vela-audio').evaluate(a=>a.currentTime)).toBeLessThan(3);
   const generation=await page.locator('#vela-audio').getAttribute('data-source-generation');

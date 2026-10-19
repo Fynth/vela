@@ -1,5 +1,71 @@
 # Verified progress
 
+## Row transport and frameless Hyprland repair2026-10-19
+
+Evolved actual baseline91867f2 after the newer Better Design implementation request.
+Original mint design, root audio owners and auth/cancellation boundaries remain.
+No user data, schema, dependencies, Cargo.lock, frozen runtime, release archives or
+Hyprland configuration changed. Initially untracked unrelated `prompt.txt` was not
+read/staged/changed. No agents spawned. See [review](UX_INTERACTION_REVIEW_2026-10-19.md)
+and [ADR0024](DECISIONS/0024-row-transport-and-linux-window.md).
+
+Implemented current-row pause/resume without source/seek/order reset; distinct
+duplicate occurrence selection; accurate requested-state names/icons; separate
+context Play for albums/playlists/radio/mixes; native pending intent so a second click
+prevents late autoplay; native per-entry group/playlist playback; route-independent
+public Next/Previous; saved-source queue dispatch; retry/clear state repairs; honest
+public/offline mode availability. Offline repeat-one retains its verified local
+descriptor/domain at EOF. Shared Linux production/QA builder disables GTK decorations
+and integrates window controls/drag region. Non-Linux retains system decorations.
+
+Executed final evidence:
+
+- fmt/diff whitespace PASS; strict workspace/all-target, native-qa/all-target and
+  wasm32 web Clippy PASS. Workspace **293 passed,0 failed,3 ignored** in
+  `target/checks/ux-modes-rust-tests-final.log`;22 Python tests PASS; JS syntax and
+  native QA CLI bounds PASS. Native desktop/example debug build PASS
+  (`ux-modes-native-build.log`), pinned dev WASM build PASS
+  (`ux-toggle-web-build-final.log`). No release/Docker/mobile result is inferred.
+- Full Chromium **43 passed/1 live-import skip in2.3m**, Firefox
+  **43 passed/1 live-import skip in2.7m**, against real isolated Rust servers/current
+  dev assets. UX01 plays PCM, seeks7s and toggles Library/Home/current queue rows
+  while checking actual source/time. Existing PLAY/RES/NET/NP/auth/privacy/DSP/radio/
+  sharing tests remain. Logs/screens `target/checks/ux-toggle-{chromium,firefox}-final/`.
+  Browser source hashes remain unchanged by the later native-only mode follow-up.
+- Native X11/WebKitGTK/Rodio **89 checks PASS**,10 complete PNGs with exact dimensions,
+  actual640/1280/1440/1728 widths and0 abandoned originals. Includes pending double
+  click, seek/row/queue/playlist-entry continuity, two-origin TLS/public transport
+  after navigation and actual offline repeat-one EOF while server stopped.
+  `target/checks/ux-modes-native-x11/report.json`.
+- Actual **native Wayland**, normally tiled in Hyprland without resize/float requests:
+  **5 checks PASS**,1 complete PNG, viewport1278×1030/DPR2→2556×2060, exact owning PID
+  and xwayland=false verified. Frameless controls, seek/row source continuity and
+  no overflow checked. `target/checks/ux-modes-native-wayland/report.json`.
+  Both native runs use owned null sinks, not physical audio/hardware validation.
+- Better Design principles/review rules loaded. Final scoped transport-guidance and
+  window-action comprehension PASS after simplifying offline copy. Initial bundled
+  copy check mixed mutually exclusive Play/Pause and unrelated window actions; it
+  is not claimed as whole-screen approval. Actual DOM measurement completed: web
+ 390/1440/1728 themes **0 critical/0 serious/10 moderate**; four native X11 states plus
+  tiled Wayland **0 critical/0 serious/5 moderate**. Native390 is outside its640px
+  minimum; web320/390 checks are separate. Inherited off-scale values/web2px volume
+  gap drift remain. `.better-design/ux-review.json` records scope. In-app Browser
+  and review-ui-code unavailable; existing Playwright CLI/real WebKitGTK used.
+
+Intermediate failures were fixed and preserved: NET02 now explicitly appends/selects
+a different duplicate rather than expecting current-row restart; Radio's primary
+Play now starts its context. Initial Wayland captures failed after Dioxus mutated
+GDK_BACKEND following GTK startup; QA now independently checks actual compositor
+protocol. Earlier artifacts remain under target/checks. Fingerprints:
+`target/checks/ux-source-manifest.json`.
+
+Final read-only runtime check: frozen service active0.12.6/MainPID1178/NRestarts0,
+health OK. Initially inspected desktopPID115855 was not terminated by this task and
+was absent at final inspection. Launch rebuilt `target/debug/vela-desktop` for the
+new frame. Frozen server/web assets were not upgraded. No prefetch/handoff/mobile/
+whole-product completion follows. Next: native artwork, stable duplicate-entry
+provenance/native queue restore, then bounded progressive sources/prefetch/device work.
+
 ## Better Design contrast and listening-layout implementation2026-10-19
 
 The newer explicit UI implementation request supersedes the earlier MD-only task.

@@ -1,0 +1,231 @@
+{
+  "date": "2026-10-19",
+  "sourceBaseline": "91867f2",
+  "product": "Vela Music",
+  "classification": "repair",
+  "scope": "Existing Dioxus web/Linux native transport interactions and frameless Hyprland window",
+  "designSystem": "Retained original bright mint/dark/light semantic tokens and SVG icons; no catalog kit/framework swap",
+  "principles": [
+    "playback state machines and current-row toggles",
+    "pending operation intent and stale-source cancellation",
+    "window controls/accessible targets",
+    "capability-specific disabled modes"
+  ],
+  "tradeoff": "Retain single audio owners and integrity/cancellation contracts. Linux loses the GTK title strip and gains integrated 44px window controls. Unsupported public/offline modes are explicitly limited rather than appearing active.",
+  "comprehension": [
+    {
+      "verdict": "pass",
+      "findingCount": 0,
+      "findings": [],
+      "words": 14,
+      "estimatedExplainSeconds": 8
+    },
+    {
+      "verdict": "pass",
+      "findingCount": 0,
+      "findings": [],
+      "words": 10,
+      "estimatedExplainSeconds": 9
+    }
+  ],
+  "comprehensionLimits": "Two scoped copy regions, not a whole-screen user study. The initial combined bundle counted mutually exclusive Play/Pause and unrelated window actions; not accepted as screen approval. Offline copy simplified.",
+  "spacing": [
+    {
+      "platform": "Web Chromium",
+      "status": "completed",
+      "widths": [
+        390,
+        1440,
+        1728
+      ],
+      "themes": [
+        "dark",
+        "light"
+      ],
+      "summary": {
+        "critical": 0,
+        "serious": 0,
+        "moderate": 10,
+        "total": 10
+      },
+      "findings": [
+        {
+          "state": "library-390-dark",
+          "severity": "moderate",
+          "ruleId": "spacing/off-scale-value",
+          "message": "library-390-dark uses 8 off-scale spacing values across 21 elements: 1px, 6px, 10px, 14px, 19px, 22px, 36px, 200px."
+        },
+        {
+          "state": "library-390-light",
+          "severity": "moderate",
+          "ruleId": "spacing/off-scale-value",
+          "message": "library-390-light uses 8 off-scale spacing values across 21 elements: 1px, 6px, 10px, 14px, 19px, 22px, 36px, 200px."
+        },
+        {
+          "state": "library-1440-dark",
+          "severity": "moderate",
+          "ruleId": "spacing/off-scale-value",
+          "message": "library-1440-dark uses 9 off-scale spacing values across 41 elements: 1px, 6px, 10px, 14px, 20px, 22px, 27px, 29px, 232px."
+        },
+        {
+          "state": "library-1440-dark",
+          "severity": "moderate",
+          "ruleId": "spacing/sibling-gap-drift",
+          "message": "div:nth-of-type(2)@180 has inconsistent sibling gaps: 13px, 15px."
+        },
+        {
+          "state": "library-1440-light",
+          "severity": "moderate",
+          "ruleId": "spacing/off-scale-value",
+          "message": "library-1440-light uses 9 off-scale spacing values across 41 elements: 1px, 6px, 10px, 14px, 20px, 22px, 27px, 29px, 232px."
+        },
+        {
+          "state": "library-1440-light",
+          "severity": "moderate",
+          "ruleId": "spacing/sibling-gap-drift",
+          "message": "div:nth-of-type(2)@180 has inconsistent sibling gaps: 13px, 15px."
+        },
+        {
+          "state": "library-1728-dark",
+          "severity": "moderate",
+          "ruleId": "spacing/off-scale-value",
+          "message": "library-1728-dark uses 9 off-scale spacing values across 41 elements: 1px, 6px, 10px, 14px, 20px, 22px, 27px, 29px, 232px."
+        },
+        {
+          "state": "library-1728-dark",
+          "severity": "moderate",
+          "ruleId": "spacing/sibling-gap-drift",
+          "message": "div:nth-of-type(2)@180 has inconsistent sibling gaps: 13px, 15px."
+        },
+        {
+          "state": "library-1728-light",
+          "severity": "moderate",
+          "ruleId": "spacing/off-scale-value",
+          "message": "library-1728-light uses 9 off-scale spacing values across 41 elements: 1px, 6px, 10px, 14px, 20px, 22px, 27px, 29px, 232px."
+        },
+        {
+          "state": "library-1728-light",
+          "severity": "moderate",
+          "ruleId": "spacing/sibling-gap-drift",
+          "message": "div:nth-of-type(2)@180 has inconsistent sibling gaps: 13px, 15px."
+        }
+      ]
+    },
+    {
+      "platform": "Linux native WebKitGTK X11 + normal tiled native Wayland",
+      "status": "completed",
+      "widths": [
+        640,
+        1278,
+        1280,
+        1440,
+        1728
+      ],
+      "summary": {
+        "critical": 0,
+        "serious": 0,
+        "moderate": 5,
+        "total": 5
+      },
+      "missingWidths": [
+        390
+      ],
+      "reason": "Native minimum width640;320/390 is tested on web.",
+      "findings": [
+        {
+          "state": "x11-library-dark",
+          "severity": "moderate",
+          "ruleId": "spacing/off-scale-value",
+          "message": "x11-library-dark uses 7 off-scale spacing values across 14 elements: 2px, 6px, 10px, 14px, 22px, 28px, 621.88px."
+        },
+        {
+          "state": "x11-library-wide-dark",
+          "severity": "moderate",
+          "ruleId": "spacing/off-scale-value",
+          "message": "x11-library-wide-dark uses 7 off-scale spacing values across 14 elements: 2px, 6px, 10px, 14px, 22px, 28px, 781.88px."
+        },
+        {
+          "state": "x11-library-ultrawide-dark",
+          "severity": "moderate",
+          "ruleId": "spacing/off-scale-value",
+          "message": "x11-library-ultrawide-dark uses 7 off-scale spacing values across 14 elements: 2px, 6px, 10px, 14px, 22px, 28px, 1069.88px."
+        },
+        {
+          "state": "x11-compact-light",
+          "severity": "moderate",
+          "ruleId": "spacing/off-scale-value",
+          "message": "x11-compact-light uses 4 off-scale spacing values across 17 elements: 2px, 6px, 10px, 20px."
+        },
+        {
+          "state": "wayland-tiled-library-dark",
+          "severity": "moderate",
+          "ruleId": "spacing/off-scale-value",
+          "message": "wayland-tiled-library-dark uses 7 off-scale spacing values across 14 elements: 2px, 6px, 10px, 14px, 22px, 28px, 630.22px."
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "rust": {
+      "passed": 293,
+      "failed": 0,
+      "ignored": 3
+    },
+    "pythonPassed": 22,
+    "chromium": {
+      "passed": 43,
+      "skipped": 1,
+      "minutes": 2.3
+    },
+    "firefox": {
+      "passed": 43,
+      "skipped": 1,
+      "minutes": 2.7
+    },
+    "nativeX11": {
+      "checks": 89,
+      "captures": 10,
+      "abandonedOriginals": 0
+    },
+    "nativeWayland": {
+      "checks": 5,
+      "captures": 1,
+      "viewport": [
+        1278,
+        1030
+      ],
+      "dpr": 2,
+      "png": [
+        2556,
+        2060
+      ],
+      "xwayland": false,
+      "abandonedOriginals": 0
+    },
+    "fmt": true,
+    "strictClippy": [
+      "workspace/all-targets",
+      "native-qa/all-targets",
+      "wasm32 web"
+    ],
+    "builds": [
+      "native debug main + QA example",
+      "dev WASM pinned wasm-bindgen"
+    ]
+  },
+  "evidence": {
+    "chromium": "target/checks/ux-toggle-chromium-final",
+    "firefox": "target/checks/ux-toggle-firefox-final",
+    "nativeX11": "target/checks/ux-modes-native-x11",
+    "nativeWayland": "target/checks/ux-modes-native-wayland",
+    "sourceManifest": "target/checks/ux-source-manifest.json"
+  },
+  "limits": [
+    "Null-sink native output, no physical audio/device claim",
+    "No screen-reader, other-compositor, mobile, Windows/macOS or Safari validation",
+    "Review-ui-code and in-app Browser unavailable; real Playwright CLI/WebKitGTK used",
+    "Inherited moderate spacing/off-scale values and web2px volume-gap drift remain",
+    "No prefetch/progressive playback/device handoff feature added",
+    "No user data/schema/dependencies/frozen runtime/public deployment changed"
+  ]
+}

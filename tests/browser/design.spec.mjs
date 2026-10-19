@@ -192,3 +192,47 @@ test('DESIGN01 high contrast, responsive music surfaces and navigation retain ac
     await writeFile(`${output}/spacing-states.json`, JSON.stringify(states));
   } finally { await runtime.close(); }
 });
+
+test('UX01 current track and queue clicks pause/resume without replacing audio or position', async ({ page }) => {
+  const output = process.env.VELA_UX_EVIDENCE || 'test-results/ux-toggle';
+  await mkdir(output, { recursive: true });
+  const runtime = await isolatedServer(output);
+  try {
+    await expect.poll(async () => { try { return (await page.request.get(runtime.origin + '/health')).ok(); } catch { return false; } }).toBeTruthy();
+    const setup = await page.request.post(runtime.origin + '/api/setup', { headers: { Origin: runtime.origin }, data: { username: 'listener', password: 'private isolated UX fixture password' } });
+    expect(setup.ok()).toBeTruthy();
+    const me = await setup.json();
+    const uploaded = await page.request.post(runtime.origin + '/api/upload', { headers: { 'X-CSRF-Token': me.csrf_token }, multipart: { file: { name: 'Continuous listening.wav', mimeType: 'audio/wav', buffer: pcmWave(30, 523.25) } } });
+    expect(uploaded.ok()).toBeTruthy();
+    await page.goto(runtime.origin);
+    await navigate(page, 'Library');
+    await page.getByRole('button', { name: 'Play Continuous listening', exact: true }).click();
+    const audio = page.locator('#vela-audio');
+    await expect.poll(() => audio.evaluate(node => node.currentTime)).toBeGreaterThan(0);
+    const source = await audio.getAttribute('src');
+    await page.getByRole('slider', { name: 'Playback position', exact: true }).evaluate(node => { node.value = '7'; node.dispatchEvent(new Event('input', { bubbles: true })); });
+    await expect.poll(() => audio.evaluate(node => node.currentTime)).toBeGreaterThanOrEqual(6.9);
+    await page.getByRole('button', { name: 'Pause Continuous listening', exact: true }).click();
+    await expect(audio).toHaveJSProperty('paused', true);
+    const paused = await audio.evaluate(node => node.currentTime);
+    expect(paused).toBeGreaterThanOrEqual(6.9);
+    await page.waitForTimeout(250);
+    expect(Math.abs(await audio.evaluate(node => node.currentTime) - paused)).toBeLessThan(.1);
+    await page.getByRole('button', { name: 'Play Continuous listening', exact: true }).click();
+    await expect.poll(() => audio.evaluate(node => node.currentTime)).toBeGreaterThan(paused + .1);
+    expect(await audio.getAttribute('src')).toBe(source);
+    await navigate(page, 'Home');
+    await page.getByRole('button', { name: 'Pause Continuous listening', exact: true }).first().click();
+    await expect(audio).toHaveJSProperty('paused', true);
+    await page.getByRole('button', { name: 'Play Continuous listening', exact: true }).first().click();
+    await expect(audio).toHaveJSProperty('paused', false);
+    await page.getByRole('button', { name: 'Show playback queue', exact: true }).click();
+    await page.locator('.queue-row.current .queue-track').click();
+    await expect(audio).toHaveJSProperty('paused', true);
+    const queuedPosition = await audio.evaluate(node => node.currentTime);
+    await page.locator('.queue-row.current .queue-track').click();
+    await expect.poll(() => audio.evaluate(node => node.currentTime)).toBeGreaterThan(queuedPosition + .1);
+    expect(await audio.getAttribute('src')).toBe(source);
+    await page.screenshot({ path: `${output}/queue-toggle-dark.png` });
+  } finally { await runtime.close(); }
+});

@@ -355,7 +355,7 @@ fn shelf(
     rsx! { section { class: "personal-mix-shelf", "aria-label": title,
         div { class: "section-toolbar",
             div { h3 { "{title}" } p { if rotation { "Music you have meaningfully listened to, ranked by your private listening activity." } else { "Fresh paths through music you actually own, with a reason for every suggestion." } } }
-            if !tracks.is_empty() { button { class: "button secondary small", "aria-label": "Play {origin} mix", onclick: move |_| { if play_ui.actionable(&play_context) { actions.play.call((mix.clone(), 0, PlaybackContext::new(ContextKind::Home, title))); } }, Icon { name: "play" } "Play mix" } }
+            if !tracks.is_empty() { button { class: "button secondary small", "aria-label": "Play {origin} mix", onclick: move |_| { if play_ui.actionable(&play_context) { actions.start.call((mix.clone(), 0, PlaybackContext::new(ContextKind::Home, title))); } }, Icon { name: "play" } "Play mix" } }
         }
         if items.is_empty() { div { class: "personal-mix-empty",
             Icon { name: empty_icon }
@@ -381,8 +381,8 @@ fn shelf(
             let radio_context = context.clone();
             let hide_context = context.clone();
             rsx! { article { class: "personal-mix-card", key: "{item.track.id}", "data-track-id": "{item.track.id}",
-                button { class: "personal-mix-play", "aria-label": "Play {item.track.title} from {origin}", onclick: move |_| { if play_ui.actionable(&play_context) { actions.play.call((queue.clone(), at, PlaybackContext::new(ContextKind::Home, title))); } },
-                    div { class: "listening-cover", crate::Art { track } span { class: "cover-play", Icon { name: "play" } } }
+                button { class: "personal-mix-play", "aria-label": format!("{} from {origin}",actions.play_label(&item.track.id,&item.track.title)), onclick: move |_| { if play_ui.actionable(&play_context) { actions.play.call((queue.clone(), at, PlaybackContext::new(ContextKind::Home, title))); } },
+                    div { class: "listening-cover", crate::Art { track } span { class: "cover-play", if actions.is_playing(&item.track.id){Icon {name:"pause"}}else{Icon {name:"play"}} } }
                     div { class: "personal-mix-description", strong { "{item.track.title}" } small { "{item.track.artist}" } }
                 }
                 p { class: "personal-mix-reason", "{item.reason}" }

@@ -186,3 +186,10 @@ input::placeholder { color:var(--quiet); opacity:1; }
   .player-controls { grid-column:1; grid-row:2; }
   .player-volume { grid-column:1; grid-row:3; }
 }
+
+/* Frameless Linux window: controls share the account toolbar, no extra strip. */
+.native-window-controls { display:flex; align-items:center; gap:4px; flex-shrink:0; }
+.native-window-controls .icon-button { min-width:44px; width:44px; height:44px; }
+.native-window-controls .window-close:hover { background:var(--danger); color:var(--bg); }
+.native-window-drag { flex:1; align-self:stretch; display:flex; flex-direction:column; justify-content:center; cursor:grab; user-select:none; }
+.signin-window-controls { position:absolute; top:16px; right:16px; z-index:10; }

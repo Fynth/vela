@@ -1,5 +1,14 @@
 # Platform evidence
 
+Latest source/debug repair2026-10-19 (baseline91867f2), separate from the package
+matrix below: Chromium43 pass/1skip and Firefox43 pass/1skip; Linux X11 native
+fixture89 checks/10 screenshots; actual native Wayland Hyprland normally tiled
+fixture5 checks/1 screenshot, verified own PID/xwayland=false and DOM×DPR PNG size.
+FUNCTIONAL_TESTED applies to the stated interaction/window subset only. Both native
+runs use owned null sinks; HARDWARE_VERIFIED is not claimed. See
+[interaction review](UX_INTERACTION_REVIEW_2026-10-19.md) and QA_EVIDENCE. No platform
+package, frozen runtime or other-OS status below was upgraded by this source pass.
+
 Updated2026-10-18; reconciled2026-10-19 (docs-only). A native server executable is not a desktop music client. Status applies only to the stated scope. COMPILES, RUNS, FUNCTIONAL_TESTED and HARDWARE_VERIFIED require separate evidence; RELEASE_READY is not inferred from any one of them.
 
 Current deployed baseline is the frozen0.12.6 server runtime (schema12) and the0.12.6 native package, both built from `7fe1ca0`; earlier0.12.x rows quoted in historical documents are evidence for those releases, not the current state. Source HEAD `05b4c37` contains undeployed peer-preview-cursor and100k planner fixes — see [CURRENT_STATE.md](CURRENT_STATE.md). New analysis jobs use `vela-pcm-spectral-4`; retained rows keep their recorded extractor version (the live20rows are `spectral-1`).

@@ -1,5 +1,13 @@
 # Current state index
 
+Latest source-only interaction repair2026-10-19 (baseline91867f2): row pause/resume,
+pending intent, per-entry native playback, route-independent public transport and
+frameless Linux behavior are recorded in [review](UX_INTERACTION_REVIEW_2026-10-19.md)
+and latest PROGRESS/QA_EVIDENCE. Real Wayland tiling is checked for its stated subset;
+separate X11 peers/offline evidence does not imply full Wayland certification.
+Debug binary and development web assets are rebuilt. The frozen0.12.6 service and
+already running user desktop remain separate processes, not automatically upgraded.
+
 Newer source-only UI increment2026-10-19: original mint high-contrast web/Linux
 native design, shell/control fixes and real fixture regression evidence are recorded
 in [the design review](DESIGN_REVIEW_2026-10-19.md) and latest PROGRESS/QA_EVIDENCE.

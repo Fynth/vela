@@ -12,6 +12,7 @@ pub mod playback;
 pub mod remote;
 pub mod session_store;
 pub mod ui;
+pub mod window;
 
 /// A private temporary original. Its lease, not a public DTO, owns file cleanup.
 pub struct PreparedAudio {

@@ -1,5 +1,29 @@
 # Authoritative backlog
 
+## Implemented interaction and Hyprland repair2026-10-19
+
+Current-row Play/Pause preserves source/position/order in web/Linux native; explicit
+context Play stays separate. Requested intent wins over late native preparation;
+queue occurrences toggle, remote transport survives navigation, and native album/
+artist/playlist rows have per-entry playback. Offline repeat-one stays local;
+unsupported modes are disabled/explained. Linux production/QA share a frameless
+builder with integrated window controls. See [review](UX_INTERACTION_REVIEW_2026-10-19.md),
+PROGRESS/QA_EVIDENCE for actual Chromium/Firefox/X11/Wayland checks and limits.
+
+Next priorities, retaining auth/source/integrity boundaries:
+
+1. Authorized native artwork with bounded decode/cache and ownership regression.
+2. Stable duplicate playlist-entry provenance across concurrent edits; durable
+   account-scoped native queue/context/paused-position restoration.
+3. Native Add Music entry point and accessible contextual actions for existing APIs.
+4. Progressive authorized sources and actual-next prefetch with range/hash/quota/
+   cancellation/eviction/stale-account acceptance before rollout.
+5. Explicit device queue/position sync and acknowledged handoff, then authorized
+   rooms and actual Android/iOS native audio milestones.
+
+These remain independent slices. No runtime/package upgrade or external publication
+was performed for this source/debug repair.
+
 ## Implemented contrast/listening-layout slice2026-10-19
 
 The newer Better Design request authorizes implementation after the earlier MD-only

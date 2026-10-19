@@ -38,6 +38,8 @@ pub fn Icon(name: &'static str) -> Element {
         "moon" => "M21 13A9 9 0 1 1 11 3a7 7 0 0 0 10 10Z",
         "plus" => "M12 4v16M4 12h16",
         "close" => "m5 5 14 14M5 19 19 5",
+        "minimize" => "M5 17h14",
+        "maximize" => "M5 5h14v14H5Z",
         "more" => "M4 12h.01M12 12h.01M20 12h.01",
         "edit" => "m15 3 6 6L8 22H2v-6Zm-2 2 6 6",
         "up" => "m5 12 7-7 7 7M12 5v16",

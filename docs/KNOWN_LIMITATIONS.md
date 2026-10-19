@@ -1,5 +1,26 @@
 # Unsupported and unverified functionality
 
+## Interaction/window source repair2026-10-19
+
+The newer [interaction review](UX_INTERACTION_REVIEW_2026-10-19.md) supersedes the
+earlier NOT_RUN statement below only for the tested normal tiled Hyprland Wayland
+subset: frameless window, reachable controls, row pause/resume, seek/source continuity
+and no horizontal overflow. Full peers/offline and responsive native checks remain
+separate X11 fixtures with a null sink. Physical sound, other compositors, screen
+readers and non-Linux platforms remain unverified.
+
+Web/native current-row transport, pending native intent and native per-entry group/
+playlist playback are repaired. Context Play remains separate. Native public sources
+still have no shuffle/repeat; offline supports sequential playback and repeat-one,
+not shuffle/repeat-all. Controls/MPRIS reflect these limits. Public MPRIS metadata/
+transport remains unsupported. Stable duplicate playlist-entry provenance during
+concurrent reorder needs further work.
+
+The frozen server and already running user desktop were not upgraded. Restart the
+updated desktop binary to see the frame change. Progressive native playback,
+next-track prefetch, durable native queue restore, artwork and handoff remain work.
+Exact passing runs are in PROGRESS; this is not whole-product UX certification.
+
 ## Contrast UI verification2026-10-19
 
 The newer Better Design implementation replaces the earlier muted current-source

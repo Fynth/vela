@@ -69,7 +69,32 @@ const resizeCompact = async () => {
   }
   window.__velaResizeTrace = trace;
 };
-if (config.sessionPhase === 'resume') {
+if (config.windowOnly) {
+  try {
+    await wait(() => button('Sign in') && !button('Sign in').disabled, 'Native output initialization');
+    assert(config.decorations === false, 'Native Wayland window disables GTK titlebar decorations');
+    assert(button('Close window') && button('Minimize window') && button('Maximize or restore window'), 'Integrated window controls are reachable without a titlebar');
+    fill('#native-origin', config.origin); fill('#native-username', config.username); fill('#native-password', config.password);
+    el('.signin-form form').requestSubmit();
+    await wait(() => document.querySelectorAll('[data-native-track-id]').length === 3, 'Actual private library on Wayland');
+    fill('#native-volume', '0'); await sleep(300);
+    await click('Play Native Continuity');
+    await wait(() => phase() === 'Playing' && position() > 200, 'Wayland native clock advances');
+    const source = generation();
+    fill('#native-seek', '5000', 'change');
+    await wait(() => position() >= 4900, 'Wayland seek');
+    await click('Pause Native Continuity');
+    await wait(() => phase() === 'Paused', 'Wayland row pause');
+    const paused = position(); await sleep(300);
+    assert(generation() === source && paused >= 4900 && Math.abs(position() - paused) < 150, 'Wayland row pause preserves source and position');
+    await click('Play Native Continuity');
+    await wait(() => phase() === 'Playing' && position() > paused + 100, 'Wayland row resume');
+    assert(generation() === source, 'Wayland row resume retains the native source');
+    assert(document.documentElement.scrollWidth <= innerWidth + 1, 'Normal tiled Wayland window has no horizontal overflow');
+    await capture('library-dark');
+    dioxus.send({ok:true, checks, viewportEvidence:[{actualWidth:innerWidth,actualHeight:innerHeight,mode:'normal tiled, no resize requests'}]});
+  } catch(error) { dioxus.send({ok:false, checks, failure:String(error.message)}); }
+} else if (config.sessionPhase === 'resume') {
   try {
     await wait(() => button('Continue saved session') && !button('Continue saved session').disabled, 'Saved session option');
     await click('Continue saved session');
@@ -85,6 +110,8 @@ if (config.sessionPhase === 'resume') {
   } catch(error) { dioxus.send({ok:false, checks, failure:String(error.message)}); }
 } else {
 try {
+  assert(config.decorations === false, 'Linux window disables GTK titlebar decorations');
+  assert(button('Close window') && button('Minimize window') && button('Maximize or restore window'), 'Frameless window keeps accessible window controls');
   await wait(() => button('Sign in') && !button('Sign in').disabled, 'Native output initialization');
   fill('#native-origin', config.origin); fill('#native-username', config.username); fill('#native-password', config.password);
   el('.signin-form form').requestSubmit();
@@ -128,14 +155,35 @@ try {
   const rowActions = firstNativeRow.querySelector('.native-track-actions').getBoundingClientRect();
   assert(rowActions.left >= rowTime.right - 1, 'Track duration and four action controls do not overlap');
   assert(el('.native-player').getBoundingClientRect().height <= 160, 'Idle desktop transport does not reserve a large empty status strip');
+  const rapidRow = button('Play Native Continuity');
+  rapidRow.click(); rapidRow.click();
+  await wait(() => phase() === 'Paused', 'Rapid repeated selection stays paused after preparation');
+  assert(position() < 150, 'Rapid double click pauses the pending selection instead of restarting it');
   await click('Play Native Continuity');
   await wait(() => phase() === 'Playing' && position() > 400, 'Native playback clock advances');
+  const rowGeneration = generation();
+  fill('#native-seek', '5000', 'change');
+  await wait(() => position() >= 4900, 'Native row toggle seek fixture');
+  await click('Pause Native Continuity');
+  await wait(() => phase() === 'Paused', 'Current library row pauses');
+  const rowPaused = position();
+  await sleep(300);
+  assert(generation() === rowGeneration && Math.abs(position() - rowPaused) < 120 && rowPaused >= 4900, 'Repeated row click pauses without replacing source or resetting position');
+  await click('Play Native Continuity');
+  await wait(() => phase() === 'Playing' && position() > rowPaused + 100, 'Current library row resumes');
+  assert(generation() === rowGeneration, 'Row resume reuses the same native source');
   el('[data-testid="native-player-favorite"]').click();
   await wait(() => el('[data-testid="native-player-favorite"]')?.getAttribute('aria-label') === 'Remove Native Continuity from favorites', 'Player favorite mutation');
   assert(el('[data-testid="native-player-favorite"]')?.getAttribute('aria-label') === 'Remove Native Continuity from favorites', 'Player favorite control updates the shared queue state');
   const gen = generation(); const before = position();
   await click('Queue'); await sleep(450);
   assert(generation() === gen && position() > before, 'Navigation preserves native source and advancing position');
+  const activeQueueRow = [...document.querySelectorAll('.native-queue-row')].find(row => row.classList.contains('current'));
+  activeQueueRow.querySelector('.native-queue-select').click();
+  await wait(() => phase() === 'Paused', 'Current queue row pauses');
+  activeQueueRow.querySelector('.native-queue-select').click();
+  await wait(() => phase() === 'Playing', 'Current queue row resumes');
+  assert(generation() === gen, 'Current queue row toggle preserves occurrence, source and shuffle order');
   await click('Pause'); await wait(() => phase() === 'Paused', 'Native pause');
   const paused = position(); await sleep(450);
   assert(Math.abs(position() - paused) < 150, 'Paused native position is stable');
@@ -228,10 +276,19 @@ try {
   await click('Open playlist Native evening');
   await wait(() => button('Play playlist') && document.querySelectorAll('.native-queue-row').length === 2, 'Real playlist detail with two entries');
   assert(document.querySelectorAll('.native-queue-row').length === 2 && button('Play playlist'), 'Playlist detail shows both owned entries');
-  const trackPicker = el('#native-playlist-track'); trackPicker.value = trackPicker.options[3].value; trackPicker.dispatchEvent(new Event('change', { bubbles:true }));
+  const trackPicker = el('#native-playlist-track'); trackPicker.value = [...trackPicker.options].find(option => option.textContent.includes('Native Continuity')).value; trackPicker.dispatchEvent(new Event('change', { bubbles:true }));
   await click('Add selected track');
   await wait(() => document.querySelectorAll('.native-queue-row').length === 3, 'Native playlist track add');
   assert(document.querySelectorAll('.native-queue-row').length === 3, 'Owned library track added to the native playlist');
+  await click('Play playlist entry 3: Native Continuity');
+  await wait(() => phase() === 'Playing' && position() > 100, 'Individual playlist row plays');
+  const playlistSource = generation();
+  await click('Pause playlist entry 3: Native Continuity');
+  await wait(() => phase() === 'Paused', 'Individual playlist row pauses');
+  assert(generation() === playlistSource, 'Individual playlist entry controls the existing native source');
+  await click('Play playlist entry 3: Native Continuity');
+  await wait(() => phase() === 'Playing', 'Individual playlist row resumes');
+  assert(generation() === playlistSource, 'Individual playlist entry resume preserves its occurrence');
   await capture('playlists-dark');
   await click('Play playlist');
   await wait(() => phase() === 'Playing' && position() > 200, 'Playlist playback starts through native audio');
@@ -323,6 +380,8 @@ try {
     catch { throw new Error(`Public track playback failed (phase=${phase()} position=${position()} status=${el('.native-player-status small')?.textContent || '-'} error=${el('.player-error')?.textContent?.trim() || '-'})`); }
     assert(['Playing','Ended'].includes(phase()), 'Authorized second-server public audio plays through the native engine');
     assert((el('.native-player-status small')?.textContent || '').includes('Public ·'), 'Player identifies the public origin context');
+    assert(button('Shuffle')?.disabled && button('Repeat off')?.disabled && button('Shuffle').getAttribute('aria-pressed') === 'false', 'Public source disables unsupported shuffle and repeat with an explanation');
+    assert(button('Repeat off').getAttribute('aria-description')?.includes('public sources'), 'Unavailable public repeat explains its source limitation');
     fill('#native-peer-query', 'Vela'); await click('Search saved servers');
     try { await wait(() => [...document.querySelectorAll('[data-public-track-id][data-public-origin]')].map(row => row.dataset.publicOrigin).filter((origin, index, all) => all.indexOf(origin) === index).length >= 2, 'Unified saved-server search'); }
     catch { throw new Error(`Unified saved-server search failed (error=${el('.alert.error')?.textContent?.trim() || '-'} query=${el('#native-peer-query')?.value || '-'} origins=${JSON.stringify([...document.querySelectorAll('[data-public-track-id][data-public-origin]')].map(row => row.dataset.publicOrigin))} saved=${JSON.stringify([...document.querySelectorAll('[aria-label^="Remove saved server"]')].map(node => node.getAttribute('aria-label')))} peers=${JSON.stringify([...document.querySelectorAll('[data-public-peer-summary]')].map(node => [node.dataset.publicOrigin, node.dataset.publicPeerError]))})`); }
@@ -350,12 +409,15 @@ try {
     peer2Row.querySelector('button').click();
     await wait(() => (el('.native-player-status small')?.textContent || '').includes(config.peer2Origin), 'Second-origin public playback');
     assert((el('.native-player-status small')?.textContent || '').includes(config.peer2Origin), 'Public audio from the second saved origin is selected natively');
+    await click('Library');
+    await wait(() => document.querySelectorAll('[data-native-track-id]').length === 3, 'Library during remote playback');
     await click('Previous');
     await wait(() => phase() === 'Playing' && (el('.native-player-status small')?.textContent || '').includes(config.peerOrigin), 'Remote queue previous');
     assert(phase() === 'Playing' && (el('.native-player-status small')?.textContent || '').includes(config.peerOrigin), 'Remote queue previous moves to the other origin');
     await click('Next');
     await wait(() => phase() === 'Playing' && (el('.native-player-status small')?.textContent || '').includes(config.peer2Origin), 'Remote queue next');
     assert(phase() === 'Playing' && (el('.native-player-status small')?.textContent || '').includes(config.peer2Origin), 'Remote queue next returns to the selected origin');
+    assert(el('.native-library')?.dataset.view === 'library', 'Remote transport works after leaving Public without navigating back');
     await click('Library');
     await wait(() => document.querySelectorAll('[data-native-track-id]').length === 3, 'Library after public playback');
     await click('Sign out'); await wait(() => button('Sign in'), 'Native sign-out clears account');
@@ -385,6 +447,15 @@ try {
     await click(`Play offline ${offlineTitles[1]}`);
     await wait(() => phase() === 'Playing' && position() > 100 && (el('.native-player-status small')?.textContent || '').includes('Offline ·'), 'Offline playback');
     assert(phase() === 'Playing' && (el('.native-player-status small')?.textContent || '').includes('Offline ·'), 'Saved original plays natively with the server stopped');
+    assert(button('Shuffle')?.disabled && !button('Repeat off')?.disabled, 'Offline source exposes repeat one but disables unsupported shuffle');
+    await click('Repeat off');
+    assert(button('Repeat one')?.getAttribute('aria-pressed') === 'true' && !button('Repeat all'), 'Offline repeat cycles directly to one track');
+    const offlineGeneration = generation();
+    fill('#native-seek', String(Math.max(0, Number(el('#native-seek').max) - 250)), 'change');
+    await wait(() => generation() !== offlineGeneration && phase() === 'Playing' && (el('.native-player-status small')?.textContent || '').includes('Offline ·'), 'Offline repeat one replays after actual EOF');
+    assert(generation() !== offlineGeneration && (el('.native-player-status small')?.textContent || '').includes('Offline ·'), 'Offline repeat EOF reuses the verified local descriptor while the server is stopped');
+    await click('Repeat one');
+    assert(button('Repeat off')?.getAttribute('aria-pressed') === 'false', 'Offline repeat returns to off without an unsupported all mode');
     await click('Next');
     await wait(() => (el('.native-player-status small')?.textContent || '').includes(`Offline · ${offlineTitles[0]}`), 'Offline next');
     assert((el('.native-player-status small')?.textContent || '').includes(`Offline · ${offlineTitles[0]}`), 'Offline queue advances to the second saved copy');

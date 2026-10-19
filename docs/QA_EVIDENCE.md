@@ -1,5 +1,25 @@
 # Verified0.12.0 package and preserved runtime checkpoint
 
+## Current-source interaction/Hyprland repair — executed2026-10-19
+
+Baseline91867f2, workspace0.12.6; source/debug evidence, not a runtime/package upgrade.
+Exact changes/reproduction: [interaction review](UX_INTERACTION_REVIEW_2026-10-19.md).
+
+| Check | Executed evidence | Scope/status |
+| --- | --- | --- |
+| UX01 | Real server/PCM upload, seek7s, Library/Home/current queue Pause/Play, same audio source and retained clock | PASS Chromium/Firefox; no mocked audio |
+| Full browser regression | Chromium43 pass/1 live-import skip2.3m; Firefox43 pass/1 skip2.7m; DESIGN01 responsive/theme, PLAY/RES/NET/NP/privacy/auth retained | `target/checks/ux-toggle-{chromium,firefox}-final/`; browser sources unchanged by later native-only follow-up |
+| Native X11 fixture |89 checks,10 complete PNGs,640/1280/1440/1728; pending click/row/queue/playlist continuity, two-origin TLS, mode capabilities, server-stopped offline actual EOF repeat;0 leftover originals | PASS `target/checks/ux-modes-native-x11/report.json`; WebKitGTK/Rodio/null sink |
+| Actual native Wayland |5 checks, unresized normal Hyprland tiling, exact owned PID/xwayland=false; frameless controls, seek/row/source continuity/no overflow;1278×1030 DPR2→2556×2060 PNG;0 leftovers | PASS `target/checks/ux-modes-native-wayland/report.json`; distinct subset, not full peers/offline/physical output |
+| Better Design | Two final scoped comprehension PASS; DOM web0critical/0serious/10moderate, native0critical/0serious/5moderate | `.better-design/ux-review.json`; inherited moderate spacing remains; native390 unsupported |
+| Rust/tooling |293 pass/0fail/3ignored; fmt; strict workspace/native-qa/wasm Clippy; native debug/example/dev WASM builds;22 Python tests; JS syntax/CLI bounds | `target/checks/ux-modes-*.log`, `ux-toggle-web-build-final.log`; ignored/device checks not claimed |
+
+G01–G24 mapping: reinforces G05 persistent player/queue; G18 Linux-client subset and
+G23 responsive/theme/input subset remain PARTIAL. No screen-reader, physical sound,
+mobile, device handoff, rooms or all-platform certification. Data/schema/runtime
+unchanged. Initial failed browser/capture runs are retained/explained, not counted
+as final passing evidence.
+
 ## Current-source Better Design UI — executed2026-10-19
 
 Source baseline0170ec5, workspace0.12.6; separate from the historical packages below.

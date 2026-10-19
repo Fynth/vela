@@ -1,8 +1,5 @@
 //! Opt-in real-window integration driver. Never compiled into the shipping app.
-use dioxus::{
-    desktop::{Config, LogicalSize, WindowBuilder},
-    prelude::*,
-};
+use dioxus::{desktop::Config, prelude::*};
 use serde_json::{Value, json};
 use std::path::PathBuf;
 
@@ -13,6 +10,8 @@ fn Harness() -> Element {
             PathBuf::from(std::env::var_os("VELA_NATIVE_QA_REPORT").expect("fixture report path"));
         let mut eval = document::eval(include_str!("native-ui-qa.js"));
         eval.send(json!({
+            "decorations": dioxus::desktop::window().is_decorated(),
+            "windowOnly": std::env::var("VELA_NATIVE_QA_WINDOW_ONLY").as_deref() == Ok("1"),
             "origin": std::env::var("VELA_DESKTOP_SERVER_URL").expect("isolated fixture origin"),
             "username": std::env::var("VELA_NATIVE_QA_USERNAME").expect("fixture username"),
             "password": std::env::var("VELA_NATIVE_QA_PASSWORD").expect("fixture password"),
@@ -78,17 +77,55 @@ fn Harness() -> Element {
                         (viewport["height"].as_f64().unwrap_or(0.0) * scale).round() as u32,
                     );
                     let capture = tokio::task::spawn_blocking(move || {
-                        let windows = std::process::Command::new("xdotool")
-                            .args(["search", "--onlyvisible", "--pid", &pid])
-                            .output()
-                            .map_err(|_| "Window lookup failed")?;
-                        let ids = String::from_utf8_lossy(&windows.stdout);
-                        let id = ids.lines().next().ok_or("Owned window was not found")?;
-                        let status = std::process::Command::new("import")
-                            .args(["-window", id])
-                            .arg(&output)
-                            .status()
-                            .map_err(|_| "Screenshot tool unavailable")?;
+                        let status = if std::env::var("VELA_NATIVE_QA_BACKEND").as_deref()
+                            == Ok("wayland")
+                        {
+                            let clients = std::process::Command::new("hyprctl")
+                                .args(["clients", "-j"])
+                                .output()
+                                .map_err(|_| "Hyprland query failed")?;
+                            let clients: Vec<Value> = serde_json::from_slice(&clients.stdout)
+                                .map_err(|_| "Invalid Hyprland clients")?;
+                            let owned = clients
+                                .iter()
+                                .find(|c| c["pid"].as_u64() == Some(std::process::id() as u64))
+                                .ok_or("Owned Wayland surface missing")?;
+                            if owned["xwayland"].as_bool() != Some(false) {
+                                return Err("Fixture is not native Wayland");
+                            }
+                            let x = owned["at"][0].as_i64().ok_or("Invalid window x")?;
+                            let y = owned["at"][1].as_i64().ok_or("Invalid window y")?;
+                            let width = owned["size"][0]
+                                .as_u64()
+                                .filter(|v| *v > 0 && *v <= 8192)
+                                .ok_or("Invalid window width")?;
+                            let height = owned["size"][1]
+                                .as_u64()
+                                .filter(|v| *v > 0 && *v <= 8192)
+                                .ok_or("Invalid window height")?;
+                            std::process::Command::new("grim")
+                                .args([
+                                    "-g",
+                                    &format!("{x},{y} {width}x{height}"),
+                                    "-s",
+                                    &scale.to_string(),
+                                ])
+                                .arg(&output)
+                                .status()
+                                .map_err(|_| "Wayland capture failed")?
+                        } else {
+                            let windows = std::process::Command::new("xdotool")
+                                .args(["search", "--onlyvisible", "--pid", &pid])
+                                .output()
+                                .map_err(|_| "Window lookup failed")?;
+                            let ids = String::from_utf8_lossy(&windows.stdout);
+                            let id = ids.lines().next().ok_or("Owned window was not found")?;
+                            std::process::Command::new("import")
+                                .args(["-window", id])
+                                .arg(&output)
+                                .status()
+                                .map_err(|_| "Screenshot tool unavailable")?
+                        };
                         if !status.success() {
                             return Err("Screenshot failed");
                         }
@@ -106,7 +143,12 @@ fn Harness() -> Element {
                         Ok::<_, &str>(output)
                     })
                     .await;
-                    captures.push(json!({"name":name,"passed":matches!(capture,Ok(Ok(_))),"layout":message["layout"]}));
+                    let error = match &capture {
+                        Ok(Err(message)) => Some(*message),
+                        Err(_) => Some("Screenshot worker failed"),
+                        _ => None,
+                    };
+                    captures.push(json!({"name":name,"passed":matches!(capture,Ok(Ok(_))),"error":error,"layout":message["layout"]}));
                     let _ = eval.send(json!({"continue":true}));
                 }
                 Ok(Ok(message)) if message["handshake"].is_string() => {
@@ -212,9 +254,7 @@ fn main() {
         std::fs::read_to_string(alsa).is_ok_and(|config| config.contains(&sink)),
         "isolated ALSA configuration must route to the owned null sink"
     );
-    let window = WindowBuilder::new()
-        .with_title("Vela Music — isolated native QA")
-        .with_inner_size(LogicalSize::new(1280., 840.));
+    let window = vela_desktop::window::builder("Vela Music — isolated native QA");
     dioxus::LaunchBuilder::desktop()
         .with_cfg(
             Config::new()

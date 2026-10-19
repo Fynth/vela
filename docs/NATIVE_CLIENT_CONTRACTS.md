@@ -10,6 +10,28 @@ Evidence is listed at the end; see ADR0017 for the decision record.
 
 ## Ownership
 
+Source extension2026-10-19: `Ui.wants_play` is root requested intent, independent of
+delayed decoder snapshots. Current-track/current-occurrence activation pauses or
+resumes without replacing source/order; a different duplicate starts a new selection.
+Group/playlist header Play starts context through a separate callback. Native public
+identity is origin+object ID. Existing session/account/gate/selection/lifetime guards
+still govern every deferred result; completion reads current intent before loading.
+
+Owned online queues retain shuffle/all/one preferences. Public queues expose neither
+shuffle nor repeat. Offline queues are sequential with repeat-one; EOF replays the
+verified descriptor without leaving the offline domain. MPRIS ignores unsupported
+mode commands and publishes effective source modes without discarding owned
+preferences. Public MPRIS metadata/transport remains unsupported.
+
+`window::builder` is shared by production/QA: Linux decorations=false,1280×840
+initial logical size,640×480 minimum; accessible window actions/drag region live in
+the existing toolbar. Other platforms retain their frame. QA defaults to floated
+X11; `--backend wayland --window-only` runs a distinct unresized tiled Hyprland
+fixture. Exact owned PID/xwayland=false and PNG dimensions=DOM×DPR are verified.
+The QA backend variable is independent of Dioxus's later GDK_BACKEND mutation.
+Unsupported CLI combinations fail before resource allocation. See
+[interaction review](UX_INTERACTION_REVIEW_2026-10-19.md) for tests and limits.
+
 Main owns workspace/`Cargo.lock`, this contract, `apps/desktop/src/lib.rs`,
 `main.rs`, tests/builds/docs. `apps/desktop/src/audio.rs` is the audio adapter;
 `client.rs` is the native HTTP/account boundary; `ui.rs` and `style.css` are

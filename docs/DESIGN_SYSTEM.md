@@ -1,5 +1,16 @@
 # Original Vela design system
 
+## Transport/window interaction repair2026-10-19
+
+Keep the contrast tokens below. Current-row Play/Pause reflects root requested
+intent and preserves the source, position and queue. Context-level Play starts the
+album/playlist/mix/radio; duplicate occurrences remain separate. Linux integrates
+44px accessible window controls into its existing toolbar, with no GTK title strip.
+Other platforms retain system decorations. Source-specific unsupported modes are
+disabled and explained. See [interaction review](UX_INTERACTION_REVIEW_2026-10-19.md)
+and [ADR0024](DECISIONS/0024-row-transport-and-linux-window.md) for actual browser,
+native Wayland/X11 evidence and limits. No new kit, font or audio owner is introduced.
+
 ## Current-source contrast increment2026-10-19
 
 The implemented web/Linux native UI now follows [ADR0023](DECISIONS/0023-contrast-and-listening-layout.md)

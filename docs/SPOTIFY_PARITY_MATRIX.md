@@ -1,5 +1,16 @@
 # Music experience parity
 
+## Source interaction/window repair2026-10-19
+
+| Feature / priority | Status | Implementation | Acceptance / tests | Platform and limits |
+| --- | --- | --- | --- | --- |
+| Current-row pause/resume, queue occurrence continuity P0 | VERIFIED for exercised flows | desktop/ui.rs; web/main.rs,browser_player.rs,experience.rs | UX01; existing PLAY/RES/NET/NP; real native pending/row/queue/playlist checks | Chromium/Firefox + Linux X11; native Wayland row/seek subset; source-only |
+| Frameless Hyprland window P0 | VERIFIED for exercised surface | desktop/window.rs,main.rs,ui.rs,style.css; shared QA builder | Native xwayland=false/PID/PNG evidence,5 normal tiled checks | Linux Hyprland only; no compositor settings changed or other-OS claim |
+| Honest source-specific native modes P0 | VERIFIED for exercised flows | desktop/ui.rs playback_modes/set_repeat/advance | Native89 includes disabled public modes and offline repeat-one actual EOF with stopped server | Public shuffle/repeat, offline shuffle/all unavailable; no invented capability |
+
+Exact scope and remaining work: [interaction review](UX_INTERACTION_REVIEW_2026-10-19.md),
+PROGRESS/QA_EVIDENCE. Existing dated sections below retain their original evidence.
+
 ## Source contrast/layout2026-10-19
 
 | Feature / priority | Status | Implementation | Acceptance / tests | Platform and limits |

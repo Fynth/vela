@@ -342,6 +342,10 @@ fn clear_upcoming(mut ui: PlaybackUi) {
     persist_queue(&ui.queue.peek(), ui.auth);
 }
 fn select_queued(at: usize, mut ui: PlaybackUi) {
+    if at == *ui.index.peek() && at < ui.queue.peek().len() {
+        toggle_playback(ui);
+        return;
+    }
     if let Some(track) = ui.queue.peek().get(at) {
         ui.order.write().reset(ui.queue.peek().len(), at);
         ui.index.set(at);
@@ -646,6 +650,39 @@ fn play_queue(mut new_queue: Vec<Track>, at: usize, context: PlaybackContext, mu
     ui.queue.set(new_queue);
     ui.start(&track);
 }
+fn play_or_toggle_queue(
+    new_queue: Vec<Track>,
+    at: usize,
+    context: PlaybackContext,
+    ui: PlaybackUi,
+) {
+    if at >= playback::MAX_QUEUE {
+        return;
+    }
+    let Some(track) = new_queue.get(at) else {
+        return;
+    };
+    let active = ui
+        .queue
+        .peek()
+        .get(*ui.index.peek())
+        .is_some_and(|current| current.id == track.id);
+    let duplicate = new_queue.iter().filter(|item| item.id == track.id).count() > 1;
+    let same_occurrence = *ui.index.peek() == at
+        && *ui.context.peek() == context
+        && ui
+            .queue
+            .peek()
+            .iter()
+            .map(|t| &t.id)
+            .eq(new_queue.iter().map(|t| &t.id));
+    if active && (!duplicate || same_occurrence) {
+        toggle_playback(ui);
+        return;
+    }
+    play_queue(new_queue, at, context, ui);
+}
+
 fn advance(command: Command, mut ui: PlaybackUi) {
     synchronize_order(ui);
     let elapsed = ui.engine.peek().elapsed();
@@ -1016,7 +1053,7 @@ fn GroupTracks(
         for (at, track) in tracks.iter().cloned().enumerate() {
             { let favorite = track.clone(); let queued = track.clone(); let edited = track.clone();
             rsx! { div { key: "{track.id}", class: if current_id.as_ref().is_some_and(|id| *id == track.id) { "track-row current" } else { "track-row" },
-                button { class: "track-play", "aria-label": "Play {track.title}", onclick: move |_| onplay.call(at), if current_id.as_ref().is_some_and(|id| *id == track.id) && playing { Icon { name: "music" } } else { Icon { name: "play" } } }
+                button { class: "track-play", "aria-label":format!("{} {}",if current_id.as_ref().is_some_and(|id| *id == track.id) && playing {"Pause"}else{"Play"},track.title), onclick: move |_| onplay.call(at), if current_id.as_ref().is_some_and(|id| *id == track.id) && playing { Icon { name: "pause" } } else { Icon { name: "play" } } }
                 button { class: "track-title", onclick: move |_| onplay.call(at), Art { track: track.clone() } div { strong { "{track.title}" } small { "{track.artist}" } } }
                 span { class: "track-album", "{track.album}" } span { class: "quality-tag", "{track.codec}" } span { class: "track-duration", "{seconds(track.duration_ms as f64 / 1000.0)}" }
                 div { class: "track-actions", button { class: if track.favorite { "icon-button favorite selected" } else { "icon-button favorite" }, "aria-label": if track.favorite { "Remove favorite" } else { "Favorite track" }, "aria-pressed": track.favorite, onclick: move |_| onfavorite.call(favorite.clone()), if track.favorite { Icon { name: "heart" } } else { Icon { name: "heart" } } } button { class: "icon-button", "aria-label": "Add {track.title} to playback queue", onclick: move |_| onqueue.call(queued.clone()), "+" } button { class: "icon-button metadata-edit", "aria-label": "Edit metadata for {track.title}", title: "Edit metadata", onclick: move |_| onedit.call(edited.clone()), Icon { name: "edit" } } }
@@ -1123,6 +1160,7 @@ fn App() -> Element {
     let mut queue = use_signal(Vec::<Track>::new);
     let mut index = use_signal(|| 0);
     let mut playing = use_signal(|| false);
+    let requested = use_signal(|| false);
     let mut position = use_signal(|| 0.0);
     let mut duration = use_signal(|| 0.0);
     let mut volume = use_signal(|| 0.8);
@@ -1140,6 +1178,7 @@ fn App() -> Element {
         browser_player::BrowserPlayer::new(browser_player::View {
             auth,
             playing,
+            requested,
             position,
             duration,
             status: playback_status,
@@ -1231,10 +1270,21 @@ fn App() -> Element {
         generation: playlist_generation,
         share_url,
     };
+    let active_track = use_memo(move || {
+        queue
+            .read()
+            .get(*index.read())
+            .map(|track| track.id.clone())
+    });
     let actions = use_hook(move || experience::Actions {
+        active_track,
+        requested,
+        start: EventHandler::new(move |(items, at, context)| {
+            play_queue(items, at, context, playback)
+        }),
         play: EventHandler::new(
             move |(items, at, context): (Vec<Track>, usize, PlaybackContext)| {
-                play_queue(items, at, context, playback)
+                play_or_toggle_queue(items, at, context, playback)
             },
         ),
         queue: EventHandler::new(move |(track, next): (Track, bool)| {
@@ -1645,7 +1695,7 @@ fn App() -> Element {
     });
 
     let current = queue.read().get(*index.read()).cloned();
-    let requested_play = engine.peek().wants_play();
+    let requested_play = requested();
     let heading = match page.read().as_str() {
         "albums" => "Albums",
         "artists" => "Artists",
@@ -1761,8 +1811,8 @@ fn App() -> Element {
                                     for (at, track) in tracks.read().iter().cloned().enumerate() {
                                         { let row_track = track.clone(); let favorited_track = track.clone(); let add_track = track.clone(); let edit_track = track.clone(); let radio_track = track.clone();
                                         rsx! { div { key: "{track.id}", class: if current.as_ref().is_some_and(|t| t.id == track.id) { "track-row current" } else { "track-row" },
-                                            button { class: "track-play", "aria-label": "Play {track.title}", onclick: move |_| play_queue(tracks.peek().clone(), at, view_context(page,catalog,selected_playlist), playback), if current.as_ref().is_some_and(|t| t.id == track.id) && playing() { Icon { name: "music" } } else { Icon { name: "play" } } }
-                                            button { class: "track-title", onclick: move |_| play_queue(tracks.peek().clone(), at, view_context(page,catalog,selected_playlist), playback), Art { track: row_track } div { strong { "{track.title}" } small { "{track.artist}" } } }
+                                            button { class: "track-play", "aria-label": actions.play_label(&track.id, &track.title), onclick: move |_| play_or_toggle_queue(tracks.peek().clone(), at, view_context(page,catalog,selected_playlist), playback), if current.as_ref().is_some_and(|t| t.id == track.id) && requested_play { Icon { name: "pause" } } else { Icon { name: "play" } } }
+                                            button { class: "track-title", onclick: move |_| play_or_toggle_queue(tracks.peek().clone(), at, view_context(page,catalog,selected_playlist), playback), Art { track: row_track } div { strong { "{track.title}" } small { "{track.artist}" } } }
                                             span { class: "track-album", "{track.album}" }
                                             span { class: "quality-tag", "{track.codec}" }
                                             span { class: "track-duration", "{seconds(track.duration_ms as f64 / 1000.0)}" }
@@ -1811,8 +1861,8 @@ fn App() -> Element {
                                 else if catalog.tracks.read().is_empty() { div { class: "empty-state compact", h3 { "No tracks on this page" } p { "Refresh the collection to check what is available." } button { class: "button secondary", onclick: move |_| catalog_tracks(None, catalog), "Refresh tracks" } } }
                                 else {
                                     GroupTracks {
-                                        tracks: catalog.tracks.read().clone(), current_id: current.as_ref().map(|track| track.id.clone()), playing: playing(),
-                                        onplay: move |at| play_queue(catalog.tracks.peek().clone(), at, view_context(page,catalog,selected_playlist), playback),
+                                        tracks: catalog.tracks.read().clone(), current_id: current.as_ref().map(|track| track.id.clone()), playing: requested_play,
+                                        onplay: move |at| play_or_toggle_queue(catalog.tracks.peek().clone(), at, view_context(page,catalog,selected_playlist), playback),
                                         onfavorite: move |track: Track| favorite_track(track,auth,tracks,queue,catalog.tracks,facets_revision,error),
                                         onqueue: move |track: Track| { enqueue_track(track,false,playback,notice); },
                                         onedit: move |track: Track| editing_track.set(Some(track)),
@@ -2045,14 +2095,20 @@ fn App() -> Element {
                                         } });
                                     }, "Leave playlist" }
                                 }
-                                for (at, entry) in detail.items.iter().cloned().enumerate() { { let track = entry.track.clone(); let item_id = entry.id.clone(); let played_item=entry.id.clone(); let revision = detail.playlist.revision; let list_id = detail.playlist.id.clone(); rsx! { div { class: "playlist-track", key: "{entry.id}", Art { track: track.clone() } div { strong { "{track.title}" } small { "{track.artist}" } }
-                                            if entry.can_stream { button { class: "icon-button", "aria-label": "Play {track.title}", onclick: move |_| {
+                                for (at, entry) in detail.items.iter().cloned().enumerate() { { let track = entry.track.clone(); let item_id = entry.id.clone(); let played_item=entry.id.clone(); let revision = detail.playlist.revision; let list_id = detail.playlist.id.clone();
+                                    let stream_at=detail.items.iter().filter(|i|i.can_stream).position(|i|i.id==entry.id);
+                                    let duplicate=detail.items.iter().filter(|i|i.can_stream && i.track.id==track.id).count()>1;
+                                    let active_entry=current.as_ref().is_some_and(|t|t.id==track.id) && (!duplicate || (stream_at==Some(index()) && context.read().kind==ContextKind::Playlist && context.read().label==detail.playlist.name && queue.read().iter().map(|t|&t.id).eq(detail.items.iter().filter(|i|i.can_stream).map(|i|&i.track.id))));
+                                    let row_playing=active_entry && requested_play;
+                                    let row_verb=if row_playing {"Pause"}else{"Play"};
+                                    rsx! { div { class: "playlist-track", key: "{entry.id}", Art { track: track.clone() } div { strong { "{track.title}" } small { "{track.artist}" } }
+                                            if entry.can_stream { button { class: "icon-button", "aria-label":"{row_verb} {track.title}", onclick: move |_| {
                                                 let Some(value)=selected_playlist.peek().clone() else {return;};
                                                 let playable=value.items.iter().filter(|i|i.can_stream).collect::<Vec<_>>();
                                                 let Some(at)=playable.iter().position(|i|i.id==played_item) else{return;};
                                                 let origin=PlaybackContext::new(ContextKind::Playlist,&value.playlist.name);
-                                                play_queue(playable.into_iter().map(|i|i.track.clone()).collect(),at,origin,playback);
-                                            }, Icon { name: "play" } } } else { span { class: "quality-tag", "Metadata only" } }
+                                                play_or_toggle_queue(playable.into_iter().map(|i|i.track.clone()).collect(),at,origin,playback);
+                                            }, if row_playing {Icon {name:"pause"}}else{Icon {name:"play"}} } } else { span { class: "quality-tag", "Metadata only" } }
                                             if detail.playlist.can_edit { button { class: "icon-button", "aria-label": "Move track up in playlist", disabled: at == 0, onclick: move |_| {
                                                 let Some(current) = selected_playlist.peek().clone() else { return; };
                                                 let mut ids = current.items.iter().map(|entry| entry.id.clone()).collect::<Vec<_>>();
@@ -2195,7 +2251,7 @@ fn App() -> Element {
                         for (at, track) in queue.read().iter().cloned().enumerate() { {
                             let last = at + 1 >= queue.read().len();
                             let is_current = at == index();
-                            rsx! { div { class: if is_current { "queue-row current" } else { "queue-row" }, key: "{at}-{track.id}", button { class: "queue-track", onclick: move |_| select_queued(at, playback), Art { track: track.clone() } div { strong { "{track.title}" } small { "{track.artist}" } } }
+                            rsx! { div { class: if is_current { "queue-row current" } else { "queue-row" }, key: "{at}-{track.id}", button { class: "queue-track", "aria-label":format!("{} queue item {}: {}",if is_current && requested_play {"Pause"}else{"Play"},at+1,track.title), onclick: move |_| select_queued(at, playback), Art { track: track.clone() } div { strong { "{track.title}" } small { "{track.artist}" } } }
                                 button { class: "icon-button", "aria-label": "Move track up", title: if at == 0 { "Already the first queued track." } else { "Move this occurrence one place earlier in the saved queue." }, disabled: at == 0, onclick: move |_| move_queue_up(at, playback), Icon { name: "up" } }
                                 button { class: "icon-button", "aria-label": "Move queue occurrence {at + 1} down", title: if last { "Already the last queued track." } else { "Move this occurrence one place later in the saved queue." }, disabled: last, onclick: move |_| move_queue_down(at, playback), MoveDownIcon {} }
                                 button { class: "icon-button", "aria-label": "Remove queued track", title: if is_current { "The playing occurrence cannot be removed because that would stop the audio; remove later rows with Clear upcoming tracks instead." } else { "Remove this occurrence from the queue." }, "aria-describedby": if is_current { "queue-current-remove-note" } else { "" }, disabled: is_current, onclick: move |_| remove_queued(at, playback), Icon { name: "close" } }
