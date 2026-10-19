@@ -3,6 +3,12 @@
 Planning date: 2026-10-19. Language: English. Repository anchor: `6fa2346`.
 Status: implementation specification only. No application code is changed by this package.
 
+Latest supplement: [Interaction Playbook](INTERACTION_PLAYBOOK/README.md), with 96
+granular briefs, complete loading/context-menu specifications, 16 interaction recipes,
+11 delivery packages and a copyable agent prompt. Read its current-state reconciliation
+before treating older gaps below as absent: native authorized artwork and web/native
+80–150% appearance Settings now have their own dated implementation evidence.
+
 ## Assignment
 
 Turn the existing Vela application into an enjoyable everyday music product, with
@@ -32,6 +38,7 @@ vertical slices; never expose 320 unfinished controls at once.
 12. [Copyable implementation-agent mandate](12_AGENT_HANDOFF.md).
 13. [Everyday scenarios and completion criteria](13_PRODUCT_SCENARIOS.md).
 14. [Native desktop/phone master plan and copyable prompt](14_NATIVE_CROSS_PLATFORM_MASTER_PLAN.md).
+15. [Interactive product refinement and action-menu handoff](INTERACTION_PLAYBOOK/README.md).
 
 ## Authority and relationship to earlier plans
 
@@ -49,11 +56,12 @@ implementation instruction before acting on the handoff's executable work packag
 
 ## First implementation outcome
 
-Latest native priority: deliver the authorized artwork pipeline alongside the
-settings/scale foundation. Current native placeholders do not consume available
-artwork_id. Follow ART01–ART14 and the native tranche order; artwork must not wait
-for a full future edition/federation system. The standalone native handoff is in
-the final section of file14.
+The original artwork/Settings priorities have since received source slices:
+`0f9f12b` authorized native artwork, `1618e63` web appearance and `eb36048` native
+appearance. Artwork visual QA in `9c1ba4f`/`8c339e3` is limited to its named subset;
+it does not verify every art surface/platform. Reconcile ART01–ART14 and SCALE/SET
+against current QA_EVIDENCE before accepting remaining work. The standalone native
+handoff remains in the final section of file14.
 
 A listener can open Settings in web and native desktop, search for “scale”, adjust
 the application size, restore 100%, choose System/Dark/Light appearance, and understand
@@ -61,10 +69,12 @@ which preferences belong to this device. Playback, source generation and positio
 survive the entire flow. No server database migration is needed for device-only
 scale. Settings beyond actual backend/platform capabilities stay out of primary UI.
 
-Next outcomes are durable native queue restore, authorized artwork, cache/download
-controls, true next-source preparation, better catalog/context actions, and private
-discovery. Devices, mobile audio and social federation follow their prerequisite
-contracts rather than being simulated in the interface.
+Next interaction outcomes are truthful geometry-matched loading, root-coordinated
+right-click/More/keyboard actions, a searchable playlist picker and safe receipts/
+Undo. Continue durable native queue restore, remaining artwork/Settings validation,
+cache/download controls, true next-source preparation and private discovery under
+their existing contracts. Devices, mobile audio and social federation follow their
+prerequisites rather than being simulated in the interface.
 
 ## Evidence language
 

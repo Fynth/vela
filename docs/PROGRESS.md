@@ -1,5 +1,34 @@
 # Verified progress
 
+## Interactive product playbook 2026-10-19 — documentation only
+
+Prepared the English [Interaction Playbook](PLANS/2026-10-19/PRODUCT_EXPANSION/INTERACTION_PLAYBOOK/README.md):
+9 Markdown documents, 96 proposed IX interaction briefs, 16 detailed product recipes,
+11 dependency-ordered IN packages and a copyable implementation prompt. It supplements
+the320-entry product catalog without counting overlap as new implemented features.
+Core scope: geometry-matched skeleton/shimmer/static loading, right-click/More/
+keyboard/touch actions, searchable playlist picker, receipts/Undo, queue manipulation,
+mix previews, offline readiness and privacy-safe collaborative flows.
+
+Inspected existing loading/actions/artwork/appearance and contracts at `b619253`
+with pre-existing dirty native appearance work. During preparation, independent
+`eb36048`, `9c1ba4f` and `8c339e3` committed native Settings and scoped artwork QA.
+Reconciled the plan with actual 80–150% web/native settings and implemented native
+artwork; their tests remain historical and are not rerun by this documentation task.
+
+Loaded Better Design UI/UX/review guidance and checked selected WAI/MDN primary
+references. Three scoped proposed-copy comprehension checks PASS: loading status,
+queue receipt and playlist-picker introduction. These are copy checks, not visual/
+DOM/platform approval. LOAD18/MENU22/ACT16/MOT12/FLOW12 rows specify future tests;
+none is marked executed here. Document link/ID/table/preservation results are in
+the playbook README.
+
+No application-code/CSS/dependency/schema/data/runtime changes, application test
+runs, new benchmarks, deployment, publishing or delegation performed by this task.
+The pre-existing prompt.txt remains unread/unstaged. Next authorized implementation:
+IN00 baseline, then IN01 truthful loading + IN02 single-item context actions, IN03
+playlist picker/receipts and continuous IN10 accessibility/real-UI review.
+
 ## Product/settings/native expansion specification2026-10-19 — documentation only
 
 Prepared the English [Product Expansion plan](PLANS/2026-10-19/PRODUCT_EXPANSION/README.md)

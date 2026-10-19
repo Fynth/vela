@@ -1,5 +1,26 @@
 # Authoritative backlog
 
+## Interactive listening refinement 2026-10-19 — proposed, documentation only
+
+The [Interaction Playbook](PLANS/2026-10-19/PRODUCT_EXPANSION/INTERACTION_PLAYBOOK/README.md)
+adds96 granular IX briefs and 11 IN delivery packages to the existing product plan.
+It refines overlapping EX outcomes; it is not a second independent feature-count
+backlog or evidence that the proposed interactions work.
+
+First complete slice: IN00 real-source/rendered baseline → IN01 geometry-matched
+catalog/art skeletons with honest pending/refresh/error states + IN02 single-track
+right-click/More/keyboard commands → IN03 actual playlist picker and safe receipts/
+Undo. Apply IN10 motion/accessibility/platform review at every integration. Then
+selection/drag/queue, listening shelf/time planner, catalog/mix peeks and supported
+offline/privacy/share/device interactions under their accepted prerequisites.
+
+Reconciliation: native artwork (`0f9f12b`), web appearance (`1618e63`) and native
+appearance (`eb36048`) are already implemented source foundations. Actual scale
+bounds are80–150%; scoped native art QA was updated in `9c1ba4f`/`8c339e3`.
+Remaining surface/HiDPI/native visual evidence must follow current QA_EVIDENCE.
+Older "next artwork/scale" statements below are dated, not instructions to duplicate
+those services. All new IX/IN work remains PROPOSED until real acceptance executes.
+
 ## English product/settings/native expansion2026-10-19 — proposed
 
 The documentation-only request is addressed by the
