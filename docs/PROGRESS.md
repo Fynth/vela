@@ -1,5 +1,16 @@
 # Verified progress
 
+## Queue snapshot canonical origin — fixed (2026-10-20)
+
+The queue snapshot previously stored and compared the raw origin string, so a queue
+saved by a fresh login typed without the trailing `/` could fail to restore after a
+canonical resume (`…/`). `QueueSnapshot::new` now stores
+`client::canonical_origin(origin)`, `load` compares the same canonical value, and
+`validate` rejects non-canonical/empty/foreign forms. Unit coverage proves
+`https://a.example.org` and `https://a.example.org/` are one identity. This closes the
+adjacent FIX-04 step-7 gap reported during AUD-06; cold offline launch (AUD-05) remains
+open.
+
 ## AUD-06 origin-scoped offline namespace — fixed (2026-10-20)
 
 `a913574`: offline copies now live under

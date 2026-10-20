@@ -148,7 +148,9 @@ AUD-03/07/08/12 are fixed in source `e225b63` (off-thread cancellable prepare,
 current-vs-other removal remap, per-await origin/epoch guards, quota/staging/
 recoverable publication); concurrent two-process and disk-full/power-loss boundaries
 plus explicit checking/Cancel harness assertions remain unexecuted. AUD-05 (cold
-offline launch) and AUD-06 (origin-scoped offline namespace) remain open. AUD-01/02/04/11
+offline launch) remains open; AUD-06 (origin-scoped offline namespace) is fixed in
+`a913574`, and queue snapshots canonicalize their origin in the adjacent fix.
+AUD-01/02/04/11
 are fixed in `3094754`, AUD-13 in `48b2fa4`.
 
 Offline routing regressions observed during the repair are now fixed in source
