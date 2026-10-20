@@ -1,8 +1,8 @@
 # Unsupported and unverified functionality
 
-## Distribution pipeline2026-10-20
+## Distribution pipeline 2026-10-20
 
-Distribution0.12.7 supplies packaging workflows for exe/tar.gz/deb/AppImage/APK and the user-selected AUR name vela-music-bin. AUR requires owner credentials; APKs without a keystore are explicit previews with ephemeral signatures. Native packaging smoke is not device/audio/background certification. See [DISTRIBUTION](DISTRIBUTION.md); dated platform rows below retain their historical scope.
+Distribution 0.12.8 is public with EXE/tar.gz/DEB/AppImage, a durably signed arm64 APK and AUR `vela-music-bin` 0.12.8-1 (resolved through yay). Windows EXE/ZIP is portable, unsigned by Authenticode and requires WebView2. Ubuntu 24.04+ DEB/tar/AppImage uses host GTK3/WebKitGTK4.1/ALSA/libudev/libxdo.so.3; AppImage does not bundle these libraries. AUR carries a private compatible libxdo.so.3 because current Arch uses libxdo.so.4. Native packaging/CLI smoke is not GUI/device/audio/background certification. Docker image build passed; runtime was not run. APKs built without repository signing secrets remain explicit ephemeral previews. See [DISTRIBUTION](DISTRIBUTION.md) and [release evidence](RELEASE_LEDGER_0.12.8.md); dated platform rows below retain their historical scope.
 
 ## Interaction/window source repair2026-10-19
 

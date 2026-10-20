@@ -1,45 +1,56 @@
 # Verified progress
 
-## Distribution CI/CD0.12.8 — 2026-10-20
+## Distribution CI/CD 0.12.8 — 2026-10-20
+
+Published [v0.12.8](https://github.com/Fynth/vela/releases/tag/v0.12.8) from tagged source
+`eb0fb8cd059e2da03ef94abe9265d4a4d3505c63` at 2026-10-20 19:21:09 UTC.
+[Release workflow 39479453423](https://github.com/Fynth/vela/actions/runs/39479453423) completed successfully: quality, Linux,
+Windows, Android, real Arch makepkg, Docker image build, aggregate verification,
+GitHub publication and AUR publication. The public release has nine payloads and
+21 assets including SHA256 sidecars, the consolidated report, checksums and PKGBUILD.
+EXE/ZIP, AppImage, DEB, signed arm64 APK and desktop/server/web/AUR tar.gz are real
+built artifacts. See [release ledger](RELEASE_LEDGER_0.12.8.md) for exact hashes.
+
+[AUR vela-music-bin 0.12.8-1](https://aur.archlinux.org/packages/vela-music-bin) was published at recipe commit
+`10c82b3c5810d9b6a28a8497433d2e861468c887`. An anonymous public clone downloaded the
+published source tar, passed SHA256 and built with `makepkg --noconfirm --nodeps`;
+the packaged executable printed `vela-desktop 0.12.8`. After the AUR metadata snapshot
+updated, `yay -Si vela-music-bin` returned the correct version and maintainer.
+Installation command: `yay -S vela-music-bin`. No host installation was performed.
+
+Executed quality checks: fmt, strict workspace/all-target, WASM and native-QA
+Clippy, release WASM build, actionlint 1.7.12, 374 Rust tests (3 opt-in ignored,
+including 33 passing real API integration tests) and 38 Python tests. In final
+CI, Chromium and Firefox each passed 60 tests with one pre-existing opt-in live
+Internet import skip (4.3m/5.7m). Extracted optimized server/assets/schema 13 and
+shutdown/worker-fault checks passed. Linux deb/AppImage and native Windows binaries
+passed CLI smoke; the Arch build passed linkage/CLI checks. APK v2/v3 signatures,
+identity/API 26 minimum, non-debuggable/backup-off/cleartext-off policies passed.
+Docker image build passed; Docker runtime, new native GUI/physical audio,
+Windows GUI and Android device/background validation remain NOT_RUN for this release.
+The pre-existing AUD-20 maintenance warning remains informational in CI.
 
 The v0.12.7 tag is preserved: its release gate rejected a packaging unit test
-that accidentally depended on a pre-existing target/release desktop executable.
-The test now passes its own real fixture file to the payload helper; v0.12.8 is
-the next candidate, without rewriting any prior tag.
+that depended on a pre-existing release executable. The corrected test supplies
+its own fixture; no failed check was bypassed and no prior tag was rewritten.
+Firefox CI now uses an owned PulseAudio null sink. Its real playback exposed a
+10s SQLite writer wait in listening preferences/devices GETs; these now use a
+deferred read snapshot and retention-filtered counts without pruning, insertion
+or writer reservation. Existing writer/query-only/retention tests cover all four
+listening read paths. TR03 observes genuine EOF for its short fixture and separately
+checks unchanged source and advancing time through favorites on the 30s original.
 
-CI follow-up: Firefox now has real PulseAudio output, exposing a genuine10s
-SQLite writer wait from GET preferences/devices. These reads now use one deferred
-snapshot with retention-filtered device counts, never prune/insert/reserve a writer.
-Existing open-writer/query-only/retention tests cover all four listening read paths.
-TR03 observes the covered one-second original's genuine EOF before paused favorite
-checks, then separately checks source identity and advancing time through favorite
-mutations on its30s original. No assertion was removed or skipped.
-
-Quality browser/worker tests use the debug server; optimized native builds and
-extracted release-server/worker smoke checks run in the package job. The pinned
-wasm-bindgen binary replaces recompilation of its separate CLI dependency graph.
-Compiler caches survive downstream test failures. This avoids duplicate optimized
-builds without omitting release package runtime checks.
-
-User authorized push and release/AUR distribution. Replaced the broken duplicated
-package paths with reusable quality/packages workflows, required Linux tar.gz/deb/
-AppImage, native Windows exe/zip and Dioxus-generated Android APK builds. Added
-real unprivileged makepkg and .SRCINFO, distinct reports and a full-set hash/payload/
-source/version gate. Tags publish assets before the selected vela-music-bin AUR
-recipe; main/PR/manual runs retain Actions artifacts. See DISTRIBUTION and ADR0025.
-
-Local fmt, strict workspace/all-target Clippy, cargo check, actionlint1.7.12 and
-38 Python regressions passed. Workspace Rust/API tests374 passed/3 ignored, strict WASM/native-QA Clippy and
-release WASM build passed. Remote run39471846727 already built the first real
-Android preview APK and Windows exe/zip; complete-set publication remains pending. AUR host
-Ed25519 fingerprint matched the official HTTPS homepage; AUR_REPO and the pinned
-AUR_KNOWN_HOSTS were configured. A dedicated private AUR key was generated into ignored private0600 storage and
-uploaded to the repository secret; its public half was added to the owner-authorized AUR profile while preserving
-existing keys. Login credentials/cookies stayed only in process memory.
-A durable Android PKCS12 signing identity was generated, backed up privately
-under ignored target/private-release-keys and configured through repository secrets.
-The AUR key authenticated as Rasul after the key-only profile update. Frozen runtime, original data and preserved target snapshots remain
-untouched. No device/UI/audio/Docker-runtime validation was performed by this change.
+Reusable quality/package workflows retain artifacts on main/PR/manual runs;
+version-matching pushed tags publish only after all gates and then update AUR.
+Pinned prebuilt wasm-bindgen and retained compiler caches avoid duplicated work;
+optimized extracted-server checks stay in the package job. See
+[DISTRIBUTION](DISTRIBUTION.md) and [ADR0025](DECISIONS/0025-release-artifact-gates.md).
+Dedicated AUR and durable Android signing identities are configured through
+repository secrets; private backups remain ignored under `target/private-release-keys`
+(directory 0700/files 0600). The AUR host key was independently verified; the
+owner-authorized profile update preserved existing public keys. Credentials and
+cookies stayed in process memory. Frozen runtime, original data and target
+checkpoints were not upgraded or deleted; this is no new live-health observation.
 
 ## AUD-05 cold offline launch — fixed (2026-10-20)
 

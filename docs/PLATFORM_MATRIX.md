@@ -1,8 +1,19 @@
 # Platform evidence
 
-## Distribution pipeline2026-10-20
+## Distribution pipeline 2026-10-20
 
-Distribution0.12.7 updates the build recipes for Linux tar.gz/deb/AppImage, native Windows exe/zip, Android APK and AUR makepkg. Recipe presence is not successful CI/device evidence; see [DISTRIBUTION](DISTRIBUTION.md) and the current QA_EVIDENCE entry. Historical evidence rows below are not upgraded by this change.
+Distribution 0.12.8 is published from `eb0fb8c`; [workflow 39479453423](https://github.com/Fynth/vela/actions/runs/39479453423) succeeded. These rows supersede older packaging-only observations for this exact source, without upgrading historical native GUI/device claims. See [DISTRIBUTION](DISTRIBUTION.md) and [release ledger](RELEASE_LEDGER_0.12.8.md).
+
+| Platform/evidence |0.12.8 result | Remaining scope |
+| --- | --- | --- |
+| Linux x86_64 Ubuntu24.04 | tar.gz/DEB/AppImage built and verified; native CLI, extracted optimized server/assets/worker/shutdown checks PASS | New desktop GUI/physical audio NOT_RUN; host GTK/WebKit ABI required |
+| Arch x86_64 | Non-root makepkg/linkage/CLI PASS; public AUR download/checksum/build PASS; yay resolves0.12.8-1 | No host installation or new GUI/hardware run |
+| Windows x86_64 | Native MSVC EXE/ZIP and CLI PASS | GUI/audio NOT_RUN; WebView2 required, no Authenticode |
+| Android arm64 | Dioxus APK, durable v2/v3 signature, identity/API26/non-debuggable/backup-off/cleartext-off checks PASS | Physical device/background/audio NOT_RUN |
+| Browser | Chromium60/1 and Firefox60/1 PASS/SKIP in final release CI | Sole skip is opt-in live Internet import; no physical audio claim |
+| Docker | Image BUILD PASS | Runtime NOT_RUN |
+
+The existing G18 and EXP/PLAY/RES/NET/AUTH/NP mappings retain their actual scenario scope; packaging does not complete all mobile/native functionality.
 
 Latest source/debug repair2026-10-19 (baseline91867f2), separate from the package
 matrix below: Chromium43 pass/1skip and Firefox43 pass/1skip; Linux X11 native

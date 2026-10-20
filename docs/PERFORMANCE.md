@@ -1,8 +1,8 @@
 # Reproducible performance measurements
 
-## Distribution pipeline2026-10-20
+## Distribution pipeline 2026-10-20
 
-Distribution0.12.7 limits Cargo builds to two jobs and reuses runner Cargo caches. This is build resource policy, with no new playback/startup/package-size benchmark claim. AppImage uses host GTK/WebKit libraries. See [DISTRIBUTION](DISTRIBUTION.md).
+Distribution 0.12.8 limits Cargo builds to two jobs per runner and reuses Cargo caches, including after downstream failures. Browser quality uses the debug server; package verification independently starts the optimized extracted server. A pinned prebuilt wasm-bindgen avoids compiling a second CLI graph. This is build resource policy, with no new playback/startup benchmark claim. AppImage uses host GTK/WebKit libraries. Published byte sizes are recorded in the [release ledger](RELEASE_LEDGER_0.12.8.md); see [DISTRIBUTION](DISTRIBUTION.md).
 
 ## Personal recommendation query/ranking0.10 (2026-10-18)
 

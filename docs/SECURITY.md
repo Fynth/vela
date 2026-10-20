@@ -4,9 +4,9 @@ Listening GET preferences/devices/history/export use deferred owner snapshots;
 only mutation/retention paths reserve writers or delete rows. Device counts exclude
 expired sessions without physically deleting them during a read.
 
-## Distribution pipeline2026-10-20
+## Distribution pipeline 2026-10-20
 
-Release0.12.7 verifies source/version, required payloads and SHA256 for all artifacts before tag publication. AUR uses a private temporary SSH key, strict pinned host identity and the selected repository only. Android signing secrets never enter artifacts; preview APKs use an ephemeral preview identity. Checksums are not publisher signatures. See [DISTRIBUTION](DISTRIBUTION.md).
+Release 0.12.8 verified source/version, required payloads and SHA256 before publication. AUR uses a private temporary SSH key, strict pinned host identity and the selected repository only. Its dedicated key was registered while preserving existing profile keys. The published APK uses a durable repository signing identity; secret-free preview builds use an ephemeral identity and explicit preview filename. Private key backups stay in ignored `target/private-release-keys` (directory 0700/files 0600); keys never enter artifacts. Checksums are not publisher signatures; Windows has no Authenticode signature. AUD-20 dependency maintenance notices remain informational in CI, not a passing strict audit. See [DISTRIBUTION](DISTRIBUTION.md) and [release evidence](RELEASE_LEDGER_0.12.8.md).
 
 Source-review update2026-10-19: [AUD-01–20 and proposed repairs](PLANS/2026-10-19/01_AUDIT.md)
 record native account/keyring/offline lifecycle concerns still awaiting regressions/fixes.

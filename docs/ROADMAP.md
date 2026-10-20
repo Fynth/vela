@@ -1,8 +1,8 @@
 # Authoritative backlog
 
-## Distribution pipeline2026-10-20
+## Distribution pipeline 2026-10-20
 
-Distribution0.12.7 adds the required exe/zip, Linux tar.gz/deb/AppImage and Android APK pipeline plus real makepkg validation. AUR publication needs the owner account/key; stable APK update signing needs a keystore. Hardware/device/background, macOS/iOS packaging and store submissions remain separate. See [DISTRIBUTION](DISTRIBUTION.md).
+Distribution 0.12.8 is published with EXE/ZIP, Linux tar.gz/DEB/AppImage, a durably signed Android APK and the public `vela-music-bin` AUR package. Full CI and real makepkg checks passed; `yay` resolves 0.12.8-1. Owner-authorized AUR and Android signing credentials are configured. Hardware/device/background, macOS/iOS packaging and store submissions remain separate. See [DISTRIBUTION](DISTRIBUTION.md) and [release evidence](RELEASE_LEDGER_0.12.8.md).
 
 ## Approved prototype transfer 2026-10-19 — documentation only
 

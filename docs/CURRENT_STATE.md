@@ -1,10 +1,13 @@
 # Current state index
 
-> 2026-10-20 update: source `main` is `58aa0dc` (TR10–TR12 docs/evidence); the live
-> server runtime and original `data/` remain the frozen `0.12.6` build from `7fe1ca0`.
-> The TR10 desktop archive was rebuilt from `4ceafdc`; see
-> [RELEASE_LEDGER_2026-10-20.md](RELEASE_LEDGER_2026-10-20.md). Everything below
-> anchored to `05b4c37` is a historical audit, not the current source head.
+> 2026-10-20 distribution update: [v0.12.8](https://github.com/Fynth/vela/releases/tag/v0.12.8) is published from
+> tagged source `eb0fb8cd059e2da03ef94abe9265d4a4d3505c63`; full release CI passed
+> and public AUR `vela-music-bin` 0.12.8-1 is discoverable through yay. See
+> [RELEASE_LEDGER_0.12.8](RELEASE_LEDGER_0.12.8.md). This task did not upgrade the
+> frozen 0.12.6 server runtime or original `data/`, and makes no new live-health claim.
+> The earlier TR10 desktop archive remains recorded in
+> [RELEASE_LEDGER_2026-10-20](RELEASE_LEDGER_2026-10-20.md). Observations anchored
+> to `05b4c37` below are historical, not the current source head.
 
 Latest2026-10-19 English [product/settings/native plan](PLANS/2026-10-19/PRODUCT_EXPANSION/README.md)
 is documentation only:320 feature briefs/120 settings plus native artwork/cache/

@@ -1,8 +1,8 @@
 # Authoritative architecture
 
-## Distribution pipeline2026-10-20
+## Distribution pipeline 2026-10-20
 
-Distribution0.12.7 uses reusable quality/package workflows, native Windows/Linux and Dioxus-generated Android APKs, distinct platform reports and a complete-set publication gate. See [distribution contract](DISTRIBUTION.md) and [ADR0025](DECISIONS/0025-release-artifact-gates.md). Runtime/data ownership is unchanged.
+Distribution 0.12.8 is published through reusable quality/package workflows, native Windows/Linux and Dioxus-generated Android APK builds, distinct platform reports and a complete-set publication gate. GitHub publication precedes the real AUR update. See [distribution contract](DISTRIBUTION.md), [release evidence](RELEASE_LEDGER_0.12.8.md) and [ADR0025](DECISIONS/0025-release-artifact-gates.md). Runtime/data ownership is unchanged.
 
 ## Private listening and local audio discovery0.9
 

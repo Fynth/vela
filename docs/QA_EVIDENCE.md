@@ -1,16 +1,38 @@
 # Verified0.12.0 package and preserved runtime checkpoint
 
-## Distribution CI/CD2026-10-20
+## Distribution CI/CD 2026-10-20
 
-Local: fmt PASS, strict workspace/all-target Clippy PASS, cargo check PASS,
-actionlint1.7.12 PASS, Python38 PASS (including exe extension/ZIP metadata, tar
-payloads, report merge/source mismatch, tamper/missing formats and AUR arrays).
-Logs: target/checks/distribution/. Rust/API374 passed/3 ignored; strict WASM/native-QA Clippy and release WASM PASS.
-Remote run39471846727 Android initial APK and Windows exe/zip PASS; final artifact
-set and release publication PENDING. Docker image build PASS, Docker runtime NOT_RUN.
-No G01–G24 or EXP/PLAY/RES/NET/AUTH/NP behavior changed or reclassified. Native
-windows/audio/device/background, browser and Docker evidence remain separate; no
-new claim for those classes. See DISTRIBUTION.md for exact ABI/signing limitations.
+Tagged source `eb0fb8cd059e2da03ef94abe9265d4a4d3505c63`, workspace0.12.8.
+[Workflow 39479453423](https://github.com/Fynth/vela/actions/runs/39479453423) **SUCCESS**;
+[public release](https://github.com/Fynth/vela/releases/tag/v0.12.8) has nine payloads/21 assets. Exact hashes and
+publication evidence: [RELEASE_LEDGER_0.12.8](RELEASE_LEDGER_0.12.8.md).
+
+| Evidence class | Executed result |
+| --- | --- |
+| Rust quality | fmt, strict workspace/all-target, native-QA and WASM Clippy PASS; release WASM build PASS; 374 Rust tests PASS/3 opt-in ignored, including 33 API integration tests |
+| Packaging regressions | Python 38 PASS; actionlint 1.7.12 PASS; payload/size/hash/sidecar/source/version/full required-format gate PASS |
+| Browser | Final CI Chromium 60 PASS/1 SKIP (4.3m), Firefox 60 PASS/1 SKIP (5.7m); existing live import opt-in is the sole skip; Firefox uses owned null audio output |
+| Linux packages | Real optimized server extracted from archive: startup/assets/WASM/schema 13/shutdown/worker-fault PASS; desktop DEB/AppImage CLI smoke PASS |
+| Windows package | Native MSVC EXE/ZIP build and `--version` PASS; GUI/audio/hardware NOT_RUN |
+| Android package | Real Dioxus arm64 APK build, durable release signing (v2/v3) and manifest/identity/API policy checks PASS; device/background audio NOT_RUN |
+| Arch/AUR | CI non-root makepkg, `.SRCINFO`, missing-library and CLI checks PASS; public AUR clone downloaded release tar, verified SHA256, built, and printed 0.12.8; `yay -Si vela-music-bin` PASS at0.12.8-1 |
+| Docker | Image build PASS; runtime NOT_RUN |
+
+Public [AUR package](https://aur.archlinux.org/packages/vela-music-bin) recipe commit
+`10c82b3c5810d9b6a28a8497433d2e861468c887`. Logs and public build:
+`target/checks/distribution/quality-0.12.8.log`, `aur-publish-0.12.8.log`,
+`public-0.12.8/makepkg-public.log`; local Rust/Python/Clippy/WASM logs in the same
+ignored directory. The failed v0.12.7 gate/tag is preserved; its cold-build fixture
+bug was corrected before publishing 0.12.8. No failed check was reclassified as passing.
+AUD-20 dependency maintenance warnings remain informational, not a clean strict audit.
+
+G01–G24 still refer to the product mandate. This distribution work adds no new
+scenario numbering or completion claim; named EXP/PLAY/RES/NET/AUTH/NP tests retain
+their mappings below. G07 private-history coverage exercised the deferred listening
+read fix in both browsers; TR03 exercises real favorite/source/EOF continuity.
+New native GUI/physical audio/device/background checks were not run by this release;
+historical Linux evidence keeps its dated source/runtime scope. Original data and
+frozen runtime were not upgraded. See DISTRIBUTION for ABI/signing limits.
 
 ## AUD-09 measured performance
 

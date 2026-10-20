@@ -20,3 +20,7 @@ publish only when their version matches Cargo. Manual dispatch remains build-onl
 APK preview signatures are labelled and distinct from an optional durable release
 identity. No credentials in outputs, no local data/runtime upgrades, no store/device
 validation inferred from compilation or archive verification. See DISTRIBUTION.md.
+
+Executed by [v0.12.8](../RELEASE_LEDGER_0.12.8.md): all required gates, GitHub
+publication, public AUR build and yay discovery passed. The published APK uses the
+dedicated durable signing identity; physical-device validation remains separate.
