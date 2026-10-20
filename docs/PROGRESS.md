@@ -78,6 +78,22 @@ Remaining known cost: 8-client concurrency is bounded by the 4-connection
 SQLite pool, so per-endpoint RPS stays a client-bound lower bound; no capacity
 claim is made.
 
+## AUD-10/AUD-11 reconciliation and keyring verification (2026-10-20)
+
+AUD-10: the documents that previously contradicted the source now match it.
+KNOWN_LIMITATIONS, SPOTIFY_PARITY_MATRIX, PLATFORM_MATRIX, NATIVE_CLIENT_CONTRACTS,
+CONTRACTS, DESIGN_SYSTEM, PRODUCT_SPEC, PERFORMANCE and CURRENT_STATE now describe
+the delivered TR07 menus, the Settings hub instead of the removed More sheet, the
+origin-scoped offline namespace, the cold offline launch and the measured AUD-09
+costs; dated historical entries stay historical and point at their successors.
+AUD-11: the keyring subprocess risk is verified closed in current source by 13
+`session_store` tests — `SavedSession` prints `<redacted>`, helper stdout is bounded
+before buffering (`MAX_SECRET + 1`), a hung helper is killed and reaped at the
+deadline, invocations are serialized, and a physical cancellation is never treated
+as cancelling the external process. No token logging path was found in the audit
+and none was introduced. AUD-12/13 were fixed in earlier source; AUD-14–AUD-20
+remain open in the dated audit record.
+
 ## TR12 release ledger / asset verification — 2026-10-20
 
 Created [RELEASE_LEDGER_2026-10-20.md](RELEASE_LEDGER_2026-10-20.md). Package source

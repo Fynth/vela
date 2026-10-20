@@ -131,8 +131,15 @@ Examples of the split:
 
 ## 5. Open items this documentation pass cannot close
 
-AUD-05 (cold offline launch) and AUD-06 (origin-scoped namespace) are fixed in `3aeee09`/`a913574`; AUD-09 (search/stats measured and optimized in `87b7acd`; concurrency limit remains), AUD-10/14–AUD-20
-and AUD-19/20 remain open. This reconciliation fixed stale documentation only
+AUD-05 (cold offline launch) and AUD-06 (origin-scoped namespace) are fixed in
+`3aeee09`/`a913574`; AUD-09 (search/stats measured and optimized in `87b7acd`;
+concurrency limit remains) and AUD-10 (document reconciliation across
+KNOWN_LIMITATIONS, SPOTIFY_PARITY_MATRIX, PLATFORM_MATRIX, NATIVE_CLIENT_CONTRACTS,
+PERFORMANCE and CURRENT_STATE) are closed with executed evidence. AUD-11 (keyring
+subprocess) is verified in current source by 13 session_store tests (redacted
+`SavedSession` Debug, byte-bounded stdout, kill+reap at a deadline, serialized
+invocations). AUD-12/13 are fixed in earlier source. AUD-14–AUD-20 remain open
+and are tracked in the dated audit record. This reconciliation fixed stale documentation only
 (AUD-10/16 subset, AUD-17 framing, AUD-20 wording); it added no red test and fixed
 no code defect. See the [audit](PLANS/2026-10-19/01_AUDIT.md) and
 [repair plan](PLANS/2026-10-19/02_REPAIR_PLAN.md).
