@@ -234,33 +234,36 @@ def build_aur(stage: Path, version: str, commit: str, output: Path) -> Path:
     source_sha256 = hashlib.sha256((sources / source_name).read_bytes()).hexdigest()
     if base_url:
         source_url = f"{base_url}/{source_name}"
-        source_line = f'  echo "$_pkgname-$_pkgver.tar.gz::{source_url}"\n'
+        source_line = f'  echo "$pkgname-$pkgver.tar.gz::{source_url}"\n'
         checksum_line = f"  sha256sums=('{source_sha256}')\n"
     else:
-        source_line = f'  echo "$_pkgname-$_pkgver.tar.gz"\n'
+        source_line = f'  echo "$pkgname-$pkgver.tar.gz"\n'
         checksum_line = "  sha256sums=('SKIP')  # local build: set VELA_RELEASE_BASE_URL for a published recipe\n"
     (aur_dir / "PKGBUILD").write_text(
         "# Maintainer: Vela Music <vela@example.invalid>\n"
-        f"_pkgname=vela\n_pkgver={version}\n"
-        "_pkgrel=1\n"
-        "_arch=('x86_64')\n"
-        "pkgname(){\n"
-        f'  echo "$_pkgname-$_pkgver-$_pkgrel-$_arch"\n'
-        "}\n"
+        "pkgname=vela\n"
+        f"pkgver={version}\n"
+        "pkgrel=1\n"
+        "arch=('x86_64')\n"
+        "license=('AGPL-3.0-or-later')\n"
+        "url=\"https://github.com/Fynth/vela\"\n"
+        "depends=('gtk3' 'webkit2gtk-4.1' 'alsa-lib' 'libxdo')\n"
+        "options=('!strip')\n"
         "source(){\n"
         + source_line
         + checksum_line
         + "}\n"
+        "sha256sums=('SKIP')\n"
         "build(){\n"
-        "  cd \"$srcdir/$_pkgname-$_pkgver\"\n"
-        "  install -Dm0755 usr/lib/vela/vela-desktop \"$pkgdir/usr/lib/vela/vela-desktop\"\n"
-        "  install -Dm0644 usr/share/applications/vela-desktop.desktop "
-        "\"$pkgdir/usr/share/applications/vela-desktop.desktop\"\n"
+        '  cd "$srcdir/$pkgname-$pkgver"\n'
+        '  install -Dm0755 usr/lib/vela/vela-desktop "$pkgdir/usr/lib/vela/vela-desktop"\n'
+        '  install -Dm0644 usr/share/applications/vela-desktop.desktop '
+        '"$pkgdir/usr/share/applications/vela-desktop.desktop"\n'
         "}\n"
         "package(){\n"
-        "  cd \"$srcdir/$_pkgname-$_pkgver\"\n"
-        "  install -Dm0644 BUILD.txt \"$pkgdir/usr/share/doc/$_pkgname/BUILD.txt\"\n"
-        "  install -Dm0644 usr/share/licenses/vela/LICENSE \"$pkgdir/usr/share/licenses/$_pkgname/LICENSE\"\n"
+        '  cd "$srcdir/$pkgname-$pkgver"\n'
+        '  install -Dm0644 BUILD.txt "$pkgdir/usr/share/doc/$pkgname/BUILD.txt"\n'
+        '  install -Dm0644 usr/share/licenses/vela/LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"\n'
         "}\n",
         encoding="utf-8",
     )
