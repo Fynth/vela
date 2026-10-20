@@ -1,5 +1,64 @@
 # Verified0.12.0 package and preserved runtime checkpoint
 
+## Current-source TR11 integration matrix — executed2026-10-20
+
+Baseline `e4c425d` on `main`; docs-only diff, no source/Cargo/test/package change.
+Host: Ryzen7 8845HS,16 logical CPUs,14GiB visible RAM, kernel7.2.10-1-cachyos;
+cargo/rustc1.99.0, Python3.14.8, node26.11.1, Playwright1.64.0, Chromium156.0.8078.4,
+Firefox157.0. Every run used an isolated temporary data directory, random loopback
+ports and the suites' own fixture accounts; logins stayed on the real production
+limiter. The frozen0.12.6 runtime (`vela-local-development.service`, MainPID185315,
+0 restarts, health OK) and `data/` were not opened or modified.
+
+| Check | Exact command | Executed result | Artifact |
+| --- | --- | --- | --- |
+| TR11 Rust format | `cargo fmt --all -- --check` | exit0, no diff | `target/checks/tr11/01-fmt.log` |
+| TR11 strict Clippy, host workspace | `cargo clippy --locked --workspace --all-targets -- -D warnings` | exit0;8 crates printed `Checking` (domain/media/core/server/web/scanner/desktop/imports),11.44s | `02-clippy-workspace.log` |
+| TR11 strict Clippy, WASM | `cargo clippy --locked -p vela-web --target wasm32-unknown-unknown -- -D warnings` | exit0; `Checking vela-web` forced re-run2.55s | `03-clippy-wasm.log`, `07-clippy-wasm-fresh.log` |
+| TR11 strict Clippy, native QA | `cargo clippy --locked -p vela-desktop --all-targets --features native-qa -- -D warnings` | exit0; `Checking vela-desktop` forced re-run2.00s | `04-clippy-native-qa.log`, `08-clippy-native-qa-fresh.log` |
+| TR11 workspace tests | `cargo test --locked --workspace --no-fail-fast` | **345 passed,0 failed,3 ignored** in42s (18 real test binaries plus7 doc-test targets that run0 tests) | `05-cargo-test.log` |
+| TR11 pinned WASM build | `VELA_WEB_PROFILE=dev VELA_WASM_BINDGEN=target/tools/wasm-bindgen-0.2.129-x86_64-unknown-linux-musl/wasm-bindgen scripts/build-web.sh` | exit0; CLI `wasm-bindgen 0.2.129` (lock also0.2.129); dev WASM20,070,213 B sha256`3e1f17c03a428e93c5e3092727dcc1e5d8124f495471ed9da5ce1b8c7889ac3f` | `09-build-web-dev.log` |
+| TR11 release asset build | same script with `VELA_WEB_PROFILE=release` | exit0 after a real38.5s compile;3,529,914 B sha256`9d9251092581ff7ea6b8a137203a8fd652800bdcb1cf0a3b68c728061a72371f` | `10-build-web-release.log` |
+| TR11 Chromium suite | `cd tests/browser && npx playwright test --browser=chromium` | **56 passed/1 skipped/0 failed in3.0m** (57 declared: music44, prototype-transfer11, design2) | `target/checks/tr11/browser-chromium.log`, `test-results-chromium/` |
+| TR11 Firefox suite | `cd tests/browser && npx playwright test --browser=firefox` | **56 passed/1 skipped/0 failed in3.4m** | `target/checks/tr11/browser-firefox.log` |
+| TR11 skip identity | `music.spec.mjs:308` `direct public downloadable audio URL imports without console access` | the only skip in both engines; `test.skip(!process.env.VELA_LIVE_IMPORT_TEST)` — opt-in live Internet import, not a product failure | both suite logs |
+| TR11 visual/responsive review | `node target/checks/tr11/capture_visual.js {chromium,firefox}` on real isolated server+`dist` | 7 widths320/390/768/1024/1284/1440/1728×2 engines: document/body overflow0, one central scroller`#main-scroll`,1 audio element, player120px(mobile)/88px(desktop), topbar63/75, content scroller ends at player top, topbar visible,0 page errors;28 PNGs captured (2 opened and inspected:320 Home,1284 Library) | `target/checks/tr11/visual-{chromium,firefox}/{home,library}-*.png`, `visual-review.json` |
+| TR11 band reserve (in-suite TR09 evidence) | TR09 test assertions executed in both engines; retained JSON is from the later Firefox run | reserve190=120 player+70 nav at320/390/671/760;88 on761/900/1024/1284/1440/1728; scroller bottom=player top at all10 viewports; nav0 height when sidebar shows; audio1 | `target/checks/prototype-transfer-web/tr09-composition-evidence.json` |
+| TR11 startup/first response (release) | `VELA_SERVER_BIN=target/release/vela-server python3 target/checks/tr11/measure_startup.py target/checks/tr11/startup-release.json` | 3 fresh-DB runs: spawn→`/health`200 **21.89–28.57ms**, setup15.0ms, first`/api/me`0.35–0.41ms, first`/api/tracks`0.38–0.45ms, 2s PCM upload2.87ms, warm restart21.4–21.9ms, RSS12.8MiB→34.3MiB, SIGTERM3.1–7.1ms exit0, cookie survived restart | `startup-release.json` |
+| TR11 startup/first response (debug) | same script on `target/debug/vela-server` | 3 runs: spawn→health330–368ms, setup309ms, `/api/me`0.68–1.25ms, `/api/tracks`0.89–1.81ms, RSS25.6→49.9MiB, warm312–324ms | `startup.json` |
+| TR11 HTTP read benchmark | `python3 scripts/benchmark_http.py --threads8 --duration5 --tracks20 --output target/checks/tr11/http-bench-release.json` | release bin sha256`346b8ea2…` (rebuilt from this source,53.9s): `/health`44,201 req/5s p50 0.874/p95 1.379/p99 1.634ms; `/api/me`43,892 p50 0.882; `/api/tracks?limit=50`36,162 p50 1.069; `/api/search?q=Bench`29,751 p50 1.334; `/api/albums`41,545 p50 0.929; **0 errors**, SIGTERM exit0, temp tree removed | `http-bench-release.json`, `http-bench-release.log` |
+| TR11 browser navigation timing | `node target/checks/tr11/browser-timing.js` | Chromium156: TTFB1.3–1.8ms, FCP120/120/164ms, app-ready152/161/191ms, WASM transfer+compile4.6–7.1ms of3,529,914 B, DOMContentLoaded57.3–98ms; route click→content Library56ms, Albums42ms, Home34ms;1 audio element, overflow0 | `browser-timing.json` |
+| TR11 native X11 | `python3 scripts/verify_native_client.py --backend x11 --server target/debug/vela-server --test-peer --test-session --evidence target/checks/tr11-native` | **260 checks PASS**,15 complete PNGs (1280×840,1440×900,1728×900,640×700), **1 output stream on the owned `vela_native_test_null` sink, zero HTML media elements**,0 temporary originals after exit, 3 TLS peer connections, saved session resumed without password and cleared after sign-out, v2 BLAKE3 offline copy2,646,044 B | `target/checks/tr11-native/report.json` |
+| TR11 native Wayland (window-only) | same wrapper `--backend wayland --window-only --evidence target/checks/tr11-native-wayland` | **5 checks PASS**,1 PNG **2556×2060** from viewport1278×1030 DPR2, normally tiled with no resize,0 temporary originals; backend=`wayland` | `target/checks/tr11-native-wayland/report.json` |
+
+Named negative permission/race tests executed inside the above suites (not weakened,
+no fabricated grants):
+
+| Area | Suite and named tests | Result |
+| --- | --- | --- |
+| Revoked/expired session | browser `AUTH01 real revoked session stops the source and clears private playback UI`; Rust `auth::tests::setup_is_atomic_sessions_revocable_and_credentials_private`, `tests/api.rs authentication_csrf_private_catalog_and_artwork_are_enforced` | PASS both engines; api.rs33/33, core26/26 |
+| Public metadata vs private audio | browser `PN01 explicit publication separates private playback, metadata, streaming and revocation`, `PN02 public preview rejects private origins…`; Rust `global_search_finds_owned_music_and_granted_metadata_without_audio_rights`, `publication_tests::publication_http_enforces_explicit_rights_private_ownership_and_every_media_grant` | PASS both engines; api33/33 |
+| Playlist collaborator without media | browser first-run scenario (listener sees `Metadata only`, no `Play playlist`, share page has no `#vela-audio`, revoke removes it); Rust `viewer_cannot_edit_manage_access_or_play_and_can_leave`, `collaboration_conflicts_idempotency_reordering_sharing_and_revocation`, `playlist_rename_and_delete_are_owner_cas_idempotent_and_revoke_metadata` | PASS both engines; api33/33 |
+| History/privacy consent | browser `G07 private history measures actual playback only after account and device consent, exports and erases`; Rust `private_listening_consent_idempotence_export_and_erasure_use_real_http`, `personal_mixes_use_only_current_consented_history_and_owned_feedback`, core`revocation_still_deletes_history_and_fails_late_writes_and_exports_closed`, `privacy_cas_is_atomic_and_clear_invalidates_inflight_updates`, media`concurrent_privacy_changes_never_mix_history_and_consent_snapshots`, `disabled_history_has_no_effect_and_performs_no_history_queries` | PASS both engines; core26+7, media63 |
+| Stale replies/obsolete reads | browser `late older library responses…`, `pending album responses…`, `job filters ignore late replies…`, `global search debounces and discards obsolete queries…`, `late play rejections…`, `NP02 held genuine favorite replies…`, `RES03`, `NET02`, `PC02`, `TR09`/`TR04a` view races | PASS both engines |
+| Account change/logout | browser `pending private responses are discarded when another account signs in`, `cancelled metadata responses stay closed across account changes`, `newer filter requests win and private suggestions clear across account changes`, `private search replies cannot populate another account after logout`, `private job replies cannot reappear after logout and another account signs in` | PASS both engines |
+
+Corrections kept visible: the first WASM/native-qa Clippy invocations finished from
+cargo cache in0.4s without re-checking a crate, so both were re-run after touching only
+the crate-root mtimes (`git status` stayed empty and is empty now); the first HTTP
+benchmark used the stale `target/release/vela-server` sha256`0fef9e58…` (2026-10-19
+23:37), which was rebuilt from this source before the recorded run. Superseded logs
+`03-clippy-wasm.log`, `04-clippy-native-qa.log`, `http-bench.json/.log` are retained,
+not quoted as final.
+
+TR11 verdict: **PASS for the executed source/browser/native-linux/measurement scope.**
+NOT_RUN: physical speaker/hardware audio output (all audio was an owned null sink or
+browser-decoded), screen reader/Orca, WebKit/Safari, Android/iOS, Windows/macOS,
+full Wayland resize/peer/offline runs, Internet/public-CA federation, Docker/other OS,
+packaged-runtime rerun and real-device touch/keyboard hardware. Native Wayland remains a
+window-only subset; the measured numbers are one host, one workload and not capacity
+claims.
+
 ## Current-source interaction/Hyprland repair — executed2026-10-19
 
 Baseline91867f2, workspace0.12.6; source/debug evidence, not a runtime/package upgrade.

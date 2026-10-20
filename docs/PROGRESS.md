@@ -1,5 +1,86 @@
 # Verified progress
 
+## TR11 integration/regression matrix2026-10-20 — executed, no source change
+
+Baseline `e4c425d` on `main`; the only diff from this task is this section and the
+TR11 section/row in [QA_EVIDENCE](QA_EVIDENCE.md). No source, Cargo/lock, test, asset,
+migration, package or runtime change, and no commit were made. Host: Ryzen7
+8845HS,16 logical CPUs,14GiB visible RAM, kernel7.2.10-1-cachyos, cargo/rustc1.99.0,
+Python3.14.8, node26.11.1, Playwright1.64.0, Chromium156.0.8078.4, Firefox157.0.
+Every run used isolated temporary data, random loopback ports and each suite's own
+fixture accounts on the real login limiter. The frozen0.12.6 runtime
+(`vela-local-development.service`, MainPID185315,0 restarts, `/health` ok) and the
+original `data/` were not opened or modified.
+
+Executed results, all under ignored `target/checks/tr11/`:
+
+- **Rust** — `cargo fmt --all -- --check` exit0. Strict Clippy exit0 for
+  `--workspace --all-targets`, for `-p vela-web --target wasm32-unknown-unknown` and
+  for `-p vela-desktop --all-targets --features native-qa` (the last two re-run after
+  a cache-only0.4s pass so the crates were really checked: `07-clippy-wasm-fresh.log`,
+  `08-clippy-native-qa-fresh.log`). `cargo test --locked --workspace --no-fail-fast`
+  gave **345 passed,0 failed,3 ignored** in42s: core33 (26 lib+7 `tests/jobs.rs`),
+  desktop113/3 ignored, domain1, imports20, media98 (63 lib+catalog6+filters8+ingest8+
+  metadata4+publications9), scanner10 (2+`tests/scanning.rs`8), server40 (7 lib+
+  `tests/api.rs`33), web30, doc-tests0. The3 ignored are the opt-in owned-Pulse-null-sink
+  audio test, the private-D-Bus MPRIS test and an explicit offline measurement.
+- **WASM/asset build** — pinned CLI `wasm-bindgen 0.2.129`
+  (`target/tools/wasm-bindgen-0.2.129-x86_64-unknown-linux-musl/`, same version as
+  `Cargo.lock`). `VELA_WEB_PROFILE=dev scripts/build-web.sh` produced
+  20,070,213 B dev WASM (sha256`3e1f17c0…`); `VELA_WEB_PROFILE=release` compiled for
+  real38.5s and produced3,529,914 B (sha256`9d925109…`), which is what the browser and
+  native runs loaded.
+- **Browser** — full Chromium **56 passed/1 skipped/0 failed in3.0m**, full Firefox
+  **56 passed/1 skipped/0 failed in3.4m** (57 declared: music44, prototype-transfer11,
+  design2), against real isolated Rust servers and the current `dist`. The single skip
+  is `music.spec.mjs:308 direct public downloadable audio URL imports…`, gated by
+  `test.skip(!process.env.VELA_LIVE_IMPORT_TEST)`; no other test is skipped and none
+  was weakened. Security/player/history/publication/scale/sleep-timer regressions kept.
+- **Visual review** — read-only `target/checks/tr11/capture_visual.js` on real isolated
+  servers measured320/390/768/1024/1284/1440/1728 in both engines: document and body
+  overflow0, exactly one central scroller`#main-scroll`,1 audio element, player band
+  120px(mobile)/88px(desktop), topbar63/75, content scroller ending exactly at the
+  player top, mobile nav only at≤760 and never below the player, sidebar offset applied
+  once and0 page errors.28 PNGs were captured; the320 Home and1284 Library images were
+  opened and inspected (mobile Home at320 shows the mini-player+nav reserve; desktop1284
+  Library shows216/75/88). The suites' own TR09 evidence records
+  the reserve arithmetic:190=120+70 at320/390/671/760 and88 from761 up, scroller bottom
+  = player top at all10 viewports.
+- **Measured performance/resources** — `measure_startup.py` (bounded, private temp data)
+  on the release binary: spawn→`/health` **21.89–28.57ms**, setup15.0ms, first
+  `/api/me`0.35–0.41ms, first `/api/tracks`0.38–0.45ms, warm restart21.4–21.9ms,
+  RSS12.8MiB→34.3MiB, SIGTERM3.1–7.1ms exit0, pre-restart cookie still valid; the debug
+  binary measured330–368ms cold and25.6→49.9MiB RSS. `scripts/benchmark_http.py
+  --threads8 --duration5 --tracks20` against a release server rebuilt from this source
+  (sha256`346b8ea2…`): `/health`44,201 requests/5s p50 0.874 p95 1.379 p99 1.634ms,
+  `/api/me`43,892 p50 0.882, `/api/tracks?limit=50`36,162 p50 1.069,
+  `/api/search?q=Bench`29,751 p50 1.334, `/api/albums`41,545 p50 0.929, 0 errors.
+  Chromium navigation timing: TTFB1.3–1.8ms, FCP120–164ms, app ready152–191ms,
+  WASM fetch+compile4.6–7.1ms, route click→content56/42/34ms for Library/Albums/Home.
+  These are single-host, single-client lower bounds, not capacity claims.
+- **Native** — X11 wrapper (`--test-peer --test-session`, current debug server):
+  **260 checks PASS**,15 PNGs (1280×840/1440×900/1728×900/640×700), **one AudioEngine
+  with1 output stream on the owned `vela_native_test_null` sink and zero HTML media
+  elements**,0 temporary originals after exit,3 TLS peer connections, Secret-Service
+  session resumed without password and cleared after sign-out, v2 BLAKE3 offline copy.
+  Wayland `--window-only`: **5 checks PASS**,1 PNG2556×2060 (viewport1278×1030 DPR2),
+  normally tiled without resize requests,0 temporary originals. Wayland stays a
+  window-only subset; no full Wayland resize/peer/offline run was performed.
+
+Corrections retained, not hidden: the first WASM/native-qa Clippy invocations were
+cargo-cache hits that checked no crate, and the first HTTP benchmark used a stale
+release server artifact; both were re-run properly and the superseded logs remain. Two
+harness runs of my own read-only scripts were discarded before the recorded ones (a
+wrong Home heading selector produced one15s timeout, and the first visual pass reported
+raw scroller counts including the sidebar). Git stays clean apart from these two
+documentation files.
+
+Honest gaps: physical/hardware audio output, screen reader/Orca, WebKit/Safari,
+Android/iOS, Windows/macOS, Docker/other OS, Internet/public-CA federation, full
+Wayland, packaged-runtime rerun, real touch/keyboard hardware and Better Design VALID
+receipts are **NOT_RUN**. Next: TR12 package/asset verification, source-versus-artifact
+ledger and the coherent documentation commit.
+
 ## Approved prototype transfer specification 2026-10-19 — documentation only
 
 Prepared the English [reference transfer package](PLANS/2026-10-19/PROTOTYPE_TRANSFER/README.md)
