@@ -1,5 +1,16 @@
 # Verified progress
 
+## TR12 release ledger / asset verification — 2026-10-20
+
+Created [RELEASE_LEDGER_2026-10-20.md](RELEASE_LEDGER_2026-10-20.md). Package source
+`4ceafdc` and HEAD `ba0209d` differ only in docs, so the launch-verified archive
+(SHA256 `58da18db…`, BUILD `4ceafdc`) matches the shipped source behavior. Verified
+byte-identical `dist/style.css`/`dist/player.js`, release WASM
+`9d925109…`, both Manrope subsets/brand PNG hashes, and the package launch result.
+The frozen `0.12.6` runtime (PID185315, 0 restarts, health ok) and `data/` were not
+modified; the previous `7fe1ca0` desktop tar is preserved under `previous/`. Handoff
+lists every remaining platform/hardware gap and the version-collision caveat.
+
 ## TR11 integration/regression matrix2026-10-20 — executed, no source change
 
 Baseline `e4c425d` on `main`; the only diff from this task is this section and the
