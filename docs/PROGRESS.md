@@ -69,7 +69,12 @@ workspace clippy, workspace tests (25 suites ok), server API 33/33, media suites
 full Chromium 56/1/0, full Firefox 56/1/0. Migration 0013 was applied to an
 isolated copy of the live data directory (schema 12->13, `quick_check ok`, 0 FK
 violations, all three indexes present); the live runtime and `data/` were not
-touched. Remaining known cost: 8-client concurrency is bounded by the 4-connection
+touched. Write amplification was measured as FIX-07 requires: inserting 2,000 metadata
+tracks into the 100k fixture took 5.1ms with the three new indexes and 4.0ms without
+them (+1.1ms), and the database grew 4.5MiB (202.4->206.9MiB). Only read-path
+indexes were added, so the write cost is one extra B-tree per insert.
+
+Remaining known cost: 8-client concurrency is bounded by the 4-connection
 SQLite pool, so per-endpoint RPS stays a client-bound lower bound; no capacity
 claim is made.
 

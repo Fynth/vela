@@ -4,7 +4,7 @@
 
 | Check | Paths | Commit | Evidence | Status | NOT_RUN |
 | --- | --- | --- | --- | --- | --- |
-| 100k stats/search cost | crates/media/src/{lib,search}.rs; migrations/0013_stats_covering_indexes.sql | `87b7acd` | stats p50 531->119ms, search p50 138->121ms (8 clients)/20ms (1 client) on isolated 100k fixture; covering indexes, parallel groups, two-phase search; identity equality proven; workspace25 suites, API33/33, Chromium56/1/0, Firefox56/1/0; migration12->13 on isolated live copy (quick_check ok) | PASS measured + optimized | Capacity/concurrency limits, other hardware profiles, live upgrade NOT_RUN | media/server |
+| 100k stats/search cost | crates/media/src/{lib,search}.rs; migrations/0013_stats_covering_indexes.sql | `87b7acd` | stats p50 531->119ms, search p50 138->121ms (8 clients)/20ms (1 client) on isolated 100k fixture; covering indexes, parallel groups, two-phase search; identity equality proven; write cost +1.1ms/2000 inserts, +4.5MiB/100k; workspace25 suites, API33/33, Chromium56/1/0, Firefox56/1/0; migration12->13 on isolated live copy (quick_check ok) | PASS measured + optimized | Capacity/concurrency limits, other hardware profiles, live upgrade NOT_RUN | media/server |
 
 ## TR12 release ledger
 
