@@ -1,6 +1,10 @@
 # Verified0.12.0 package and preserved runtime checkpoint
 
-| TR12 release ledger | docs/RELEASE_LEDGER_2026-10-20.md; desktop tar; dist assets | `58da18db…` BUILD `4ceafdc` | Source-vs-artifact docs-only diff; package launch PASS; dist CSS/player byte-identical, release WASM and font/brand hashes; frozen runtime/data untouched; preserved `7fe1ca0` tar | PASS local artifact ledger | Public deploy/push, other platforms, hardware audio/SR/WebKit/full Wayland NOT_RUN | release |
+## TR12 release ledger
+
+| Check | Paths | Artifact | Evidence | Status | NOT_RUN |
+| --- | --- | --- | --- | --- | --- |
+| Release ledger | docs/RELEASE_LEDGER_2026-10-20.md; desktop tar; dist assets | SHA256 `58da18db…`, BUILD `4ceafdc` | Source-vs-artifact docs-only diff; package launch PASS; dist CSS/player byte-identical; release WASM and font/brand hashes; frozen runtime/data untouched; preserved `7fe1ca0` tar | PASS local artifact ledger | Public deploy/push, other platforms, hardware audio/SR/WebKit/full Wayland |
 
 ## Current-source TR11 integration matrix — executed2026-10-20
 
