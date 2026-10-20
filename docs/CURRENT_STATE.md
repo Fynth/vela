@@ -65,6 +65,11 @@ changed for this page.
 
 ## 2. Deployed runtime — frozen0.12.6, schema12
 
+Source now migrates to schema13 (`migrations/0013_stats_covering_indexes.sql`,
+AUD-09 read-path indexes). The deployed runtime below is still schema12 and is not
+upgraded by that source change; the migration was verified on an isolated copy of
+the live data directory only.
+
 - `target/runtime/vela-0.12.6` (`BUILD.txt`: version0.12.6, commit `7fe1ca0`,
   `schema_version=12`) serves the original data directory. A new `cargo build` does
   **not** replace or upgrade it; only the explicit installer/upgrade path does.
