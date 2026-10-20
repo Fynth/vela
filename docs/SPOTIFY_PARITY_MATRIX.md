@@ -16,7 +16,7 @@ PROGRESS/QA_EVIDENCE. Existing dated sections below retain their original eviden
 | Feature / priority | Status | Implementation | Acceptance / tests | Platform and limits |
 | --- | --- | --- | --- | --- |
 | Readable original Vela contrast and daily listening layout P0 | VERIFIED for scoped fixture states | apps/web/style.css,src/main.rs; apps/desktop/style.css,src/ui.rs | DESIGN01; selected rendered contrast≥4.5,320/390/1440/1728 web themes, actual playback/navigation, nonoverlapping sidebar; native real-window library/queue/playlists/transport fixture | Web + Linux X11/WebKitGTK only; exact logs in design review/PROGRESS, no global accessibility or product-parity claim |
-| Context menus, persistent right panel, authorized native artwork P1 | PARTIAL / NOT_STARTED per feature | Existing Now Playing modal/root player retained; native covers remain placeholders | Separate future interaction/artwork tests required | No new audio engine, handoff, progressive prefetch or mobile validation in this design pass |
+| Context menus, queue drawer, authorized native artwork P1 | VERIFIED for the delivered slice | apps/web/src/{main,queue_drawer,home_editorial}.rs; apps/desktop/src/{ui,artwork}.rs | TR07/TR07b/TR07c (registry, right-click, Shift+F10, ContextMenu key, phone sheet, searchable picker with receipt/Undo), TR10 native artwork/covers | A persistent right Now Playing panel, progressive prefetch, handoff and cross-device parity remain open; Linux/WebKitGTK + Chromium/Firefox only |
 
 Reconciled2026-10-19 (docs-only): this file is a dated parity ledger, not the current
 state. Current source/deployed/design split is in [CURRENT_STATE.md](CURRENT_STATE.md).
