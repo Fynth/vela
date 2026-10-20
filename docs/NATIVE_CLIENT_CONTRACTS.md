@@ -8,6 +8,11 @@ AUD-01/02/04/11 are fixed in source `3094754` (real two-process Secret Service Q
 AUD-03/07/08/12 fixed in source `e225b63` (basic native offline QA passed); AUD-05/06 remain open; see [CURRENT_STATE.md](CURRENT_STATE.md).
 Evidence is listed at the end; see ADR0017 for the decision record.
 
+TR10 (2026-10-20, source `47fb518`/`d314a2c`): the packaged stylesheet now self-hosts the
+approved Manrope typography and the real X11 native QA verifies fonts, frameless window
+controls, app scale80–150 and one `AudioEngine` output authority. The portable package rebuild is pending at this checkpoint, so the packaged slice
+described below remains0.12.6 evidence only.
+
 ## Ownership
 
 Source extension2026-10-19: `Ui.wants_play` is root requested intent, independent of
@@ -127,7 +132,10 @@ metadata is never treated as a current grant, and there is no background refresh
 - `ui.rs`/`style.css`: real loading/empty/error/preparing/cancel/retry states,
   duplicate occurrence identity, disabled-state explanations, responsive
   1280×840 and640×700 layouts, light/dark, keyboard focus and reduced motion.
-  Sign-out clears catalog/queue/player and stops native audio.
+  Sign-out clears catalog/queue/player and stops native audio. The top of
+  `style.css` embeds the approved Manrope Latin/Cyrillic subsets as data-URI
+  `@font-face` rules (TR10, below); no font is fetched, installed or served from
+  an asset protocol.
 
 ## Explicit non-goals / limitations
 
@@ -142,6 +150,45 @@ cross-server download or automatic cache refresh is claimed. It sends no
 native listening events. Only Linux x86_64 is built/tested on this host; Windows,
 macOS, Android and iOS remain separate targets. Hardware output, screen readers and
 physical media keys are not certified.
+
+## Self-hosted Manrope typography (TR10)
+
+`apps/desktop/style.css` begins with two `@font-face` rules that embed the approved
+`apps/web/assets/fonts/manrope-latin.woff2` (23,056 bytes) and
+`manrope-cyrillic.woff2` (11,820 bytes) subsets (SIL OFL 1.1; no new font source,
+license at `apps/web/assets/fonts/OFL.txt`) as `data:font/woff2;base64` URIs. Each
+face declares `font-weight:200 800`, `font-display:swap` and its own `unicode-range`,
+so the variable weight axis and Cyrillic coverage are preserved with no font CDN,
+network request, asset protocol, extra package file or user-installed font. `:root`
+now starts with `Manrope` followed by the unchanged
+`Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`
+fallbacks. The stylesheet grows from51,263 to98,729 bytes; the 34,876 raw font bytes
+become the embedded base64 `include_str!` compiles into the binary.
+
+The real X11 window QA (`scripts/verify_native_client.py --test-peer`, evidence
+`target/checks/tr10-native-final/`) passed260 checks and15 screenshots, including
+`native-typography-dark.png` at1280×840 = DOM×DPR. TR10 typography checks read the
+real renderer, not a stylesheet claim: computed `:root` and `.native-app`
+`font-family` start with `Manrope` and keep the fallbacks; exactly two `Manrope`
+`FontFace` entries report `status:loaded` with `weight:200 800`; exactly two
+`@font-face` rules each carry one `data:font/woff2;base64` source and a distinct
+Latin/Cyrillic `unicode-range`; `document.fonts.load`/`check` succeed for both
+subsets; and a24-character Cyrillic sample (`Привет, мир! Ёё № «Vela»`) renders in
+the inherited Manrope stack with Manrope metrics (199.83px vs207.72px for
+`sans-serif`), so the loaded face is actually used instead of silently falling back.
+`performance` records zero network font requests. Font loading is real: nothing in
+the QA installs a font, injects a face or rewrites the family.
+
+The same run verifies the frameless window chrome (decorations=false, exactly one
+accessible minimize/maximize/close group with44px hit boxes and a687px drag region),
+the validated app scale on the real stepper (100%→105%→100%→80%→150%→100%: both
+ends disable and clamp, one `zoom`/`--app-zoom` value with no stacked transform, no
+viewport overflow, same native source and paused position), and exactly one
+`AudioEngine` output authority (one `.native-player` band, one
+`[data-audio-generation]` surface, zero `audio`/`video`/`iframe` elements, and
+exactly one process-matched native output stream on the QA-owned
+`vela_native_test_null` Pulse/PipeWire sink). Wayland remains the prior window-only
+evidence; no full Wayland run was made for TR10.
 
 ## Portable package
 
@@ -159,6 +206,19 @@ integrity sweep and the folder/filter/move controls. It includes saved
 peers, cached browse-only metadata and preview/per-peer search pagination. Evidence:
 `target/checks/desktop-0.12.6-verify.log`,
 `desktop-package-screens/vela-desktop-0.12.6-package-launch.png`.
+
+TR10 packaging was attempted and refused honestly: with the TR10 changes uncommitted,
+`scripts/package-desktop-linux.sh` exits1 before any build with
+`Commit the verified checkpoint before packaging the desktop binary.` No archive was
+created, replaced or re-verified, so the evidence above still describes source
+`7fe1ca0` and does **not** contain the embedded Manrope faces.
+`scripts/verify_desktop_package.py --launch` was therefore NOT_RUN for TR10. The
+would-be artifact path is
+`target/desktop-releases/vela-desktop-0.12.6-linux-x86_64-unknown-linux-gnu.tar.gz`;
+it still holds the prior SHA256
+`7abe3982073470d36e4680b56845aa6858a0c21b3c86f2007862ba9ba16d6063`. Packaging and
+launch verification stay blocked until the verified checkpoint is committed, which is
+outside this increment.
 
 ## Reusable complete-file media cache
 
