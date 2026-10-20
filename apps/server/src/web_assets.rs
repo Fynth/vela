@@ -145,8 +145,17 @@ fn pinned_wasm_bindgen(root: &Path) -> Option<PathBuf> {
     for entry in entries.flatten() {
         let path = entry.path();
         let name = path.file_name()?.to_string_lossy().to_string();
-        if name.starts_with("wasm-bindgen-") && !name.ends_with(".tar.gz") && path.is_file() {
+        if !name.starts_with("wasm-bindgen-") || name.ends_with(".tar.gz") {
+            continue;
+        }
+        // The pinned tool is unpacked as a directory holding the executable.
+        if path.is_file() {
             found = Some(path);
+        } else if path.is_dir() {
+            let binary = path.join("wasm-bindgen");
+            if binary.is_file() {
+                found = Some(binary);
+            }
         }
     }
     found
