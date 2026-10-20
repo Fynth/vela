@@ -80,7 +80,7 @@ jobs:
           fail_on_unmatched_files: true
           generate_release_notes: true
           body: |
-            Linux x86_64 packages require GTK3, WebKitGTK 4.1, ALSA and libxdo on Ubuntu 24.04+ or current Arch. The AppImage packages the application and requires these system libraries.
+            Linux deb/tar/AppImage target Ubuntu 24.04+ with GTK3, WebKitGTK 4.1, ALSA, libudev and libxdo.so.3. The AppImage uses these host libraries. Current Arch users should use vela-music-bin, which carries its private compatible libxdo library.
             Windows requires the WebView2 runtime. Executables have no Authenticode signature.
             Android arm64 APK is a preview; device audio/background behavior is not certified. A filename ending in -preview.apk uses a temporary CI signing key and may require reinstalling between builds. Stable APK signing uses the repository Android keystore secrets.
             AUR installation: yay -S vela-music-bin (available after the separate AUR publish job succeeds).

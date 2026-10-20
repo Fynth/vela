@@ -72,13 +72,7 @@ class ReleasePackagesTest(unittest.TestCase):
             # Use the real payload layout; only the executable is a test fixture.
             binary = root / 'binary'
             binary.write_bytes(b'#!/bin/sh\nexit 0\n')
-            original_copy = release_packages.shutil.copy2
-            def copy(source, destination, *args, **kwargs):
-                if str(source).endswith('target/release/vela-desktop'):
-                    source = binary
-                return original_copy(source, destination, *args, **kwargs)
-            with patch.object(release_packages.shutil, 'copy2', side_effect=copy):
-                stage = release_packages.desktop_payload('1.2.3', 'a' * 40)
+            stage = release_packages.desktop_payload('1.2.3', 'a' * 40, binary)
             self.addCleanup(release_packages.shutil.rmtree, stage)
             with patch.dict(os.environ, {'VELA_RELEASE_BASE_URL': 'https://github.com/Fynth/vela/releases/download/v1.2.3'}), patch.object(release_packages, 'bundle_xdo'):
                 archive = release_packages.build_aur(stage, '1.2.3', 'a' * 40, root)

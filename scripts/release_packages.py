@@ -62,7 +62,7 @@ def tool_available(name: str) -> bool:
     return shutil.which(name) is not None
 
 
-def desktop_payload(version: str, commit: str) -> Path:
+def desktop_payload(version: str, commit: str, binary: Path | None = None) -> Path:
     """Lays out the files every Linux package carries."""
     stage = Path(tempfile.mkdtemp(prefix="vela-pkg-"))
     (stage / "usr" / "bin").mkdir(parents=True)
@@ -73,7 +73,7 @@ def desktop_payload(version: str, commit: str) -> Path:
     (stage / "usr" / "share" / "doc" / "vela-desktop").mkdir(parents=True)
     (stage / "usr" / "share" / "licenses" / "vela").mkdir(parents=True)
 
-    binary = REPO_ROOT / "target" / "release" / "vela-desktop"
+    binary = binary or REPO_ROOT / "target" / "release" / "vela-desktop"
     if not binary.is_file():
         raise SystemExit("the desktop binary is missing; build it before packaging")
     shutil.copy2(binary, stage / "usr" / "lib" / "vela" / "vela-desktop")

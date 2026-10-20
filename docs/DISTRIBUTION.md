@@ -1,4 +1,4 @@
-# Distribution (0.12.7)
+# Distribution (0.12.8)
 
 The release workflow runs on main pushes, pull requests, version tags and manual
 requests. Its reusable quality and packages workflows build with the tracked lock

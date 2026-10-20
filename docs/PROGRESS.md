@@ -1,6 +1,11 @@
 # Verified progress
 
-## Distribution CI/CD0.12.7 — 2026-10-20
+## Distribution CI/CD0.12.8 — 2026-10-20
+
+The v0.12.7 tag is preserved: its release gate rejected a packaging unit test
+that accidentally depended on a pre-existing target/release desktop executable.
+The test now passes its own real fixture file to the payload helper; v0.12.8 is
+the next candidate, without rewriting any prior tag.
 
 CI follow-up: Firefox now has real PulseAudio output, exposing a genuine10s
 SQLite writer wait from GET preferences/devices. These reads now use one deferred
