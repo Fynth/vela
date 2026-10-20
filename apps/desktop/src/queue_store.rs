@@ -38,9 +38,10 @@ impl QueueSnapshot {
         repeat: &str,
         context: &str,
     ) -> Result<Self, String> {
+        let canonical = crate::client::canonical_origin(origin)?;
         let snapshot = Self {
             version: VERSION,
-            origin: origin.to_owned(),
+            origin: canonical.as_str().to_owned(),
             account_id: account_id.to_owned(),
             queue,
             current,
@@ -113,7 +114,8 @@ pub fn load(origin: &str, account_id: &str) -> Result<Option<QueueSnapshot>, Str
     let Ok(snapshot) = serde_json::from_slice::<QueueSnapshot>(&bytes) else {
         return Ok(None);
     };
-    if snapshot.origin != origin
+    let canonical = crate::client::canonical_origin(origin)?;
+    if snapshot.origin != canonical.as_str()
         || snapshot.account_id != account_id
         || snapshot.validate().is_err()
     {
@@ -198,6 +200,21 @@ mod tests {
         let encoded = serde_json::to_vec(&snapshot).unwrap();
         let decoded: QueueSnapshot = serde_json::from_slice(&encoded).unwrap();
         assert_eq!(decoded, snapshot);
+        assert_eq!(
+            QueueSnapshot::new(
+                "https://a.example.org",
+                "10000000-0000-4000-8000-000000000001",
+                vec![track(id)],
+                0,
+                7000,
+                true,
+                "all",
+                "Your library"
+            )
+            .unwrap()
+            .origin,
+            "https://a.example.org/"
+        );
         assert!(
             QueueSnapshot::new(
                 "https://a.example.org/",
