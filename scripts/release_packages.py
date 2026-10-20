@@ -24,6 +24,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -184,12 +185,37 @@ def build_appimage(stage: Path, version: str, commit: str, output: Path) -> Path
     return package
 
 
+def bundle_xdo(stage: Path) -> None:
+    """Keep Ubuntu's xdo ABI private; current Arch ships a different SONAME."""
+    library_dir = stage / "usr/lib/vela"
+    linked = run(["ldd", str(library_dir / "vela-desktop")]).stdout
+    match = re.search(r"\b(libxdo\.so\.\d+) => (/\S+)", linked)
+    if match is None:
+        raise SystemExit("could not resolve the desktop libxdo dependency")
+    shutil.copy2(Path(match[2]).resolve(), library_dir / match[1])
+    copyright_file = Path("/usr/share/doc/libxdo3/copyright")
+    if not copyright_file.is_file():
+        raise SystemExit("missing bundled libxdo copyright notice")
+    notices = stage / "usr/share/licenses/vela"
+    shutil.copy2(copyright_file, notices / "libxdo-COPYRIGHT")
+    launcher = stage / "usr/bin/vela-desktop"
+    launcher.unlink()
+    launcher.write_text(
+        '#!/bin/sh\n'
+        'vela_lib="$(CDPATH= cd -- "$(dirname -- "$0")/../lib/vela" && pwd)"\n'
+        'export LD_LIBRARY_PATH="$vela_lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"\n'
+        'exec "$vela_lib/vela-desktop" "$@"\n', encoding="utf-8"
+    )
+    launcher.chmod(0o755)
+
+
 def build_aur(stage: Path, version: str, commit: str, output: Path) -> Path:
     """Binary AUR package with ordinary makepkg arrays and a complete package()."""
     aur_dir = output / "aur"
     aur_dir.mkdir(parents=True, exist_ok=True)
     source_name = f"vela-music-bin-{version}-x86_64.tar.gz"
     source = output / source_name
+    bundle_xdo(stage)
     with tarfile.open(source, "w:gz") as bundle:
         bundle.add(stage / "usr", arcname="usr")
     base_url = os.environ.get("VELA_RELEASE_BASE_URL", "").rstrip("/")
@@ -204,7 +230,7 @@ def build_aur(stage: Path, version: str, commit: str, output: Path) -> Path:
         "arch=('x86_64')\n"
         "url='https://github.com/Fynth/vela'\n"
         "license=('AGPL-3.0-or-later')\n"
-        "depends=('glibc>=2.39' 'gtk3' 'webkit2gtk-4.1' 'alsa-lib' 'libxdo' 'systemd-libs')\n"
+        "depends=('glibc>=2.39' 'gtk3' 'webkit2gtk-4.1' 'alsa-lib' 'libx11' 'libxtst' 'libxinerama' 'systemd-libs')\n"
         "optdepends=('libsecret: remember a session through Secret Service')\n"
         "options=('!strip' '!debug')\n"
         f"source=('{source_url}')\n"

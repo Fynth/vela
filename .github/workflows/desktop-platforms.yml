@@ -71,13 +71,16 @@ jobs:
           path: /tmp/vela-artifacts
       - name: Build package and generate .SRCINFO as an unprivileged user
         run: |
-          pacman -Syu --noconfirm --needed gtk3 webkit2gtk-4.1 alsa-lib libxdo systemd-libs
+          pacman -Syu --noconfirm --needed gtk3 webkit2gtk-4.1 alsa-lib libx11 libxtst libxinerama systemd-libs
           useradd -m builder
           mkdir -p /tmp/vela-aur
           cp /tmp/vela-artifacts/aur/PKGBUILD /tmp/vela-aur/
           cp /tmp/vela-artifacts/vela-music-bin-*.tar.gz /tmp/vela-aur/
           chown -R builder:builder /tmp/vela-aur
           su builder -c 'cd /tmp/vela-aur && makepkg --printsrcinfo > .SRCINFO && makepkg --noconfirm'
+          /tmp/vela-aur/pkg/vela-music-bin/usr/bin/vela-desktop --version
+          LD_LIBRARY_PATH=/tmp/vela-aur/pkg/vela-music-bin/usr/lib/vela ldd /tmp/vela-aur/pkg/vela-music-bin/usr/lib/vela/vela-desktop > /tmp/vela-aur/linked-libraries.txt
+          if grep 'not found' /tmp/vela-aur/linked-libraries.txt; then exit 1; fi
           test -s /tmp/vela-aur/.SRCINFO
           bsdtar -tf /tmp/vela-aur/*.pkg.tar.zst | grep -x 'usr/bin/vela-desktop'
       - uses: actions/upload-artifact@v4

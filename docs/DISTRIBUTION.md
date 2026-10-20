@@ -13,7 +13,7 @@ commit named by every report. There is no deployment of the persistent local ser
 | Linux x86_64 | Desktop/server/web `.tar.gz`, `.deb`, `.AppImage` | Ubuntu 24.04 build; GTK3, WebKitGTK 4.1, ALSA, libxdo and libudev required; AppImage contains the app, uses host libraries and needs FUSE2 or `APPIMAGE_EXTRACT_AND_RUN=1` |
 | Windows x86_64 | `.exe`, portable `.zip` with `.exe` entry | Native MSVC runner, `--version` smoke; WebView2 runtime required; no Authenticode signature/installer |
 | Android arm64 | `.apk` | Dioxus CLI 0.7.10 generates the application, SDK35/NDK r26d, minimum API26; signature and payload checks; no device/background audio certification |
-| Arch x86_64 | `vela-music-bin` PKGBUILD + `.SRCINFO` | Real non-root makepkg build, versioned release asset and SHA256, full binary/launcher/icon/license payload |
+| Arch x86_64 | `vela-music-bin` PKGBUILD + `.SRCINFO` | Real non-root makepkg build, versioned release asset and SHA256, full binary/launcher/icon/license payload; private Ubuntu libxdo.so.3 compatibility library because Arch ships libxdo.so.4 |
 
 macOS/iOS application packaging, notarization, Google Play, winget and Homebrew
 submission remain separate work. Existing source compile reports are not store or

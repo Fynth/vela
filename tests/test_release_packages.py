@@ -80,7 +80,7 @@ class ReleasePackagesTest(unittest.TestCase):
             with patch.object(release_packages.shutil, 'copy2', side_effect=copy):
                 stage = release_packages.desktop_payload('1.2.3', 'a' * 40)
             self.addCleanup(release_packages.shutil.rmtree, stage)
-            with patch.dict(os.environ, {'VELA_RELEASE_BASE_URL': 'https://github.com/Fynth/vela/releases/download/v1.2.3'}):
+            with patch.dict(os.environ, {'VELA_RELEASE_BASE_URL': 'https://github.com/Fynth/vela/releases/download/v1.2.3'}), patch.object(release_packages, 'bundle_xdo'):
                 archive = release_packages.build_aur(stage, '1.2.3', 'a' * 40, root)
             verification.check_archive(archive, ['usr/bin/vela-desktop', 'usr/lib/vela/vela-desktop', 'usr/share/icons/hicolor/scalable/apps/vela-desktop.svg'])
             recipe = root / 'aur/PKGBUILD'
