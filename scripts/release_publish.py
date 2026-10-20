@@ -118,7 +118,14 @@ def main() -> int:
             receipt["published"] = previous.get("published", [])
         except json.JSONDecodeError:
             pass
-    already = {entry["target"] for entry in receipt["published"]}
+    # Only a target that really reached a channel counts as published. An
+    # artifact that was merely attached to the release must not make a later
+    # real publish look like it already happened.
+    already = {
+        entry["target"]
+        for entry in receipt["published"]
+        if entry.get("status") in {"published", "dry-run"}
+    }
 
     for target in targets:
         identifier = target["id"]

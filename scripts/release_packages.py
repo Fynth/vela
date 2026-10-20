@@ -262,6 +262,16 @@ def build_aur(stage: Path, version: str, commit: str, output: Path) -> Path:
     return aur_dir
 
 
+def relative_to_repo(path: Path) -> str:
+    """Records a path relative to the repository when it is inside it."""
+    resolved = path.resolve()
+    root = REPO_ROOT.resolve()
+    try:
+        return str(resolved.relative_to(root))
+    except ValueError:
+        return str(resolved)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -325,7 +335,7 @@ def main() -> int:
                 {
                     "kind": kind,
                     "status": "built",
-                    "file": str(package.relative_to(REPO_ROOT)),
+                    "file": relative_to_repo(package),
                 }
             )
     finally:
