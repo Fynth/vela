@@ -330,8 +330,19 @@ jobs:
         with:
           name: release-signed
           path: target/release-artifacts
+      - name: Collect the release assets
+        run: |
+          mkdir -p target/release-assets
+          cp target/release-artifacts/*.tar.gz target/release-artifacts/*.zip \
+            target/release-artifacts/*.deb target/release-artifacts/*.rpm \
+            target/release-artifacts/*.AppImage target/release-assets/ 2>/dev/null || true
+          # The AUR recipe and its source tarball are release assets too, so that
+          # the published recipe can actually download what it names.
+          cp target/release-artifacts/aur/PKGBUILD target/release-assets/ 2>/dev/null || true
+          cp target/release-artifacts/aur-sources/*.tar.gz target/release-assets/ 2>/dev/null || true
+          ls -l target/release-assets
       - uses: softprops/action-gh-release@v2
         with:
-          files: target/release-artifacts/*
+          files: target/release-assets/*
           generate_release_notes: true
           fail_on_unmatched_files: true

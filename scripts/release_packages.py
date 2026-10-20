@@ -232,6 +232,9 @@ def build_aur(stage: Path, version: str, commit: str, output: Path) -> Path:
     # than shipping a placeholder URL and a skipped checksum to the AUR.
     base_url = os.environ.get("VELA_RELEASE_BASE_URL", "").rstrip("/")
     source_sha256 = hashlib.sha256((sources / source_name).read_bytes()).hexdigest()
+    # The recipe downloads the source from the GitHub release, so the tarball
+    # has to be a release asset of its own and not only a build by-product.
+    shutil.copy2(sources / source_name, output / source_name)
     if base_url:
         source_url = f"{base_url}/{source_name}"
         source_line = f'  echo "$pkgname-$pkgver.tar.gz::{source_url}"\n'
