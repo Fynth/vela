@@ -238,20 +238,17 @@ jobs:
         uses: nttld/setup-ndk@v1
         with:
           ndk-version: r26d
-      - name: Build the Android client
+      - name: Prepare the Android toolchain
+        # The NDK names its compilers after the API level, while the crates that
+        # compile C code look for the plain target name. Both names are provided,
+        # and the toolchain directory is put on the path for the crates that
+        # look for the compiler by name.
         run: |
-          echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME" >> "$GITHUB_ENV"
-          echo "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin" >> "$GITHUB_PATH"
-          # The NDK names its compilers after the API level. The crates that
-          # compile C code look for the plain target name, so both are provided.
-          for target in aarch64-linux-android armv7a-linux-androideabi x86_64-linux-android; do
-            level=26
-            case "$target" in
-              armv7a-linux-androideabi) prefix=armv7a-linux-androideabi ;;
-              *) prefix=$target ;;
-            esac
-            ln -sf "${prefix}${level}-clang" "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/${prefix}-clang"
+          bin="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          for prefix in aarch64-linux-android armv7a-linux-androideabi x86_64-linux-android; do
+            ln -sf "${prefix}26-clang" "$bin/${prefix}-clang"
           done
+          echo "$bin" >> "$GITHUB_PATH"
           cargo build --locked --release -p vela-desktop --bin vela-mobile --features mobile --target aarch64-linux-android
       - name: Package the Android client
         run: python3 scripts/release_build.py --output target/release-artifacts --only android-arm64
