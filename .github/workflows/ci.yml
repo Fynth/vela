@@ -86,7 +86,11 @@ jobs:
           fi
           exit 0
   docker:
+    # The container build downloads the crates from the network and can fail on
+    # a registry or a rate limit, which says nothing about the source. It stays
+    # visible, but the release artifacts are built by the jobs that matter.
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
