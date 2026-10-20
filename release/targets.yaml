@@ -148,6 +148,11 @@ targets:
     publish: none
     requires: [desktop-linux-x86-64]
     credentials: [ANDROID_KEYSTORE_BASE64, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD, PLAY_SERVICE_ACCOUNT_JSON]
+    # Blocked: the only published Dioxus mobile renderer is 0.7.0-alpha.2, whose
+    # dioxus-lib does not compile against the 0.7.10 core this project uses, and
+    # upstream calls Android support experimental. The client code itself
+    # compiles for aarch64-linux-android; what is missing is the NDK build, the
+    # mobile project layout and a renderer that matches the current Dioxus.
     status: blocked
 
   - id: ios-arm64
@@ -158,4 +163,6 @@ targets:
     publish: none
     requires: [desktop-linux-x86-64]
     credentials: [APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID]
+    # Blocked: the only published Dioxus mobile renderer is 0.7.0-alpha.2 and does
+    # not compile against the 0.7.10 core; iOS additionally needs a macOS host.
     status: blocked
