@@ -1397,3 +1397,207 @@ test('TR04a Home composes bounded filter views from real DTOs and keeps one root
     await writeFile(`${output}/home-filter-evidence.json`, JSON.stringify({ filter, cards, phone, absent: 'IMAGE_BLOCKED' }, null, 2));
   } finally { await runtime.close(); }
 });
+
+/**
+ * TR07b: the row More menu is one signal-backed menu that changes surface, not
+ * meaning. At touch widths it is a modal bottom action sheet anchored above the
+ * reserved player + navigation bands (backdrop, safe-area aware, full-width
+ * >=44px rows); on desktop it keeps the compact anchored panel. Both surfaces
+ * dispatch the same real root commands, so the sheet can never become a second
+ * audio owner, a new API or a decorative action list.
+ */
+test('TR07b row More menu is a modal bottom action sheet on phones and an anchored menu on desktop', async ({ page }) => {
+  test.setTimeout(180000);
+  const output = resolve(root, process.env.VELA_TRANSFER_EVIDENCE || 'target/checks/prototype-transfer-web');
+  await mkdir(output, { recursive: true });
+  const runtime = await signedInFixture(output);
+  try {
+    await setupWithTracks(page, runtime, 6);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(runtime.origin);
+    await settle(page);
+    await navigate(page, 'Library');
+    await expect(page.locator('.track-row')).toHaveCount(6);
+
+    const row = page.locator('.track-row').first();
+    const menuTitle = (await row.locator('.track-title strong').innerText()).trim();
+    expect(menuTitle.length).toBeGreaterThan(0);
+    const trigger = row.getByRole('button', { name: `More actions for ${menuTitle}`, exact: true });
+    await expect(trigger).toHaveAttribute('aria-haspopup', 'menu');
+    await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+
+    const measure = () => page.evaluate(() => {
+      const box = element => {
+        const rect = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        return {
+          left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom,
+          width: rect.width, height: rect.height,
+          position: style.position, display: style.display,
+          zIndex: parseInt(style.zIndex, 10),
+          backgroundColor: style.backgroundColor,
+          paddingLeft: parseFloat(style.paddingLeft), paddingRight: parseFloat(style.paddingRight),
+        };
+      };
+      const panel = document.querySelector('.track-menu-panel');
+      const backdrop = document.querySelector('.track-menu-backdrop');
+      const player = document.querySelector('.player-bar');
+      const nav = document.querySelector('.mobile-nav');
+      const trigger = document.querySelector(`[data-track-menu] button[aria-haspopup="menu"]`);
+      return {
+        viewport: { width: innerWidth, height: innerHeight },
+        panel: panel ? box(panel) : null,
+        backdrop: backdrop ? box(backdrop) : null,
+        player: player ? box(player) : null,
+        nav: nav ? box(nav) : null,
+        trigger: trigger ? box(trigger) : null,
+        panelRole: panel ? panel.getAttribute('role') : null,
+        panelLabel: panel ? panel.getAttribute('aria-label') : null,
+        rows: panel ? [...panel.querySelectorAll(':scope > button')].map(button => ({
+          label: button.textContent.trim(), role: button.getAttribute('role'), ...box(button),
+        })) : [],
+        panelOverflow: panel ? panel.scrollWidth - panel.clientWidth : null,
+        documentOverflow: document.documentElement.scrollWidth - innerWidth,
+        bodyOverflow: document.body.scrollWidth - innerWidth,
+        audios: document.querySelectorAll('audio').length,
+        paused: document.querySelector('#vela-audio').paused,
+        activeIsPanel: !!panel && document.activeElement === panel,
+      };
+    });
+
+    const actions = ['Play / Pause', 'Add to queue', 'Favorite / Unfavorite', 'Start track radio', 'Edit metadata'];
+
+    // --- Phone: right-click opens the sheet without starting playback.
+    await row.click({ button: 'right', position: { x: 6, y: 6 } });
+    await expect(page.locator('.track-menu-panel')).toBeVisible();
+    await expect(page.locator('.track-menu-backdrop')).toBeVisible();
+    await expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    await expect.poll(() => page.evaluate(() => document.activeElement === document.querySelector('.track-menu-panel'))).toBe(true);
+    const phone = await measure();
+
+    expect(phone.panelRole).toBe('menu');
+    expect(phone.panelLabel).toBe(`Actions for ${menuTitle}`);
+    expect(phone.panel.position, 'phone menu is a fixed sheet').toBe('fixed');
+    expect(phone.panel.width).toBeCloseTo(390, 0);
+    expect(Math.abs(phone.panel.left)).toBeLessThanOrEqual(1);
+    expect(Math.abs(phone.panel.right - 390)).toBeLessThanOrEqual(1);
+    // The shell reserves player + navigation (+ one safe area); the sheet ends
+    // exactly at the player band's top edge instead of hiding the transport.
+    expect(phone.player.height).toBeCloseTo(120, 0);
+    expect(phone.nav.height).toBeCloseTo(70, 0);
+    expect(Math.abs(phone.panel.bottom - phone.player.top)).toBeLessThanOrEqual(1);
+    expect(phone.panel.bottom).toBeLessThanOrEqual(phone.nav.top + 1);
+    expect(phone.panel.top).toBeGreaterThanOrEqual(0);
+
+    expect(phone.backdrop.display).toBe('block');
+    expect(phone.backdrop.position).toBe('fixed');
+    expect(Math.abs(phone.backdrop.left)).toBeLessThanOrEqual(1);
+    expect(Math.abs(phone.backdrop.top)).toBeLessThanOrEqual(1);
+    expect(phone.backdrop.width).toBeCloseTo(390, 0);
+    expect(phone.backdrop.height).toBeCloseTo(844, 0);
+    expect(phone.backdrop.backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
+    expect(phone.backdrop.zIndex).toBeGreaterThan(phone.player.zIndex);
+    expect(phone.backdrop.zIndex).toBeLessThan(phone.panel.zIndex);
+
+    expect(phone.rows.map(action => action.label)).toEqual(actions);
+    for (const action of phone.rows) {
+      expect(action.role).toBe('menuitem');
+      expect(action.height, `${action.label} touch row`).toBeGreaterThanOrEqual(44);
+      expect(
+        Math.abs(action.width - (phone.panel.width - phone.panel.paddingLeft - phone.panel.paddingRight)),
+        `${action.label} full-width row`,
+      ).toBeLessThanOrEqual(1);
+    }
+    expect(phone.panelOverflow).toBeLessThanOrEqual(1);
+    expect(phone.documentOverflow).toBeLessThanOrEqual(1);
+    expect(phone.bodyOverflow).toBeLessThanOrEqual(1);
+    expect(phone.audios, 'the sheet never owns a second media element').toBe(1);
+    expect(phone.paused, 'right-click must not start playback').toBe(true);
+    await page.screenshot({ path: `${output}/track-menu-sheet-390.png`, animations: 'disabled' });
+
+    // --- Escape closes the sheet and restores the trigger's expanded state.
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.track-menu-panel')).toHaveCount(0);
+    await expect(page.locator('.track-menu-backdrop')).toHaveCount(0);
+    await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    await expect(trigger).toHaveAttribute('aria-haspopup', 'menu');
+
+    // --- Visible More opens it again; a backdrop tap closes it.
+    await trigger.click();
+    await expect(page.locator('.track-menu-panel')).toBeVisible();
+    await expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    await page.mouse.click(195, 90);
+    await expect(page.locator('.track-menu-panel')).toHaveCount(0);
+    await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+
+    // --- An action closes the sheet and runs the real root command.
+    await trigger.click();
+    const panel = page.locator('.track-menu-panel');
+    await expect(panel).toBeVisible();
+    await panel.getByRole('menuitem', { name: 'Play / Pause', exact: true }).click();
+    await expect(page.locator('.track-menu-panel')).toHaveCount(0);
+    const audio = page.locator('#vela-audio');
+    await expect.poll(() => audio.evaluate(node => node.currentTime), { timeout: 15000 }).toBeGreaterThan(0.2);
+    await expect(page.locator('.now-playing strong.player-title')).toHaveText(menuTitle);
+    expect(await page.evaluate(() => document.querySelectorAll('audio').length)).toBe(1);
+
+    // --- Desktop keeps the compact menu anchored to its own trigger.
+    await page.setViewportSize({ width: 1284, height: 856 });
+    await settle(page);
+    await trigger.click();
+    await expect(page.locator('.track-menu-panel')).toBeVisible();
+    await expect.poll(() => page.evaluate(() => document.activeElement === document.querySelector('.track-menu-panel'))).toBe(true);
+    const desktop = await measure();
+    expect(desktop.panelRole).toBe('menu');
+    expect(desktop.panel.position, 'desktop menu stays the anchored panel').toBe('absolute');
+    expect(desktop.panel.width).toBeGreaterThanOrEqual(190);
+    expect(desktop.panel.width).toBeLessThan(400);
+    expect(desktop.backdrop.display, 'no sheet backdrop on desktop').toBe('none');
+    expect(Math.abs(desktop.panel.right - desktop.trigger.right)).toBeLessThanOrEqual(3);
+    expect(desktop.panel.top).toBeGreaterThanOrEqual(desktop.trigger.bottom - 1);
+    expect(desktop.panel.top - desktop.trigger.bottom).toBeLessThanOrEqual(12);
+    expect(desktop.panel.left).toBeGreaterThanOrEqual(0);
+    expect(desktop.panel.right).toBeLessThanOrEqual(1284);
+    expect(desktop.rows.map(action => action.label)).toEqual(actions);
+    expect(desktop.documentOverflow).toBeLessThanOrEqual(1);
+    expect(desktop.audios).toBe(1);
+    await page.screenshot({ path: `${output}/track-menu-anchored-1284.png`, animations: 'disabled' });
+
+    // --- The surface switch is a real responsive boundary, not a second menu:
+    // the same open menu is an anchored panel at 671px and a sheet at 670px.
+    const surface = () => page.evaluate(() => {
+      const panel = document.querySelector('.track-menu-panel');
+      const backdrop = document.querySelector('.track-menu-backdrop');
+      return {
+        position: getComputedStyle(panel).position,
+        backdrop: getComputedStyle(backdrop).display,
+        rowHeight: panel.querySelector(':scope > button').getBoundingClientRect().height,
+        panelBottom: panel.getBoundingClientRect().bottom,
+        playerTop: document.querySelector('.player-bar').getBoundingClientRect().top,
+        width: panel.getBoundingClientRect().width,
+      };
+    });
+    await page.setViewportSize({ width: 671, height: 844 });
+    await settle(page);
+    const above = await surface();
+    expect(above.position).toBe('absolute');
+    expect(above.backdrop).toBe('none');
+    await page.setViewportSize({ width: 670, height: 844 });
+    await settle(page);
+    const at = await surface();
+    expect(at.position).toBe('fixed');
+    expect(at.backdrop).toBe('block');
+    expect(at.width).toBeCloseTo(670, 0);
+    expect(Math.abs(at.panelBottom - at.playerTop)).toBeLessThanOrEqual(1);
+    expect(at.rowHeight).toBeGreaterThanOrEqual(44);
+    await page.setViewportSize({ width: 1284, height: 856 });
+    await settle(page);
+    expect((await surface()).position).toBe('absolute');
+
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.track-menu-panel')).toHaveCount(0);
+    await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+
+    await writeFile(`${output}/track-menu-evidence.json`, JSON.stringify({ actions, menuTitle, phone, desktop }, null, 2));
+  } finally { await runtime.close(); }
+});

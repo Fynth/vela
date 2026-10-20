@@ -1231,6 +1231,25 @@ fn App() -> Element {
     let mut playlist_filter = use_signal(String::new);
     let mut playlist_undo = use_signal(|| None::<PlaylistUndo>);
     let mut open_track_menu = use_signal(|| None::<String>);
+    // TR07b: the open row menu owns the focus, so Escape closes it from the
+    // trigger, the row and the touch action sheet alike. The lean web build has
+    // no mounted event, so the panel is looked up after the renderer's DOM batch
+    // (the same pattern the queue drawer and Now Playing use).
+    use_effect(move || {
+        if open_track_menu().is_none() {
+            return;
+        }
+        spawn(async move {
+            TimeoutFuture::new(0).await;
+            if let Some(panel) = web_sys::window()
+                .and_then(|window| window.document())
+                .and_then(|document| document.get_element_by_id("track-menu-panel"))
+                .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok())
+            {
+                let _ = panel.focus();
+            }
+        });
+    });
     let mut new_user = use_signal(String::new);
     let mut new_password = use_signal(String::new);
     let mut queue = use_signal(Vec::<Track>::new);
@@ -1987,15 +2006,22 @@ fn App() -> Element {
                                                 button { class: "icon-button", title: "Add to playback queue", "aria-label": "Add {track.title} to playback queue", onclick: move |_| { enqueue_track(queue_track.clone(),false,playback,notice); }, "+" }
                                                 button { class: "icon-button metadata-edit", "aria-label": "Edit metadata for {edit_track.title}", title: "Edit metadata", onclick: move |_| editing_track.set(Some(edit_track.clone())), Icon { name: "edit" } }
                                                 button { class: "icon-button track-radio", "aria-label": "Start track radio for {radio_track.title}", title: "Track radio", onclick: move |_| actions.radio.call(radio_track.clone()), Icon { name: "radio" } }
-                                                div { class: "track-menu", "data-track-menu": "{track.id}",
+                                                div { class: "track-menu", "data-track-menu": "{track.id}", onkeydown: move |event| { if event.key() == Key::Escape { event.stop_propagation(); open_track_menu.set(None); } },
                                                     button { class: "icon-button", "aria-label": "More actions for {menu_title}", "aria-haspopup": "menu", "aria-expanded": "{open_track_menu() == Some(track.id.clone())}", title: "More actions", onclick: { let id = track.id.clone(); move |_| { let next = open_track_menu().as_deref() != Some(id.as_str()); open_track_menu.set(next.then(|| id.clone())); } }, span { "⋯" } }
-                                                    if open_track_menu().as_deref() == Some(track.id.as_str()) { div { class: "track-menu-panel", role: "menu", "aria-label": "Actions for {menu_title}", onkeydown: move |event| { if event.key() == Key::Escape { open_track_menu.set(None); } },
-                                                        button { role: "menuitem", onclick: { let mut close = open_track_menu; move |_| { close.set(None); play_or_toggle_queue(tracks.peek().clone(), at, view_context(page,catalog,selected_playlist), playback); } }, "Play / Pause" }
-                                                        button { role: "menuitem", onclick: { let mut close = open_track_menu; move |_| { close.set(None); enqueue_track(menu_queue.clone(), false, playback, notice); } }, "Add to queue" }
-                                                        button { role: "menuitem", onclick: { let mut close = open_track_menu; move |_| { close.set(None); favorite_track(menu_favorite.clone(), auth, tracks, queue, catalog.tracks, facets_revision, error); } }, "Favorite / Unfavorite" }
-                                                        button { role: "menuitem", onclick: { let mut close = open_track_menu; move |_| { close.set(None); actions.radio.call(menu_radio.clone()); } }, "Start track radio" }
-                                                        button { role: "menuitem", onclick: { let mut close = open_track_menu; move |_| { close.set(None); editing_track.set(Some(menu_play.clone())); } }, "Edit metadata" }
-                                                    } }
+                                                    if open_track_menu().as_deref() == Some(track.id.as_str()) {
+                                                        /* TR07b: the same signal-backed menu is the compact anchored panel on
+                                                           desktop and a modal bottom action sheet at touch widths. The
+                                                           backdrop is a real click-away target and stays out of the
+                                                           accessibility tree; it owns no action of its own. */
+                                                        div { class: "track-menu-backdrop", "aria-hidden": "true", onclick: move |_| open_track_menu.set(None) }
+                                                        div { class: "track-menu-panel", id: "track-menu-panel", tabindex: "-1", role: "menu", "aria-label": "Actions for {menu_title}",
+                                                            button { role: "menuitem", onclick: { let mut close = open_track_menu; move |_| { close.set(None); play_or_toggle_queue(tracks.peek().clone(), at, view_context(page,catalog,selected_playlist), playback); } }, "Play / Pause" }
+                                                            button { role: "menuitem", onclick: { let mut close = open_track_menu; move |_| { close.set(None); enqueue_track(menu_queue.clone(), false, playback, notice); } }, "Add to queue" }
+                                                            button { role: "menuitem", onclick: { let mut close = open_track_menu; move |_| { close.set(None); favorite_track(menu_favorite.clone(), auth, tracks, queue, catalog.tracks, facets_revision, error); } }, "Favorite / Unfavorite" }
+                                                            button { role: "menuitem", onclick: { let mut close = open_track_menu; move |_| { close.set(None); actions.radio.call(menu_radio.clone()); } }, "Start track radio" }
+                                                            button { role: "menuitem", onclick: { let mut close = open_track_menu; move |_| { close.set(None); editing_track.set(Some(menu_play.clone())); } }, "Edit metadata" }
+                                                        }
+                                                    }
                                                 }
                                                 if !selected_add_playlist().is_empty() { button { class: "icon-button", title: "Add to selected playlist", "aria-label": "Add to selected playlist", onclick: move |_| { let track = add_track.clone(); let id = selected_add_playlist(); let mut undo_signal = playlist_undo; spawn_authorized(auth, async move {
                                                     let track_id = track.id.clone();

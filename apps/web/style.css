@@ -1357,3 +1357,34 @@ input[type="range"]:focus { outline:2px solid var(--accent); outline-offset:3px;
 .track-menu-panel { position:absolute; right:0; top:calc(100% + 4px); z-index:30; min-width:190px; display:grid; padding:5px; border:1px solid var(--control-line); border-radius:8px; background:var(--surface-raised); box-shadow:0 16px 40px #0006; }
 .track-menu-panel button { min-height:36px; padding:8px 10px; border-radius:6px; background:none; color:var(--text); text-align:left; font-size:11px; }
 .track-menu-panel button:hover, .track-menu-panel button:focus-visible { background:var(--surface-hover); }
+
+/* TR07b: at touch widths the row More menu is a real modal bottom action
+   sheet. It is anchored above the reserved player + navigation bands, so the
+   shell keeps counting the safe area exactly once (the navigation row owns it)
+   instead of hiding the sheet behind the transport. The backdrop is the real
+   click-away layer, each action stays a full-width >=44px row, and the panel
+   scrolls internally rather than overflowing on short landscape viewports.
+   Desktop keeps the compact anchored panel above; both surfaces are the same
+   signal-backed menu dispatching the same root actions, never a second audio
+   owner. */
+.track-menu-backdrop { display:none; }
+@media (max-width:670px) {
+  .track-menu-backdrop {
+    display:block; position:fixed; inset:0; z-index:70;
+    background:#050a07b3;
+  }
+  .track-menu-panel {
+    position:fixed; left:0; right:0; top:auto; z-index:71;
+    bottom:calc(var(--vela-player-height) + var(--vela-mobile-nav-height) + env(safe-area-inset-bottom));
+    width:100%; max-width:none; min-width:0;
+    max-height:calc((100dvh - var(--vela-player-height) - var(--vela-mobile-nav-height) - env(safe-area-inset-bottom) - 16px) / var(--app-zoom, 1));
+    overflow-y:auto; overscroll-behavior:contain; gap:2px;
+    padding:8px max(10px, env(safe-area-inset-right)) 10px max(10px, env(safe-area-inset-left));
+    border:0; border-top:1px solid var(--control-line); border-radius:20px 20px 0 0;
+    background:var(--vela-popover); box-shadow:0 -18px 50px #0007;
+  }
+  .track-menu-panel button {
+    display:flex; align-items:center; width:100%; min-height:48px;
+    padding:12px 14px; border-radius:10px; font-size:13px;
+  }
+}
