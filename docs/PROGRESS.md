@@ -39,6 +39,40 @@ passed), strict clippy/fmt PASS, full native X11 peer/session QA260 checks PASS 
 the new layout and tampered-copy integrity evidence. AUD-05 cold offline launch
 remains open.
 
+## AUD-09 measured stats/search cost — optimized (2026-10-20)
+
+`87b7acd`: measured on an isolated 100k-owner fixture with the release binary
+(same host, isolated temp data, real migrations and setup API):
+
+| Endpoint | Before | After |
+| --- | --- | --- |
+| `/api/stats` p50 (8 clients) | 531ms | **119ms** |
+| `/api/search?q=Signal` p50 (8 clients) | 138ms | **121ms** |
+| `/api/search` p50 (1 client) | 22ms | 20ms |
+| `/api/artists?limit=50` p50 | 30.9ms | 27.0ms |
+
+Root causes, each isolated by SQL-level timing on the same fixture:
+- the stats aggregate read the wide owner track row and the asset row for all
+  100k rows (320-480ms). Migration 0013 adds covering
+  `tracks(owner_id, media_asset_id, duration_ms)` and `media_assets(id, size_bytes)`;
+  the same aggregate is now index-only (~26ms) and the three groups run on
+  separate pool connections.
+- the album visibility probe (one EXISTS per album) cost ~50ms for 8,334 albums;
+  `tracks(owner_id, album_id)` answers it directly (~10ms).
+- search built album/artist summaries for every match before LIMIT; it now
+  matches bounded identities first and builds summaries for those rows only,
+  and the three catalog reads run concurrently.
+
+Search identity is unchanged: the returned track ids/titles match the
+authoritative FTS selection exactly on the 100k fixture. Verified: fmt, strict
+workspace clippy, workspace tests (25 suites ok), server API 33/33, media suites,
+full Chromium 56/1/0, full Firefox 56/1/0. Migration 0013 was applied to an
+isolated copy of the live data directory (schema 12->13, `quick_check ok`, 0 FK
+violations, all three indexes present); the live runtime and `data/` were not
+touched. Remaining known cost: 8-client concurrency is bounded by the 4-connection
+SQLite pool, so per-endpoint RPS stays a client-bound lower bound; no capacity
+claim is made.
+
 ## TR12 release ledger / asset verification — 2026-10-20
 
 Created [RELEASE_LEDGER_2026-10-20.md](RELEASE_LEDGER_2026-10-20.md). Package source

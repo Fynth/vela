@@ -126,8 +126,7 @@ Examples of the split:
 
 ## 5. Open items this documentation pass cannot close
 
-AUD-05 (cold offline launch) and AUD-06 (origin-scoped namespace) are fixed in `3aeee09`/`a913574`; AUD-09 (search/stats remain
-measured costs), AUD-10/14–AUD-20
+AUD-05 (cold offline launch) and AUD-06 (origin-scoped namespace) are fixed in `3aeee09`/`a913574`; AUD-09 (search/stats measured and optimized in `87b7acd`; concurrency limit remains), AUD-10/14–AUD-20
 and AUD-19/20 remain open. This reconciliation fixed stale documentation only
 (AUD-10/16 subset, AUD-17 framing, AUD-20 wording); it added no red test and fixed
 no code defect. See the [audit](PLANS/2026-10-19/01_AUDIT.md) and
