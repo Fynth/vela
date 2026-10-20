@@ -292,8 +292,13 @@ test('TR02 shell reserves one sidebar offset and one player band with one centra
       { width: 1100, height: 900, sidebar: 190, gutter: 25, contentTop: 24, playerHeight: 88 },
       { width: 900, height: 900, sidebar: 175, gutter: 20, contentTop: 24, playerHeight: 88 },
       { width: 761, height: 900, sidebar: 175, gutter: 20, contentTop: 24, playerHeight: 88 },
-      { width: 760, height: 900, sidebar: 0, gutter: 20, contentTop: 25, playerHeight: 88 },
-      { width: 621, height: 900, sidebar: 0, gutter: 20, contentTop: 25, playerHeight: 88 },
+      /* TR09: 761..1024 is the tablet ladder (sidebar + desktop player, no
+         navigation bar) and <=760 is one mobile composition, so the tablet
+         boundary and the mobile band are both measured here. */
+      { width: 1024, height: 900, sidebar: 190, gutter: 25, contentTop: 24, playerHeight: 88 },
+      { width: 760, height: 900, sidebar: 0, gutter: 20, contentTop: 25, playerHeight: 120 },
+      { width: 671, height: 900, sidebar: 0, gutter: 20, contentTop: 25, playerHeight: 120 },
+      { width: 621, height: 900, sidebar: 0, gutter: 20, contentTop: 25, playerHeight: 120 },
       { width: 620, height: 900, sidebar: 0, gutter: 20, contentTop: 25, playerHeight: 120 },
       { width: 390, height: 844, sidebar: 0, gutter: 20, contentTop: 25, playerHeight: 120 },
       { width: 320, height: 780, sidebar: 0, gutter: 16, contentTop: 25, playerHeight: 120 },
@@ -853,12 +858,17 @@ test('TR03 persistent player projects the root engine with reference geometry an
     expect(afterOverlays.generation).toBe(playerAudio.generation);
     expect(Math.abs(afterOverlays.time - playerAudio.time)).toBeLessThan(0.6);
 
-    // --- Exact player geometry at the reference, compact and phone widths.
+    // --- Exact player geometry at the reference, compact, tablet and phone
+    // widths. TR09 moved the mobile mini-player boundary onto the shell's own
+    // 760px mobile boundary, so 761 keeps the three-zone desktop band with the
+    // sidebar and 760 uses the mini-player above the navigation bar.
     const viewports = [
       { width: 1284, height: 856, playerHeight: 88, desktop: true },
       { width: 1500, height: 900, playerHeight: 88, desktop: true },
       { width: 1100, height: 900, playerHeight: 88, desktop: true },
-      { width: 760, height: 900, playerHeight: 88, desktop: true },
+      { width: 1024, height: 768, playerHeight: 88, desktop: true },
+      { width: 761, height: 900, playerHeight: 88, desktop: true },
+      { width: 760, height: 900, playerHeight: 120, desktop: false },
       { width: 390, height: 844, playerHeight: 120, desktop: false },
       { width: 320, height: 780, playerHeight: 120, desktop: false },
     ];
@@ -960,7 +970,7 @@ test('TR03 persistent player projects the root engine with reference geometry an
         expect.soft(measured.expand.display === 'none', `${width} expand visibility`).toBe(width < 1101);
         if (width === 1500) expect.soft(measured.volume.width, '1500 volume 65').toBeCloseTo(65, 0.75);
         if (width === 1284) expect.soft(measured.qualityText, '1284 quality is real data').toBe(expectedQuality(longA));
-        if (width === 760) expect.soft(measured.nav.display, '760 navigation visible').toBe('flex');
+        if (width === 761) expect.soft(measured.nav.display, '761 tablet keeps the sidebar and no mobile bar').toBe('none');
         expect.soft(measured.player.bottom + (measured.nav.display === 'none' ? 0 : measured.nav.height), `${width} bands tile the viewport exactly`)
           .toBeCloseTo(height, 0.75);
       } else {
@@ -989,9 +999,12 @@ test('TR03 persistent player projects the root engine with reference geometry an
     }
 
     // The mobile shell reserves the player and the navigation plus the safe area
-    // exactly once, so the mini-player cannot sit behind the navigation.
+    // exactly once, so the mini-player cannot sit behind the navigation. TR09
+    // made that arithmetic a single derived token; the grid row and every
+    // overlay consume it instead of repeating the env() expression.
     const css = (await (await page.request.get(runtime.origin + '/style.css')).text()).replace(/\s+/g, ' ');
-    expect(css).toContain('calc(var(--vela-mobile-nav-height) + env(safe-area-inset-bottom))');
+    expect(css).toContain('calc(var(--vela-mobile-nav-height) + var(--vela-safe-bottom))');
+    expect(css).toContain('--vela-bottom-reserve:calc( var(--vela-player-height) + var(--vela-mobile-nav-height) + var(--vela-safe-bottom) )');
 
     // Queue and Now Playing remain reachable from the phone composition.
     await page.getByRole('button', { name: 'Show playback queue and controls', exact: true }).click();
@@ -1595,7 +1608,9 @@ test('TR07b row More menu is a modal bottom action sheet on phones and an anchor
     await page.screenshot({ path: `${output}/track-menu-anchored-1284.png`, animations: 'disabled' });
 
     // --- The surface switch is a real responsive boundary, not a second menu:
-    // the same open menu is an anchored panel at 671px and a sheet at 670px.
+    // TR09 moved it onto the shell's own mobile boundary, so the sheet holds for
+    // every width that still shows the mobile navigation and the same open menu
+    // is an anchored panel at 761px.
     const surface = () => page.evaluate(() => {
       const panel = document.querySelector('.track-menu-panel');
       const backdrop = document.querySelector('.track-menu-backdrop');
@@ -1608,19 +1623,21 @@ test('TR07b row More menu is a modal bottom action sheet on phones and an anchor
         width: panel.getBoundingClientRect().width,
       };
     });
-    await page.setViewportSize({ width: 671, height: 844 });
+    await page.setViewportSize({ width: 761, height: 844 });
     await settle(page);
     const above = await surface();
     expect(above.position).toBe('absolute');
     expect(above.backdrop).toBe('none');
-    await page.setViewportSize({ width: 670, height: 844 });
-    await settle(page);
-    const at = await surface();
-    expect(at.position).toBe('fixed');
-    expect(at.backdrop).toBe('block');
-    expect(at.width).toBeCloseTo(670, 0);
-    expect(Math.abs(at.panelBottom - at.playerTop)).toBeLessThanOrEqual(1);
-    expect(at.rowHeight).toBeGreaterThanOrEqual(44);
+    for (const width of [760, 671]) {
+      await page.setViewportSize({ width, height: 844 });
+      await settle(page);
+      const at = await surface();
+      expect(at.position, `${width} sheet`).toBe('fixed');
+      expect(at.backdrop, `${width} backdrop`).toBe('block');
+      expect(at.width).toBeCloseTo(width, 0);
+      expect(Math.abs(at.panelBottom - at.playerTop)).toBeLessThanOrEqual(1);
+      expect(at.rowHeight).toBeGreaterThanOrEqual(44);
+    }
     await page.setViewportSize({ width: 1284, height: 856 });
     await settle(page);
     expect((await surface()).position).toBe('absolute');
@@ -1933,5 +1950,773 @@ test('TR07c keyboard row menu and the real searchable add-to-playlist picker', a
     await writeFile(`${output}/track-menu-keyboard-evidence.json`, JSON.stringify({
       menuTitle, secondTitle, destination: destination.name, phoneMenu, phonePicker, actionRegistry: 'ROW_ACTIONS',
     }, null, 2));
+  } finally { await runtime.close(); }
+});
+
+/**
+ * TR09: true mobile composition, tablet boundaries, short-height recovery and
+ * the input contract, measured from real DOM rectangles.
+ *
+ * The shell has exactly one layout authority (the --vela-* band tokens plus the
+ * --vela-safe-* insets and the derived --vela-bottom-reserve). This test reads
+ * the rendered boxes at 320/390/671/760 (mobile), 761/900/1024 (tablet) and
+ * 1284/1440/1728 (desktop), plus the 390x600 recovery window, and asserts:
+ * one central scroller, no horizontal overflow, that the reserved bands equal
+ * the space the content scroller actually ends above, a single navigation
+ * surface per composition, >=44px primary targets on the mobile composition,
+ * non-overlapping labels/controls and one audio element.
+ */
+const PRIMARY_TARGETS = [
+  '#player-toggle', '#player-next', '#player-previous',
+  '.player-buttons .mobile-queue', '.player-now .player-favorite',
+  '.now-playing-trigger', '.mobile-nav button',
+  '.topbar .icon-button', '.topbar .button',
+  '.home-filter',
+];
+
+async function boxes(page, selectors) {
+  return page.evaluate((list) => {
+    const out = {};
+    for (const selector of list) {
+      out[selector] = [...document.querySelectorAll(selector)]
+        .filter(element => {
+          const style = getComputedStyle(element);
+          const rect = element.getBoundingClientRect();
+          return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+        })
+        .map(element => {
+          const rect = element.getBoundingClientRect();
+          const style = getComputedStyle(element);
+          return {
+            label: (element.getAttribute('aria-label') || element.textContent || '').trim().slice(0, 32),
+            x: rect.x, y: rect.y, width: rect.width, height: rect.height,
+            right: rect.right, bottom: rect.bottom,
+            outlineWidth: style.outlineWidth, outlineStyle: style.outlineStyle, outlineOffset: style.outlineOffset,
+          };
+        });
+    }
+    return out;
+  }, selectors);
+}
+
+const TR09_GEOMETRY = () => {
+  const rect = selector => {
+    const element = document.querySelector(selector);
+    if (!element) return null;
+    const box = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    return {
+      x: box.x, y: box.y, width: box.width, height: box.height,
+      right: box.right, bottom: box.bottom, display: style.display,
+      paddingLeft: parseFloat(style.paddingLeft), paddingRight: parseFloat(style.paddingRight),
+      paddingTop: parseFloat(style.paddingTop), paddingBottom: parseFloat(style.paddingBottom),
+      overflowY: style.overflowY, position: style.position,
+    };
+  };
+  // A probe resolves the token (and any calc/env inside it) to real pixels, so
+  // the asserted reserve is the value the layout actually consumed.
+  const probe = (property) => {
+    const element = document.createElement('div');
+    element.style.cssText = `position:absolute;left:-9999px;top:0;height:${property};width:10px`;
+    document.body.append(element);
+    const value = element.getBoundingClientRect().height;
+    element.remove();
+    return value;
+  };
+  const scroller = document.querySelector('#main-scroll');
+  const bodyScrollers = [...document.querySelectorAll('*')]
+    .filter(element => {
+      const style = getComputedStyle(element);
+      if (!['auto', 'scroll'].includes(style.overflowY)) return false;
+      if (element.scrollHeight <= element.clientHeight + 1) return false;
+      const box = element.getBoundingClientRect();
+      return style.display !== 'none' && box.width > 0 && box.height > 0;
+    })
+    .map(element => (element.id === 'main-scroll' ? 'main-scroll' : String(element.className || element.tagName)));
+  const navLabels = [...document.querySelectorAll('.mobile-nav button')].map(button => {
+    const icon = button.querySelector('.vela-icon, span');
+    const label = button.querySelector('small');
+    const outer = button.getBoundingClientRect();
+    if (!icon || !label) return { text: button.textContent.trim(), icon: null, label: null };
+    const a = icon.getBoundingClientRect();
+    const b = label.getBoundingClientRect();
+    return {
+      text: button.textContent.trim(),
+      icon: { x: a.x, y: a.y, right: a.right, bottom: a.bottom },
+      label: { x: b.x, y: b.y, right: b.right, bottom: b.bottom },
+      button: { x: outer.x, y: outer.y, right: outer.right, bottom: outer.bottom },
+      labelOverlapsIcon: !(a.right <= b.x || b.right <= a.x || a.bottom <= b.y || b.bottom <= a.y),
+      labelInsideButton: b.x >= outer.x - 0.5 && b.right <= outer.right + 0.5
+        && b.y >= outer.y - 0.5 && b.bottom <= outer.bottom + 0.5,
+    };
+  });
+  const intersects = (a, b) => !!a && !!b
+    && !(a.right <= b.x || b.right <= a.x || a.bottom <= b.y || b.bottom <= a.y);
+  const playerNow = rect('.player-now');
+  const playerCenter = rect('.player-center');
+  const playerRight = rect('.player-right');
+  return {
+    viewport: { width: innerWidth, height: innerHeight },
+    documentOverflow: document.documentElement.scrollWidth - innerWidth,
+    bodyOverflow: document.body.scrollWidth - innerWidth,
+    documentScrollHeight: document.documentElement.scrollHeight,
+    bodyClientHeight: document.body.clientHeight,
+    scroller: { ...rect('#main-scroll'), scrollHeight: scroller.scrollHeight, clientHeight: scroller.clientHeight },
+    bodyScrollers,
+    topbar: rect('.topbar'), inner: rect('.content-inner'),
+    shell: rect('.app-shell'), main: rect('main.main-content'),
+    player: rect('.player-bar'), nav: rect('.mobile-nav'), sidebar: rect('.sidebar'),
+    playerSurface: getComputedStyle(document.querySelector('.player-bar')).backgroundColor,
+    navSurface: getComputedStyle(document.querySelector('.mobile-nav')).backgroundColor,
+    playerNow, playerCenter, playerRight,
+    zoneOverlaps: {
+      nowCenter: intersects(playerNow, playerCenter),
+      centerRight: intersects(playerCenter, playerRight),
+    },
+    reserve: probe('var(--vela-bottom-reserve)'),
+    tokens: {
+      player: getComputedStyle(document.documentElement).getPropertyValue('--vela-player-height').trim(),
+      nav: getComputedStyle(document.documentElement).getPropertyValue('--vela-mobile-nav-height').trim(),
+      sidebar: getComputedStyle(document.documentElement).getPropertyValue('--vela-sidebar-width').trim(),
+      topbar: getComputedStyle(document.documentElement).getPropertyValue('--vela-topbar-height').trim(),
+      gutter: getComputedStyle(document.documentElement).getPropertyValue('--vela-gutter').trim(),
+      safe: ['top', 'right', 'bottom', 'left'].map(side => getComputedStyle(document.documentElement).getPropertyValue(`--vela-safe-${side}`).trim()),
+    },
+    navLabels,
+    audio: document.querySelectorAll('audio').length,
+  };
+};
+
+test('TR09 mobile composition, tablet boundaries and one reserved bottom band', async ({ page }) => {
+  test.setTimeout(240000);
+  const output = resolve(root, process.env.VELA_TRANSFER_EVIDENCE || 'target/checks/prototype-transfer-web');
+  await mkdir(output, { recursive: true });
+  const runtime = await signedInFixture(output);
+  try {
+    const track = await setupWithTracks(page, runtime, 12);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(runtime.origin);
+    await settle(page);
+    // Start a real source so the mini-player, its favorite control and the
+    // now-playing trigger are all part of the measured composition.
+    await navigate(page, 'Library');
+    await expect(page.locator('.track-row')).toHaveCount(12);
+    await page.getByRole('button', { name: `Play ${track.title}`, exact: true }).click();
+    await expect.poll(() => page.locator('#vela-audio').evaluate(audio => audio.currentTime)).toBeGreaterThan(0);
+    await navigate(page, 'Home');
+    await expect(page.locator('.home-header')).toBeVisible();
+
+    const sizes = [
+      { width: 320, height: 780, band: 'mobile', gutter: 16 },
+      { width: 390, height: 844, band: 'mobile', gutter: 20 },
+      { width: 671, height: 900, band: 'mobile', gutter: 20 },
+      { width: 760, height: 900, band: 'mobile', gutter: 20 },
+      { width: 761, height: 900, band: 'tablet', gutter: 20, sidebar: 175 },
+      { width: 900, height: 900, band: 'tablet', gutter: 20, sidebar: 175 },
+      { width: 1024, height: 768, band: 'tablet', gutter: 25, sidebar: 190 },
+      { width: 1284, height: 856, band: 'desktop', gutter: 33, sidebar: 216 },
+      { width: 1440, height: 900, band: 'desktop', gutter: 33, sidebar: 216 },
+      { width: 1728, height: 1000, band: 'desktop', gutter: 48, sidebar: 240 },
+    ];
+    const evidence = [];
+    for (const { width, height, band, gutter, sidebar } of sizes) {
+      await page.setViewportSize({ width, height });
+      await settle(page);
+      const measured = await page.evaluate(TR09_GEOMETRY);
+      const targets = await boxes(page, PRIMARY_TARGETS);
+      evidence.push({ width, height, band, measured, targets });
+
+      expect.soft(measured.documentOverflow, `${width} no document overflow`).toBeLessThanOrEqual(1);
+      expect.soft(measured.bodyOverflow, `${width} no body overflow`).toBeLessThanOrEqual(1);
+      // The application occupies one viewport and the body is never the catalog
+      // scroller; the central column is the only content scroller.
+      expect.soft(measured.documentScrollHeight, `${width} body is not a page scroller`).toBeLessThanOrEqual(height + 1);
+      expect.soft(measured.bodyScrollers.filter(name => name !== 'sidebar'), `${width} one central scroller`).toEqual(['main-scroll']);
+      expect.soft(measured.scroller.overflowY, `${width} central scroller scrolls`).toMatch(/auto|scroll/);
+      expect.soft(measured.scroller.scrollHeight, `${width} content actually scrolls`).toBeGreaterThan(measured.scroller.clientHeight);
+      expect.soft(measured.inner.paddingLeft, `${width} content gutter`).toBeCloseTo(gutter, 0);
+      expect.soft(measured.audio, `${width} one audio element`).toBe(1);
+      expect.soft(measured.zoneOverlaps.nowCenter, `${width} title zone clear of transport`).toBe(false);
+      expect.soft(measured.zoneOverlaps.centerRight, `${width} transport clear of the right zone`).toBe(false);
+
+      // The reserve the layout consumed equals the space the scroller ends above.
+      expect.soft(measured.reserve, `${width} bottom reserve`).toBeCloseTo(height - measured.scroller.bottom, 0);
+      expect.soft(measured.scroller.bottom, `${width} scroller ends above the bands`).toBeLessThanOrEqual(measured.player.y + 1);
+
+      if (band === 'mobile') {
+        expect.soft(measured.sidebar?.display, `${width} no sidebar`).toBe('none');
+        expect.soft(measured.nav.display, `${width} one navigation bar`).toBe('flex');
+        expect.soft(measured.nav.bottom, `${width} navigation at the viewport bottom`).toBeCloseTo(height, 0);
+        expect.soft(measured.nav.height, `${width} navigation band`).toBeCloseTo(70, 0);
+        expect.soft(measured.player.height, `${width} mini-player band`).toBeCloseTo(120, 0);
+        expect.soft(measured.player.bottom, `${width} mini-player above navigation`).toBeCloseTo(measured.nav.y, 0);
+        expect.soft(measured.topbar.height, `${width} mobile topbar`).toBeCloseTo(63, 0);
+        expect.soft(measured.playerSurface, `${width} mini-player uses the mobile player role`).toBe('rgb(28, 35, 24)');
+        expect.soft(measured.navSurface, `${width} navigation uses the mobile nav role`).toBe('rgb(16, 20, 14)');
+        expect.soft(measured.playerRight?.display, `${width} desktop volume stays in the expanded player`).toBe('none');
+        expect.soft(
+          Number.parseFloat(measured.tokens.player), `${width} one mobile player token`,
+        ).toBe(120);
+        // Primary actions reach the 44px product target.
+        expect.soft(targets['.mobile-nav button'].length, `${width} five mobile destinations`).toBe(5);
+        expect.soft(targets['.home-filter'].length, `${width} three home filters`).toBe(3);
+        expect.soft(targets['.topbar .button'].length, `${width} real topbar action`).toBeGreaterThanOrEqual(1);
+        for (const [selector, elements] of Object.entries(targets)) {
+          for (const element of elements) {
+            expect.soft(element.height, `${width} ${selector} ${element.label} height`)
+              .toBeGreaterThanOrEqual(43.5);
+            expect.soft(element.width, `${width} ${selector} ${element.label} width`)
+              .toBeGreaterThanOrEqual(43.5);
+          }
+        }
+        // Labels never cover the icon of their own tab or its neighbours.
+        for (const label of measured.navLabels) {
+          expect.soft(label.labelOverlapsIcon, `${width} ${label.text} label clear of icon`).toBe(false);
+          expect.soft(label.labelInsideButton, `${width} ${label.text} label inside its tab`).toBe(true);
+        }
+      } else {
+        expect.soft(measured.nav.display, `${width} no duplicate navigation bar`).toBe('none');
+        expect.soft(measured.sidebar.display, `${width} sidebar visible`).not.toBe('none');
+        expect.soft(measured.sidebar.width, `${width} sidebar width`).toBeCloseTo(sidebar, 0);
+        expect.soft(measured.main.x, `${width} sidebar offset applied once`).toBeCloseTo(sidebar, 0);
+        expect.soft(measured.player.height, `${width} desktop player band`).toBeCloseTo(88, 0);
+        expect.soft(measured.player.bottom, `${width} player at the viewport bottom`).toBeCloseTo(height, 0);
+        expect.soft(measured.topbar.height, `${width} desktop topbar`).toBeCloseTo(75, 0);
+        expect.soft(measured.playerRight.display, `${width} right zone present`).not.toBe('none');
+        expect.soft(measured.playerCenter.width, `${width} transport column`).toBeLessThanOrEqual(470.5);
+        // Desktop reference icons may be smaller, but their hit boxes must stay
+        // distinct: no two transport controls may share a rectangle.
+        const transport = targets['#player-toggle'];
+        expect.soft(transport.length, `${width} one play control`).toBe(1);
+        const buttons = await boxes(page, ['.player-buttons .icon-button']);
+        const rects = buttons['.player-buttons .icon-button'];
+        for (let at = 0; at < rects.length; at++) {
+          for (let next = at + 1; next < rects.length; next++) {
+            const a = rects[at], b = rects[next];
+            const overlap = !(a.right <= b.x || b.right <= a.x || a.bottom <= b.y || b.bottom <= a.y);
+            expect.soft(overlap, `${width} ${a.label}/${b.label} distinct hit boxes`).toBe(false);
+          }
+        }
+      }
+
+      // The last focused row/footer still scrolls fully above the bands.
+      await page.locator('#main-scroll').evaluate(element => { element.scrollTop = element.scrollHeight; });
+      const clearance = await page.evaluate(() => {
+        const scroller = document.querySelector('#main-scroll').getBoundingClientRect();
+        const footer = document.querySelector('.content-footer').getBoundingClientRect();
+        const player = document.querySelector('.player-bar').getBoundingClientRect();
+        const nav = document.querySelector('.mobile-nav').getBoundingClientRect();
+        return {
+          scrollerBottom: scroller.bottom, footerBottom: footer.bottom,
+          playerTop: player.top, navTop: nav.top,
+          topbar: document.querySelector('.topbar').getBoundingClientRect().top,
+        };
+      });
+      expect.soft(clearance.footerBottom, `${width} final footer above the bands`)
+        .toBeLessThanOrEqual(clearance.scrollerBottom + 1);
+      await page.locator('#main-scroll').evaluate(element => { element.scrollTop = 0; });
+      await settle(page);
+      await page.screenshot({ path: `${output}/tr09-composition-${width}x${height}.png`, animations: 'disabled' });
+    }
+
+    // The stylesheet has one reserve authority: no band rule invents its own
+    // player+navigation arithmetic and no rule reads env() directly.
+    const css = await (await page.request.get(runtime.origin + '/style.css')).text();
+    expect(css).toContain('--vela-bottom-reserve');
+    expect(css).toContain('calc(var(--vela-mobile-nav-height) + var(--vela-safe-bottom))');
+    const envUses = css.match(/env\(\s*safe-area-inset-[a-z]+\s*,/g) || [];
+    expect(envUses.length, 'safe-area env() is declared once per side in the token layer').toBe(4);
+
+    await writeFile(`${output}/tr09-composition-evidence.json`, JSON.stringify(evidence, null, 2));
+  } finally { await runtime.close(); }
+});
+
+test('TR09 safe-area insets are consumed once by the bands and the content gutter', async ({ page }) => {
+  test.setTimeout(180000);
+  const output = resolve(root, process.env.VELA_TRANSFER_EVIDENCE || 'target/checks/prototype-transfer-web');
+  await mkdir(output, { recursive: true });
+  const runtime = await signedInFixture(output);
+  try {
+    await setupWithTracks(page, runtime, 4);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(runtime.origin);
+    await settle(page);
+
+    // The environment has no cutout, so the env() fallback must resolve to 0 and
+    // the reference geometry must be untouched before any emulation.
+    const baseline = await page.evaluate(TR09_GEOMETRY);
+    expect(baseline.tokens.safe.map((value) => Number.parseFloat(value))).toEqual([0, 0, 0, 0]);
+    expect(baseline.topbar.height).toBeCloseTo(63, 0);
+    expect(baseline.nav.height).toBeCloseTo(70, 0);
+    expect(baseline.reserve).toBeCloseTo(190, 0);
+
+    // Hardware-style insets are emulated through the same variables the shell
+    // consumes, so this is the geometry a notched device would lay out.
+    const emulated = await page.evaluate(async () => {
+      const root = document.documentElement;
+      for (const [side, value] of Object.entries({ top: '47px', right: '24px', bottom: '34px', left: '24px' })) {
+        root.style.setProperty(`--vela-safe-${side}`, value);
+      }
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      return true;
+    });
+    expect(emulated).toBe(true);
+    const insets = await page.evaluate(TR09_GEOMETRY);
+    const targets = await boxes(page, ['.mobile-nav button', '.topbar .button', '.player-now .player-favorite']);
+    expect(insets.documentOverflow).toBeLessThanOrEqual(1);
+    expect(insets.topbar.height, 'the topbar owns the top inset').toBeCloseTo(63 + 47, 0);
+    expect(insets.nav.height, 'the navigation row owns the bottom inset once').toBeCloseTo(70 + 34, 0);
+    expect(insets.nav.bottom).toBeCloseTo(844, 0);
+    expect(insets.player.bottom, 'the mini-player stays above the navigation band').toBeCloseTo(insets.nav.y, 1);
+    expect(insets.scroller.y, 'content starts below the topbar inset').toBeCloseTo(insets.topbar.bottom, 1);
+    expect(insets.reserve, 'the reserve includes the inset exactly once').toBeCloseTo(844 - insets.scroller.bottom, 0);
+    expect(insets.inner.paddingLeft, 'content gutter honours the left inset').toBeCloseTo(24, 0);
+    expect(insets.inner.paddingRight, 'content gutter honours the right inset').toBeCloseTo(24, 0);
+    expect(insets.player.paddingLeft, 'player respects the left inset').toBeCloseTo(24, 0);
+    for (const [selector, elements] of Object.entries(targets)) {
+      for (const element of elements) {
+        expect.soft(element.x, `${selector} inside the left inset`).toBeGreaterThanOrEqual(23.5);
+        expect.soft(element.right, `${selector} inside the right inset`).toBeLessThanOrEqual(390 - 23.5);
+      }
+    }
+    await page.screenshot({ path: `${output}/tr09-safe-area-390.png`, animations: 'disabled' });
+
+    // The desktop shell consumes the same tokens: the topbar grows by the top
+    // inset and the player never overlaps the left/right insets.
+    await page.evaluate(() => {
+      for (const side of ['top', 'right', 'bottom', 'left']) document.documentElement.style.removeProperty(`--vela-safe-${side}`);
+    });
+    await page.setViewportSize({ width: 1284, height: 856 });
+    await settle(page);
+    const desktop = await page.evaluate(async () => {
+      document.documentElement.style.setProperty('--vela-safe-top', '24px');
+      document.documentElement.style.setProperty('--vela-safe-left', '18px');
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      return true;
+    });
+    expect(desktop).toBe(true);
+    const wide = await page.evaluate(TR09_GEOMETRY);
+    expect(wide.topbar.height).toBeCloseTo(99, 0);
+    expect(wide.inner.paddingLeft, 'the wider of gutter and inset wins').toBeCloseTo(33, 0);
+    expect(wide.documentOverflow).toBeLessThanOrEqual(1);
+    await writeFile(`${output}/tr09-safe-area-evidence.json`, JSON.stringify({ baseline, insets, wide }, null, 2));
+  } finally { await runtime.close(); }
+});
+
+test('TR09 short-height 390x600 keeps both bands reserved and every layer usable', async ({ page }) => {
+  test.setTimeout(180000);
+  const output = resolve(root, process.env.VELA_TRANSFER_EVIDENCE || 'target/checks/prototype-transfer-web');
+  await mkdir(output, { recursive: true });
+  const runtime = await signedInFixture(output);
+  try {
+    const track = await setupWithTracks(page, runtime, 8);
+    await page.setViewportSize({ width: 390, height: 600 });
+    await page.goto(runtime.origin);
+    await settle(page);
+    await navigate(page, 'Library');
+    await expect(page.locator('.track-row')).toHaveCount(8);
+
+    const short = await page.evaluate(TR09_GEOMETRY);
+    expect(short.documentOverflow).toBeLessThanOrEqual(1);
+    expect(short.documentScrollHeight, 'the body is not a second scroller').toBeLessThanOrEqual(601);
+    expect(short.player.height, 'the player band stays reserved').toBeCloseTo(120, 0);
+    expect(short.nav.height, 'the navigation band stays reserved').toBeCloseTo(70, 0);
+    expect(short.nav.bottom).toBeCloseTo(600, 0);
+    expect(short.player.bottom).toBeCloseTo(short.nav.y, 0);
+    expect(short.scroller.bottom).toBeCloseTo(short.player.y, 0);
+    expect(short.scroller.clientHeight, 'the content keeps a usable scroller').toBeGreaterThan(240);
+    expect(short.reserve).toBeCloseTo(600 - short.scroller.bottom, 0);
+
+    // The primary transport and every navigation tab stay fully inside the
+    // visible viewport instead of being clipped by the short height.
+    const primary = await boxes(page, ['#player-toggle', '#player-next', '.player-actions, .mobile-queue', '.mobile-nav button']);
+    for (const [selector, elements] of Object.entries(primary)) {
+      for (const element of elements) {
+        expect.soft(element.bottom, `${selector} ${element.label} above the fold`).toBeLessThanOrEqual(600.5);
+        expect.soft(element.y, `${selector} ${element.label} below the topbar`).toBeGreaterThanOrEqual(-0.5);
+        expect.soft(element.height, `${selector} ${element.label} target`).toBeGreaterThanOrEqual(43.5);
+      }
+    }
+
+    // A row action sheet opens above the reserved bands, keeps every action and
+    // is not clipped by the 600px height.
+    await page.locator('.track-row').first().locator('.track-menu-trigger, [aria-label^="More actions"]').first().click();
+    const panel = page.locator('.track-menu-panel');
+    await expect(panel).toBeVisible();
+    const sheet = await page.evaluate(() => {
+      const panel = document.querySelector('.track-menu-panel');
+      const rect = panel.getBoundingClientRect();
+      return {
+        top: rect.top, bottom: rect.bottom, height: rect.height,
+        playerTop: document.querySelector('.player-bar').getBoundingClientRect().top,
+        clientHeight: panel.clientHeight, scrollHeight: panel.scrollHeight,
+        actions: [...panel.querySelectorAll(':scope > button')].map(button => {
+          const box = button.getBoundingClientRect();
+          return { label: button.textContent.trim(), height: box.height, top: box.top, bottom: box.bottom };
+        }),
+        backdrop: getComputedStyle(document.querySelector('.track-menu-backdrop')).display,
+      };
+    });
+    expect(sheet.backdrop).toBe('block');
+    expect(sheet.bottom).toBeLessThanOrEqual(sheet.playerTop + 1);
+    expect(sheet.top).toBeGreaterThanOrEqual(0);
+    for (const action of sheet.actions) {
+      expect.soft(action.height, `${action.label} target`).toBeGreaterThanOrEqual(44);
+      expect.soft(action.top, `${action.label} reachable`).toBeGreaterThanOrEqual(sheet.top - 1);
+      expect.soft(action.bottom, `${action.label} not clipped`).toBeLessThanOrEqual(sheet.bottom + 1);
+    }
+    await page.screenshot({ path: `${output}/tr09-short-600-menu.png`, animations: 'disabled' });
+    await page.keyboard.press('Escape');
+    await expect(panel).toHaveCount(0);
+
+    // The upload dialog keeps Close and its primary submit reachable; the modal
+    // scrolls internally instead of pushing a primary action off-screen.
+    await page.locator('.topbar .button.primary').click();
+    const modal = page.locator('.modal');
+    await expect(modal).toBeVisible();
+    const dialog = await page.evaluate(() => {
+      const modal = document.querySelector('.modal');
+      const rect = modal.getBoundingClientRect();
+      const close = modal.querySelector('button[aria-label="Close upload dialog"]').getBoundingClientRect();
+      const submit = [...modal.querySelectorAll('button')].find(button => /upload to my library/i.test(button.textContent)).getBoundingClientRect();
+      return {
+        top: rect.top, bottom: rect.bottom, height: rect.height,
+        close: { top: close.top, bottom: close.bottom, height: close.height },
+        submit: { top: submit.top, bottom: submit.bottom, height: submit.height },
+        scrollable: modal.scrollHeight > modal.clientHeight,
+      };
+    });
+    expect(dialog.top).toBeGreaterThanOrEqual(0);
+    expect(dialog.bottom).toBeLessThanOrEqual(600.5);
+    expect(dialog.close.top).toBeGreaterThanOrEqual(0);
+    expect(dialog.close.bottom).toBeLessThanOrEqual(600.5);
+    expect(dialog.submit.bottom).toBeLessThanOrEqual(600.5);
+    expect(dialog.submit.height).toBeGreaterThanOrEqual(43.5);
+    await page.screenshot({ path: `${output}/tr09-short-600-upload.png`, animations: 'disabled' });
+    await page.locator('.modal button[aria-label="Close upload dialog"]').click();
+    await expect(modal).toHaveCount(0);
+
+    // The full-screen Now Playing dialog keeps its Close and seek reachable.
+    await page.getByRole('button', { name: `Play ${track.title}`, exact: true }).click();
+    await page.locator('.now-playing-trigger').click();
+    const nowPlaying = page.getByRole('dialog').first();
+    await expect(nowPlaying).toBeVisible();
+    // The dialog has a real 180ms entry transition; measure the settled box.
+    await nowPlaying.evaluate(element => Promise.all(element.getAnimations().map(animation => animation.finished)));
+    const playing = await page.evaluate(() => {
+      const dialog = document.querySelector('dialog.now-playing-dialog');
+      const rect = dialog.getBoundingClientRect();
+      const close = dialog.querySelector('[data-dialog-dismiss]').getBoundingClientRect();
+      const seek = dialog.querySelector('.seek-control input, input[type=range]')?.getBoundingClientRect();
+      return {
+        top: rect.top, bottom: rect.bottom,
+        close: { top: close.top, bottom: close.bottom, height: close.height },
+        seek: seek ? { top: seek.top, bottom: seek.bottom, height: seek.height } : null,
+        scrollable: dialog.scrollHeight > dialog.clientHeight,
+        overflow: document.documentElement.scrollWidth - innerWidth,
+      };
+    });
+    expect(playing.top).toBeGreaterThanOrEqual(0);
+    expect(playing.bottom).toBeLessThanOrEqual(600.5);
+    expect(playing.close.top).toBeGreaterThanOrEqual(0);
+    expect(playing.close.bottom).toBeLessThanOrEqual(600.5);
+    expect(playing.overflow).toBeLessThanOrEqual(1);
+    if (playing.seek) {
+      expect(playing.seek.top).toBeGreaterThanOrEqual(0);
+      expect(playing.seek.bottom).toBeLessThanOrEqual(600.5 + (playing.scrollable ? Number.POSITIVE_INFINITY : 0));
+    }
+    await page.screenshot({ path: `${output}/tr09-short-600-now-playing.png`, animations: 'disabled' });
+    await page.keyboard.press('Escape');
+    await expect(page.locator('dialog.now-playing-dialog')).toHaveCount(0);
+
+    // The queue drawer is still a top-layer modal with its own scroll.
+    await page.getByRole('button', { name: 'Show playback queue and controls', exact: true }).click();
+    const queue = page.getByRole('complementary', { name: 'Playback queue', exact: true });
+    await expect(queue).toBeVisible();
+    const drawer = await page.evaluate(() => {
+      const dialog = document.querySelector('#queue-drawer-dialog');
+      const rect = dialog.getBoundingClientRect();
+      return {
+        top: rect.top, bottom: rect.bottom, width: rect.width,
+        closeLabel: dialog.querySelector('[data-dialog-dismiss], .queue-close')?.getAttribute('aria-label') || null,
+        overflow: document.documentElement.scrollWidth - innerWidth,
+      };
+    });
+    expect(drawer.top).toBeGreaterThanOrEqual(0);
+    expect(drawer.overflow).toBeLessThanOrEqual(1);
+    await page.screenshot({ path: `${output}/tr09-short-600-queue.png`, animations: 'disabled' });
+    await writeFile(`${output}/tr09-short-height-evidence.json`, JSON.stringify({ short, primary, sheet, dialog, playing, drawer }, null, 2));
+  } finally { await runtime.close(); }
+});
+
+test('TR09 keyboard and touch contract: transport ownership, focus rings, no shortcut theft', async ({ page }) => {
+  test.setTimeout(180000);
+  const output = resolve(root, process.env.VELA_TRANSFER_EVIDENCE || 'target/checks/prototype-transfer-web');
+  await mkdir(output, { recursive: true });
+  const runtime = await signedInFixture(output);
+  try {
+    const first = await setupWithTracks(page, runtime, 3);
+    const auth = await (await page.request.get(runtime.origin + '/api/me')).json();
+    // A 30s fixture keeps the +/-10s keyboard seek inside the track.
+    const long = await page.request.post(runtime.origin + '/api/upload', {
+      headers: { 'X-CSRF-Token': auth.csrf_token, Origin: runtime.origin },
+      multipart: { file: { name: 'TR09 long seek.wav', mimeType: 'audio/wav', buffer: pcmWave(30, 330) } },
+    });
+    expect(long.ok()).toBeTruthy();
+    const longTrack = (await long.json()).track;
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(runtime.origin);
+    await settle(page);
+    await navigate(page, 'Library');
+    await expect(page.locator('.track-row')).toHaveCount(4);
+    await page.getByRole('button', { name: `Play ${longTrack.title}`, exact: true }).click();
+    await expect.poll(() => page.locator('#vela-audio').evaluate(audio => audio.currentTime)).toBeGreaterThan(0);
+    const audio = page.locator('#vela-audio');
+    const playing = async () => !(await audio.evaluate(node => node.paused));
+    expect(await playing()).toBe(true);
+    expect(await page.locator('audio').count(), 'one persistent audio element').toBe(1);
+
+    // The documented Space/Arrow transport works from the page body: the closed
+    // playlist picker must not advertise an open surface (TR09 regression).
+    await page.evaluate(() => document.activeElement.blur());
+    expect(await page.evaluate(() => document.activeElement.tagName)).toBe('BODY');
+    expect(await page.evaluate(() => document.querySelector('[data-vela-overlay="playlist-picker"]')?.id ?? null)).toBe(null);
+    const scrollTop = await page.locator('#main-scroll').evaluate(element => element.scrollTop);
+    await page.keyboard.press('Space');
+    await expect.poll(() => audio.evaluate(node => node.paused), 'Space pauses from the body').toBe(true);
+    expect(await page.locator('#main-scroll').evaluate(element => element.scrollTop), 'Space does not scroll the page').toBe(scrollTop);
+    await page.keyboard.press('Space');
+    await expect.poll(() => audio.evaluate(node => node.paused), 'Space resumes from the body').toBe(false);
+
+    const beforeSeek = await audio.evaluate(node => node.currentTime);
+    await page.keyboard.press('ArrowRight');
+    await expect.poll(() => audio.evaluate(node => node.currentTime), 'ArrowRight seeks forward').toBeGreaterThan(beforeSeek + 5);
+    const afterSeek = await audio.evaluate(node => node.currentTime);
+    await page.keyboard.press('ArrowLeft');
+    await expect.poll(() => audio.evaluate(node => node.currentTime), 'ArrowLeft seeks back').toBeLessThan(afterSeek - 5);
+
+    // A focused control that owns Space keeps it: the tab activates, the
+    // transport does not.
+    const libraryTab = page.locator('.mobile-nav button[data-destination="library"]');
+    await libraryTab.focus();
+    const pausedBefore = await audio.evaluate(node => node.paused);
+    const sourceBefore = await audio.evaluate(node => node.currentSrc);
+    await page.keyboard.press('Space');
+    await page.waitForTimeout(400);
+    expect(await audio.evaluate(node => node.paused), 'a focused tab owns Space').toBe(pausedBefore);
+    expect(await audio.evaluate(node => node.currentSrc)).toBe(sourceBefore);
+
+    // An open modal dialog owns Space until it closes.
+    await page.locator('.now-playing-trigger').click();
+    const dialog = page.locator('dialog.now-playing-dialog');
+    await expect(dialog).toBeVisible();
+    await page.keyboard.press('Space');
+    await page.waitForTimeout(400);
+    expect(await audio.evaluate(node => node.paused), 'the open dialog owns Space').toBe(false);
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+
+    // Editing keeps Space: the search field receives a real space character.
+    await page.locator('.mobile-nav button[data-destination="search"]').click();
+    const search = page.locator('#global-search');
+    await expect(search).toBeVisible();
+    await search.click();
+    await search.type('quiet room');
+    await page.keyboard.press('Space');
+    await expect(search).toHaveValue('quiet room ');
+    expect(await audio.evaluate(node => node.paused), 'typing never toggles playback').toBe(false);
+
+    // Browser zoom/undo and the app's own search shortcut are distinguishable:
+    // the app never cancels Ctrl/Cmd +/-/0 or editing shortcuts, and Ctrl+K is
+    // its documented search shortcut rather than a zoom replacement.
+    const shortcuts = await page.evaluate(() => {
+      const results = {};
+      for (const [code, key, ctrl] of [
+        ['Equal', '+', true], ['Minus', '-', true], ['Digit0', '0', true],
+        ['KeyZ', 'z', true], ['KeyK', 'k', true], ['KeyA', 'a', true],
+      ]) {
+        const event = new KeyboardEvent('keydown', { code, key, ctrlKey: ctrl, bubbles: true, cancelable: true });
+        document.body.dispatchEvent(event);
+        results[code] = event.defaultPrevented;
+      }
+      return results;
+    });
+    for (const code of ['Equal', 'Minus', 'Digit0', 'KeyZ', 'KeyA']) {
+      expect(shortcuts[code], `Ctrl+${code} stays with the browser`).toBe(false);
+    }
+    expect(shortcuts.KeyK, 'Ctrl+K is the app search shortcut').toBe(true);
+    await page.keyboard.press('Control+k');
+    await expect(search).toBeFocused();
+
+    // Focus rings: 2px, visible, and inside the viewport for shell-level
+    // controls (the mobile shell clips overflow at its own edge). A real Tab
+    // press marks the keyboard modality, so the following programmatic focus is
+    // a genuine :focus-visible in both engines (Firefox does not count a bare
+    // modifier for that heuristic); the ring is also read from the requested
+    // selector, never from whatever happens to hold focus in that engine.
+    const ringOf = async (selector) => {
+      await page.keyboard.press('Tab');
+      await page.locator(selector).focus();
+      await expect.poll(
+        () => page.evaluate(sel => document.activeElement === document.querySelector(sel), selector),
+        { message: `${selector} receives focus` },
+      ).toBe(true);
+      return page.evaluate(sel => {
+        const element = document.querySelector(sel);
+        const style = getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        return {
+          label: (element.getAttribute('aria-label') || element.textContent || '').trim().slice(0, 32),
+          outlineWidth: Number.parseFloat(style.outlineWidth),
+          outlineStyle: style.outlineStyle, outlineColor: style.outlineColor,
+          outlineOffset: Number.parseFloat(style.outlineOffset),
+          focusVisible: element.matches(':focus-visible'),
+          x: rect.x, y: rect.y, right: rect.right, bottom: rect.bottom, innerWidth, innerHeight,
+        };
+      }, selector);
+    };
+    const navRing = await ringOf('.mobile-nav button[data-destination="home"]');
+    expect(navRing.focusVisible, `${navRing.label} matches :focus-visible`).toBe(true);
+    expect(navRing.outlineStyle, `${navRing.label} ring style`).toBe('solid');
+    expect(navRing.outlineWidth, `${navRing.label} ring width`).toBeGreaterThanOrEqual(2);
+    // A negative offset paints the ring inside the target, so the shell edge
+    // cannot cut it off; an outside ring would have to stay in the viewport.
+    const ringBottom = navRing.bottom + (navRing.outlineOffset >= 0 ? navRing.outlineOffset + navRing.outlineWidth : 0);
+    expect(ringBottom, 'navigation focus ring visible').toBeLessThanOrEqual(navRing.innerHeight + 0.5);
+    expect(navRing.bottom, 'navigation ring inside the tab band').toBeLessThanOrEqual(navRing.innerHeight + 0.5);
+
+    const ringTargets = ['#player-toggle', '#player-next', '.topbar .button.primary'];
+    for (const selector of ringTargets) {
+      const ring = await ringOf(selector);
+      expect.soft(ring.focusVisible, `${selector} matches :focus-visible`).toBe(true);
+      expect.soft(ring.outlineStyle, `${selector} ring style`).toBe('solid');
+      expect.soft(ring.outlineWidth, `${selector} ring width`).toBeGreaterThanOrEqual(2);
+      expect.soft(ring.outlineColor, `${selector} ring is the primary role`).toBe('rgb(211, 233, 165)');
+      const margin = Math.max(ring.outlineOffset + ring.outlineWidth, 0);
+      expect.soft(ring.x - margin, `${selector} ring inside the left edge`).toBeGreaterThanOrEqual(-0.5);
+      expect.soft(ring.right + margin, `${selector} ring inside the right edge`).toBeLessThanOrEqual(ring.innerWidth + 0.5);
+      expect.soft(ring.y - margin, `${selector} ring inside the top edge`).toBeGreaterThanOrEqual(-0.5);
+      expect.soft(ring.bottom + margin, `${selector} ring inside the bottom edge`).toBeLessThanOrEqual(ring.innerHeight + 0.5);
+    }
+
+    await writeFile(`${output}/tr09-input-evidence.json`, JSON.stringify({ shortcuts, navRing }, null, 2));
+  } finally { await runtime.close(); }
+});
+
+test('TR09 reduced motion keeps state and actions, and coarse-pointer targets are real', async ({ page, browser }) => {
+  test.setTimeout(180000);
+  const output = resolve(root, process.env.VELA_TRANSFER_EVIDENCE || 'target/checks/prototype-transfer-web');
+  await mkdir(output, { recursive: true });
+  const runtime = await signedInFixture(output);
+  try {
+    const track = await setupWithTracks(page, runtime, 4);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(runtime.origin);
+    await settle(page);
+    await navigate(page, 'Library');
+    await page.getByRole('button', { name: `Play ${track.title}`, exact: true }).click();
+    await expect.poll(() => page.locator('#vela-audio').evaluate(audio => audio.currentTime)).toBeGreaterThan(0);
+    const source = await page.locator('#vela-audio').evaluate(audio => audio.currentSrc);
+    const storage = await page.context().storageState();
+    // The preference is emulated on the same page, so the playing source is the
+    // one real state the reduced-motion composition has to preserve.
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await settle(page);
+    expect(await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches)).toBe(true);
+    const state = await page.evaluate(() => {
+      const equalizer = [...document.querySelectorAll('.player-eq i')];
+      return {
+        animations: equalizer.map(bar => getComputedStyle(bar).animationName),
+        transitions: [...document.querySelectorAll('.play-toggle-face')].map(face => getComputedStyle(face).transitionDuration),
+        playing: document.querySelector('.player-eq')?.dataset.state || null,
+        label: document.querySelector('#player-toggle')?.getAttribute('aria-label'),
+        playControl: getComputedStyle(document.querySelector('#player-toggle')).display,
+      };
+    });
+    expect(state.animations.length).toBeGreaterThan(0);
+    expect(state.animations.every(name => name === 'none'), 'the equalizer is static').toBe(true);
+    expect(state.transitions.every(duration => duration === '0s'), 'transitions are removed').toBe(true);
+    // State and actions survive: the same source keeps playing, the transport
+    // stays a real enabled control and navigation still works.
+    expect(state.label).toBe('Pause');
+    expect(state.playing).toBe('playing');
+    expect(state.playControl).not.toBe('none');
+    expect(await page.locator('#vela-audio').evaluate(audio => audio.paused)).toBe(false);
+    expect(await page.locator('#vela-audio').evaluate(audio => audio.currentSrc)).toBe(source);
+    await expect(page.locator('.now-playing .player-title')).toHaveText(track.title);
+    await page.locator('.mobile-nav button[data-destination="search"]').click();
+    await expect(page.locator('#global-search')).toBeVisible();
+    await page.locator('.mobile-nav button[data-destination="home"]').click();
+    await expect(page.locator('.home-header')).toBeVisible();
+    expect(await page.locator('audio').count(), 'one audio element').toBe(1);
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+
+    // Coarse pointer (a real touch tablet): the composition is unchanged, but
+    // the primary hit boxes reach the product target without overlapping.
+    const coarse = await browser.newContext({ viewport: { width: 1024, height: 768 }, hasTouch: true, storageState: storage });
+    const touch = await coarse.newPage();
+    try {
+      await touch.goto(runtime.origin);
+      await touch.locator('.app-shell').waitFor();
+      await settle(touch);
+      const probe = await touch.evaluate(() => ({
+        coarse: matchMedia('(pointer: coarse)').matches,
+        hoverNone: matchMedia('(hover: none)').matches,
+      }));
+      test.skip(!probe.coarse, 'this engine does not emulate (pointer: coarse) through hasTouch');
+      expect(probe.coarse).toBe(true);
+      const measured = await touch.evaluate(() => {
+        const box = element => {
+          const rect = element.getBoundingClientRect();
+          return { x: rect.x, y: rect.y, width: rect.width, height: rect.height, right: rect.right, bottom: rect.bottom };
+        };
+        const visible = selector => [...document.querySelectorAll(selector)]
+          .filter(element => getComputedStyle(element).display !== 'none' && element.getBoundingClientRect().width > 0);
+        return {
+          player: box(document.querySelector('.player-bar')),
+          transport: visible('.player-buttons .icon-button, .play-toggle').map(element => ({
+            label: element.getAttribute('aria-label'), ...box(element),
+          })),
+          right: visible('.player-right .icon-button').map(element => ({
+            label: element.getAttribute('aria-label'), ...box(element),
+          })),
+          volume: document.querySelector('.player-right input[type=range]')
+            ? box(document.querySelector('.player-right input[type=range]')) : null,
+          nav: getComputedStyle(document.querySelector('.mobile-nav')).display,
+          sidebar: document.querySelector('.sidebar').getBoundingClientRect().width,
+          overflow: document.documentElement.scrollWidth - innerWidth,
+          rightOverflow: (() => {
+            const element = document.querySelector('.player-right');
+            return element.scrollWidth - element.clientWidth;
+          })(),
+        };
+      });
+      expect(measured.overflow).toBeLessThanOrEqual(1);
+      expect(measured.nav, 'the tablet keeps the sidebar composition only').toBe('none');
+      expect(measured.sidebar).toBeGreaterThan(0);
+      expect(measured.transport.length).toBeGreaterThanOrEqual(4);
+      for (const control of measured.transport) {
+        expect.soft(control.width, `${control.label} width`).toBeGreaterThanOrEqual(43.5);
+        expect.soft(control.height, `${control.label} height`).toBeGreaterThanOrEqual(43.5);
+      }
+      for (const control of measured.right) {
+        expect.soft(control.width, `${control.label} width`).toBeGreaterThanOrEqual(43.5);
+      }
+      if (measured.volume) {
+        expect.soft(measured.volume.width, 'volume target').toBeGreaterThanOrEqual(43.5);
+        expect.soft(measured.volume.right, 'volume inside the player').toBeLessThanOrEqual(measured.player.right + 0.5);
+      }
+      expect.soft(measured.rightOverflow, 'the right zone never overflows its column').toBeLessThanOrEqual(1);
+      for (let at = 0; at < measured.transport.length; at++) {
+        for (let next = at + 1; next < measured.transport.length; next++) {
+          const a = measured.transport[at], b = measured.transport[next];
+          const overlap = !(a.right <= b.x || b.right <= a.x || a.bottom <= b.y || b.bottom <= a.y);
+          expect.soft(overlap, `${a.label}/${b.label} distinct touch targets`).toBe(false);
+        }
+      }
+      await touch.screenshot({ path: `${output}/tr09-coarse-tablet-1024.png`, animations: 'disabled' });
+      await writeFile(`${output}/tr09-coarse-evidence.json`, JSON.stringify({ probe, measured }, null, 2));
+    } finally { await coarse.close(); }
   } finally { await runtime.close(); }
 });

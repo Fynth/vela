@@ -2928,8 +2928,15 @@ fn App() -> Element {
                    browser owns the top layer, inertness and its backdrop while the
                    root player's own dialog handling stays untouched. It lists only
                    playlists the server says this account may edit, and the explicit
-                   Add action commits through the existing revision/mutation CAS. */
-                dialog { id: "playlist-picker", class: "playlist-picker", "data-vela-overlay": "playlist-picker", "aria-modal": "true", "aria-labelledby": "playlist-picker-title", "aria-describedby": "playlist-picker-hint",
+                   Add action commits through the existing revision/mutation CAS.
+                   TR09: the overlay marker has to describe an *open* layer. This
+                   dialog is mounted for the app's whole lifetime, so an
+                   unconditional marker made the global Space/Arrow handler treat
+                   the shell as permanently covered and the documented transport
+                   shortcut never reached the player. The marker is kept for the
+                   frame between freezing the row target and showModal(); after
+                   that, the native `dialog[open]` state owns modal detection. */
+                dialog { id: "playlist-picker", class: "playlist-picker", "data-vela-overlay": if surfaces.picker_target().is_some() { "playlist-picker" } else { "closed" }, "aria-modal": "true", "aria-labelledby": "playlist-picker-title", "aria-describedby": "playlist-picker-hint",
                         oncancel: { let surfaces = surfaces.clone(); move |event| { event.prevent_default(); surfaces.close_picker(); } },
                         onkeydown: { let surfaces = surfaces.clone(); let lists = picker_lists.clone(); move |event| {
                             let controls = picker_controls(&lists, has_editable_playlists);

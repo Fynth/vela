@@ -94,6 +94,18 @@
   --vela-content-top: 24px;
   --vela-mobile-nav-height: 70px;
   --vela-mobile-player-height: 120px;
+  /* TR09: display-cutout/home-indicator insets are declared once, as variables,
+     so every band and the content gutter consume the same numbers. On hardware
+     they resolve from env(safe-area-inset-*); a browser test can emulate the
+     same geometry by overriding these four properties instead of guessing. */
+  --vela-safe-top: env(safe-area-inset-top, 0px);
+  --vela-safe-right: env(safe-area-inset-right, 0px);
+  --vela-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --vela-safe-left: env(safe-area-inset-left, 0px);
+  /* The one bottom reserve the central scroller ends above. Desktop shell: the
+     player band. Mobile composition (<=760px): the player band, the navigation
+     band and the one safe-area inset that the navigation row already owns. */
+  --vela-bottom-reserve: var(--vela-player-height);
   /* Compatibility aliases: the old names keep their old meaning. --quiet is
      aliased to the contrast-qualified text role because literal quiet on a
      card is below the normal-text threshold. */
@@ -187,7 +199,9 @@
 }
 .content-inner {
   width:100%; max-width:var(--vela-content-max); min-width:0;
-  margin:0 auto; padding:var(--vela-content-top) var(--vela-gutter) 24px;
+  margin:0 auto;
+  padding:var(--vela-content-top) max(var(--vela-gutter), var(--vela-safe-right)) 24px
+    max(var(--vela-gutter), var(--vela-safe-left));
 }
 .player-center {
   display:flex; flex-direction:column; justify-content:center;
@@ -202,7 +216,7 @@
 @media(min-width:1500px){:root{--vela-sidebar-width:240px;--vela-gutter:48px;--vela-content-top:35px}.library-banner{min-height:320px;padding:40px 45px}.library-banner h2{font-size:48px}.banner-record{width:390px;height:390px;right:65px;top:18px}.banner-record>div{width:135px;height:135px;font-size:85px;line-height:125px}.banner-record>div:after{top:64px;left:64px}.track-row{min-height:75px}}
 @media(max-width:1100px){:root{--vela-sidebar-width:190px;--vela-gutter:25px}.sidebar{padding:28px 14px}.track-header,.track-row{grid-template-columns:25px minmax(160px,1.5fr) minmax(100px,1fr) 48px 77px;gap:10px}.track-header>span:nth-child(4),.track-row>.quality-tag{display:none}.banner-record{right:-30px;width:310px;height:310px}.library-banner{padding:28px}.library-banner h2{font-size:35px}.player-bar{gap:17px;padding-left:20px;padding-right:20px;grid-template-columns:minmax(160px,1fr) minmax(260px,1.4fr) minmax(120px,.7fr)}.player-buttons{gap:12px}.player-right{gap:6px}.player-right input{max-width:66px}.import-layout{grid-template-columns:1fr 1fr;gap:16px}.panel{padding:23px}.section-toolbar{flex-wrap:wrap}.section-toolbar .search-form{flex:1;max-width:310px}.settings-grid{gap:16px}}
 @media(max-width:850px){:root{--vela-sidebar-width:175px;--vela-gutter:20px}.sidebar .brand{margin-left:9px}.sidebar .nav-item{padding-left:10px;gap:9px}.sidebar-collection{margin-left:9px;margin-right:9px}.breadcrumb{font-size:8px;letter-spacing:1px}.topbar-actions{gap:9px}.banner-record{right:-100px;top:28px}.library-banner h2{font-size:32px}.library-banner p{max-width:240px}.track-header,.track-row{grid-template-columns:20px minmax(150px,1fr) 42px 73px;gap:9px}.track-album,.track-header>span:nth-child(3){display:none}.track-title{gap:9px}.track-title strong{font-size:11px}.track-title small{font-size:9px}.artwork{width:37px;height:37px;min-width:37px}.track-actions{gap:0}.track-actions .icon-button{min-width:22px}.track-actions .icon-button:last-child{font-size:17px}.import-layout{grid-template-columns:1fr}.settings-grid{grid-template-columns:1fr}.player-bar{grid-template-columns:minmax(160px,1fr) minmax(250px,1.5fr);padding:12px 20px}.player-right{display:none}.now-playing .artwork{width:44px;height:44px;min-width:44px}.player-buttons{gap:13px}.auth-story{padding:40px 12%}.auth-story h1{font-size:58px}.auth-card{padding:40px 30px}.vinyl{bottom:30px;width:380px;height:380px}.sidebar .avatar{width:28px;height:28px}.account{gap:8px;padding-left:4px}.account strong{max-width:85px;font-size:10px}.account small{font-size:8px}}
-@media(max-width:620px){:root{--vela-sidebar-width:0px;--vela-gutter:20px;--vela-content-top:25px;--vela-topbar-height:63px;--vela-player-height:var(--vela-mobile-player-height)}.app-shell{padding:0}.sidebar{display:none}.breadcrumb{max-width:130px;line-height:1.7;font-size:8px}.topbar .button{font-size:10px;padding:8px 12px;min-height:35px}.theme-button{font-size:21px}.page-heading{margin-bottom:24px}.page-heading .eyebrow{font-size:8px;letter-spacing:1.8px}h1{font-size:32px;letter-spacing:-1.2px}.library-banner{min-height:240px;padding:26px 22px;border-radius:12px;margin-bottom:30px}.library-banner h2{font-size:33px}.library-banner p{font-size:10px;max-width:210px}.banner-record{width:235px;height:235px;right:-100px;top:58px;opacity:.9}.banner-record>div{width:90px;height:90px;font-size:56px;line-height:85px}.banner-record>div:after{left:42px;top:42px;width:6px;height:6px}.banner-caption{display:none}.library-banner .eyebrow{font-size:8px}.library-banner .button{font-size:10px;padding:9px 14px}.section-toolbar{gap:14px;align-items:flex-start;margin-bottom:16px}.section-toolbar h2{font-size:20px}.section-toolbar p{font-size:10px}.section-toolbar .search-form{width:100%;max-width:100%;flex-basis:100%}.search-form input{min-height:39px}.track-header{font-size:7px;padding-right:0;padding-left:0}.track-header,.track-row{grid-template-columns:18px minmax(100px,1fr) 35px 53px;gap:8px}.track-row{min-height:67px;padding:9px 0;border-radius:0}.track-title{gap:10px}.track-title strong{font-size:11px}.track-title small{font-size:9px}.artwork{width:39px;height:39px;min-width:39px}.track-duration{font-size:9px}.track-actions .icon-button{min-width:25px;height:33px;font-size:20px}.track-actions .icon-button:nth-child(3){display:none}.pagination{flex-wrap:wrap;margin-top:20px;gap:10px}.pagination>span{font-size:9px;order:3;width:100%;text-align:center}.pagination .button{font-size:10px;min-height:34px;padding:7px 12px}.content-footer{font-size:7px;margin-top:36px;padding-top:19px;letter-spacing:1px}.empty-state{min-height:230px}.empty-state h3{font-size:19px}.empty-state p{font-size:11px}.player-bar{bottom:63px;height:77px;grid-template-columns:minmax(100px,1fr) 110px;gap:8px;padding:12px 18px 16px}.now-playing{gap:10px}.now-playing .artwork{width:42px;height:42px;min-width:42px}.now-playing strong{font-size:11px}.now-playing small{font-size:9px}.player-center{display:flex;align-items:center;justify-content:flex-end}.player-buttons{margin:0;gap:10px}.player-buttons .icon-button:first-child,.player-buttons .icon-button:nth-child(2),.player-buttons .icon-button:last-child{display:none}.player-buttons .icon-button{font-size:13px}.play-toggle{width:33px;height:33px}.seek-row{position:absolute;left:0;right:0;bottom:0;height:12px;gap:0}.seek-row>span{display:none}.seek-row>input{width:100%;height:12px;min-height:12px;margin:0;border-radius:0}.mobile-nav{display:flex;position:fixed;bottom:0;left:0;right:0;height:63px;background:var(--surface);border-top:1px solid var(--line);z-index:45;justify-content:space-around;padding:6px 8px max(7px,env(safe-area-inset-bottom));align-items:center}.mobile-nav button{color:var(--quiet);background:none;display:flex;align-items:center;justify-content:center;flex-direction:column;min-width:55px;gap:1px}.mobile-nav button>span{font-size:20px}.mobile-nav button>small{color:inherit;font-size:8px}.mobile-nav button.active{color:var(--accent)}.queue-panel{bottom:140px;padding:25px 20px}.queue-panel h2{font-size:22px}.import-layout{gap:15px}.panel{padding:23px 20px}.panel h2{font-size:22px}.import-card input{font-size:11px}.import-card .button{font-size:11px}.job-card{padding:13px;gap:11px}.job-card .button{font-size:9px;padding:7px 11px;min-height:30px}.job-icon{width:32px;height:32px;min-width:32px;font-size:18px}.job-info strong{font-size:10px}.job-status{font-size:9px}.playlist-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-bottom:25px}.playlist-card{padding:12px}.playlist-art{font-size:55px;margin-bottom:12px}.playlist-card h3{font-size:12px}.playlist-card p{font-size:9px}.playlist-detail .section-toolbar .button{font-size:10px;min-height:35px;padding:8px 13px}.inline-form{width:100%}.inline-form input{font-size:11px}.inline-form .button{font-size:10px}.sharing-controls h3{font-size:16px}.sharing-controls p{font-size:10px}.checkbox-label{font-size:9px}.settings-grid dl{font-size:10px;gap:14px}.modal-backdrop{padding:16px}.modal{padding:23px 23px;max-height:92vh}.modal h2{font-size:25px}.modal>p{font-size:11px}.modal .button{font-size:11px}.auth-shell{grid-template-columns:1fr}.auth-story{padding:24px 27px 35px;min-height:260px}.auth-story>.brand{font-size:26px;margin-bottom:37px}.auth-story .brand img{width:32px;height:32px}.auth-story h1{font-size:48px;letter-spacing:-2px;line-height:1.02}.auth-story .eyebrow{font-size:8px;margin-bottom:12px}.auth-story>p{font-size:11px;max-width:210px;margin-bottom:0}.vinyl{width:230px;height:230px;right:-95px;bottom:0}.vinyl-label{width:95px;height:95px}.vinyl-label span{font-size:27px}.vinyl-label small{display:none}.auth-footer{display:none}.auth-card{width:100%;padding:36px 27px 35px}.auth-card h2{font-size:25px}.auth-card p{font-size:12px}.version{margin-top:28px;font-size:9px}}
+@media(max-width:620px){:root{--vela-sidebar-width:0px;--vela-gutter:20px;--vela-content-top:25px;--vela-topbar-height:63px;--vela-player-height:var(--vela-mobile-player-height)}.app-shell{padding:0}.sidebar{display:none}.breadcrumb{max-width:130px;line-height:1.7;font-size:8px}.topbar .button{font-size:10px;padding:8px 12px;min-height:35px}.theme-button{font-size:21px}.page-heading{margin-bottom:24px}.page-heading .eyebrow{font-size:8px;letter-spacing:1.8px}h1{font-size:32px;letter-spacing:-1.2px}.library-banner{min-height:240px;padding:26px 22px;border-radius:12px;margin-bottom:30px}.library-banner h2{font-size:33px}.library-banner p{font-size:10px;max-width:210px}.banner-record{width:235px;height:235px;right:-100px;top:58px;opacity:.9}.banner-record>div{width:90px;height:90px;font-size:56px;line-height:85px}.banner-record>div:after{left:42px;top:42px;width:6px;height:6px}.banner-caption{display:none}.library-banner .eyebrow{font-size:8px}.library-banner .button{font-size:10px;padding:9px 14px}.section-toolbar{gap:14px;align-items:flex-start;margin-bottom:16px}.section-toolbar h2{font-size:20px}.section-toolbar p{font-size:10px}.section-toolbar .search-form{width:100%;max-width:100%;flex-basis:100%}.search-form input{min-height:39px}.track-header{font-size:7px;padding-right:0;padding-left:0}.track-header,.track-row{grid-template-columns:18px minmax(100px,1fr) 35px 53px;gap:8px}.track-row{min-height:67px;padding:9px 0;border-radius:0}.track-title{gap:10px}.track-title strong{font-size:11px}.track-title small{font-size:9px}.artwork{width:39px;height:39px;min-width:39px}.track-duration{font-size:9px}.track-actions .icon-button{min-width:25px;height:33px;font-size:20px}.track-actions .icon-button:nth-child(3){display:none}.pagination{flex-wrap:wrap;margin-top:20px;gap:10px}.pagination>span{font-size:9px;order:3;width:100%;text-align:center}.pagination .button{font-size:10px;min-height:34px;padding:7px 12px}.content-footer{font-size:7px;margin-top:36px;padding-top:19px;letter-spacing:1px}.empty-state{min-height:230px}.empty-state h3{font-size:19px}.empty-state p{font-size:11px}.player-bar{bottom:63px;height:77px;grid-template-columns:minmax(100px,1fr) 110px;gap:8px;padding:12px 18px 16px}.now-playing{gap:10px}.now-playing .artwork{width:42px;height:42px;min-width:42px}.now-playing strong{font-size:11px}.now-playing small{font-size:9px}.player-center{display:flex;align-items:center;justify-content:flex-end}.player-buttons{margin:0;gap:10px}.player-buttons .icon-button:first-child,.player-buttons .icon-button:nth-child(2),.player-buttons .icon-button:last-child{display:none}.player-buttons .icon-button{font-size:13px}.play-toggle{width:33px;height:33px}.seek-row{position:absolute;left:0;right:0;bottom:0;height:12px;gap:0}.seek-row>span{display:none}.seek-row>input{width:100%;height:12px;min-height:12px;margin:0;border-radius:0}.mobile-nav{display:flex;position:fixed;bottom:0;left:0;right:0;height:63px;background:var(--surface);border-top:1px solid var(--line);z-index:45;justify-content:space-around;padding:6px 8px max(7px,var(--vela-safe-bottom));align-items:center}.mobile-nav button{color:var(--quiet);background:none;display:flex;align-items:center;justify-content:center;flex-direction:column;min-width:55px;gap:1px}.mobile-nav button>span{font-size:20px}.mobile-nav button>small{color:inherit;font-size:8px}.mobile-nav button.active{color:var(--accent)}.queue-panel{bottom:140px;padding:25px 20px}.queue-panel h2{font-size:22px}.import-layout{gap:15px}.panel{padding:23px 20px}.panel h2{font-size:22px}.import-card input{font-size:11px}.import-card .button{font-size:11px}.job-card{padding:13px;gap:11px}.job-card .button{font-size:9px;padding:7px 11px;min-height:30px}.job-icon{width:32px;height:32px;min-width:32px;font-size:18px}.job-info strong{font-size:10px}.job-status{font-size:9px}.playlist-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-bottom:25px}.playlist-card{padding:12px}.playlist-art{font-size:55px;margin-bottom:12px}.playlist-card h3{font-size:12px}.playlist-card p{font-size:9px}.playlist-detail .section-toolbar .button{font-size:10px;min-height:35px;padding:8px 13px}.inline-form{width:100%}.inline-form input{font-size:11px}.inline-form .button{font-size:10px}.sharing-controls h3{font-size:16px}.sharing-controls p{font-size:10px}.checkbox-label{font-size:9px}.settings-grid dl{font-size:10px;gap:14px}.modal-backdrop{padding:16px}.modal{padding:23px 23px;max-height:92vh}.modal h2{font-size:25px}.modal>p{font-size:11px}.modal .button{font-size:11px}.auth-shell{grid-template-columns:1fr}.auth-story{padding:24px 27px 35px;min-height:260px}.auth-story>.brand{font-size:26px;margin-bottom:37px}.auth-story .brand img{width:32px;height:32px}.auth-story h1{font-size:48px;letter-spacing:-2px;line-height:1.02}.auth-story .eyebrow{font-size:8px;margin-bottom:12px}.auth-story>p{font-size:11px;max-width:210px;margin-bottom:0}.vinyl{width:230px;height:230px;right:-95px;bottom:0}.vinyl-label{width:95px;height:95px}.vinyl-label span{font-size:27px}.vinyl-label small{display:none}.auth-footer{display:none}.auth-card{width:100%;padding:36px 27px 35px}.auth-card h2{font-size:25px}.auth-card p{font-size:12px}.version{margin-top:28px;font-size:9px}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
 
 .player-buttons .mobile-queue{display:none}.queue-playback-controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:0 0 18px;margin-bottom:8px;border-bottom:1px solid var(--line)}.queue-playback-controls label{font-size:10px;margin:10px 0 0;width:100%;color:var(--muted)}.queue-playback-controls input{width:100%}@media(max-width:850px){.player-buttons .mobile-queue{display:inline-grid}}
@@ -453,7 +467,7 @@
 
 @media(max-width:620px) {
   /* Eight visible destinations stay keyboard/touch accessible at 320px. */
-  .mobile-nav { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); grid-template-rows:repeat(2,1fr); height:104px; gap:1px; padding:4px 7px max(4px,env(safe-area-inset-bottom)); overflow:visible; }
+  .mobile-nav { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); grid-template-rows:repeat(2,1fr); height:104px; gap:1px; padding:4px 7px max(4px,var(--vela-safe-bottom)); overflow:visible; }
   .mobile-nav button { min-width:0; min-height:44px; width:100%; gap:0; }
   .mobile-nav button > span { font-size:17px; line-height:20px; }
   .mobile-nav button small { font-size:10px; line-height:14px; }
@@ -553,11 +567,11 @@
 @keyframes vela-pulse { from {opacity:.45;} to {opacity:1;} }
 @media(max-width:900px) { .home-hero {padding:28px;} .home-artwork {width:155px;} }
 @media(max-width:620px) {
-  .mobile-nav.listening-mobile-nav { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); grid-template-rows:1fr; height:calc(70px + env(safe-area-inset-bottom)); padding:7px 6px max(7px,env(safe-area-inset-bottom)); gap:2px; }
+  .mobile-nav.listening-mobile-nav { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); grid-template-rows:1fr; height:calc(70px + var(--vela-safe-bottom)); padding:7px 6px max(7px,var(--vela-safe-bottom)); gap:2px; }
   .mobile-nav.listening-mobile-nav button { min-height:44px; display:flex; flex-direction:column; align-items:center; justify-content:center; }
   .mobile-nav.listening-mobile-nav small { font-size:10px; line-height:16px; }
   .mobile-nav.listening-mobile-nav .vela-icon { width:22px; height:22px; }
-  .queue-panel {bottom:calc(var(--vela-player-height) + var(--vela-mobile-nav-height) + env(safe-area-inset-bottom));}
+  .queue-panel {bottom:calc(var(--vela-player-height) + var(--vela-mobile-nav-height) + var(--vela-safe-bottom));}
   .home-hero { padding:25px 22px; gap:12px; }
   .home-hero h1 {font-size:30px;letter-spacing:-1px;}
   .home-hero p {font-size:12px;}
@@ -586,7 +600,7 @@
 .playback-status {position:fixed;z-index:45;bottom:104px;left:max(16px,calc(50% - 300px));right:max(16px,calc(50% - 300px));display:flex;align-items:center;gap:14px;padding:12px 16px;border:1px solid var(--line);border-radius:12px;background:var(--surface-raised);color:var(--text);box-shadow:var(--shadow);font-size:13px;}
 .playback-status .text-button {flex-shrink:0;min-height:44px;}
 .queue-context {max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:12px;}
-@media(max-width:620px){.playback-status {bottom:calc(153px + env(safe-area-inset-bottom));font-size:12px;flex-wrap:wrap;gap:5px;}.queue-context {max-width:190px;}}
+@media(max-width:620px){.playback-status {bottom:calc(153px + var(--vela-safe-bottom));font-size:12px;flex-wrap:wrap;gap:5px;}.queue-context {max-width:190px;}}
 
 /* Private history uses existing surfaces; it never owns the player. */
 .listening-privacy .checkbox-label{white-space:normal;display:flex;align-items:flex-start;gap:10px;font-size:13px;line-height:1.5;margin:18px 0}.listening-privacy .checkbox-label input{flex:0 0 18px;margin-top:2px}.listening-privacy select{width:100%;margin-bottom:15px}.listening-privacy-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:20px}.listening-privacy-actions .button,.history-delete-confirm .button{white-space:normal;text-align:center}.history-delete-confirm{border:1px solid var(--danger);border-radius:12px;padding:18px;margin-top:20px}.history-delete-confirm .button{margin:4px 8px 4px 0;max-width:100%}.history-track-list{display:grid;gap:8px}.history-track{display:flex;align-items:center;justify-content:space-between;gap:16px;border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:8px 16px 8px 8px;min-width:0}.history-play{display:flex;align-items:center;gap:13px;min-width:0;flex:1;text-align:left;color:var(--text);background:none;padding:4px;border-radius:8px}.history-play .artwork{width:48px;height:48px;min-width:48px}.history-play>div{min-width:0}.history-play strong,.history-play small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.history-play .vela-icon{margin-left:auto;flex-shrink:0}.history-track>small{white-space:nowrap}.listening-history .section-toolbar p{margin-bottom:0}.listening-history .pagination{gap:10px;flex-wrap:wrap}@media(max-width:500px){.history-track{gap:8px;padding-right:10px}.history-play{gap:10px}.history-play .artwork{width:40px;height:40px;min-width:40px}.history-play .vela-icon{display:none}.history-track>small{font-size:10px}.listening-privacy-actions{flex-direction:column}.listening-privacy-actions .button{width:100%}.listening-privacy .checkbox-label{font-size:13px}.listening-history .section-toolbar{align-items:flex-start;gap:10px;flex-wrap:wrap}}
@@ -991,33 +1005,50 @@ input::placeholder { color:var(--quiet); opacity:1; }
   :root { --vela-sidebar-width:175px; --vela-gutter:20px; }
 }
 
-/* TR02 tablet/mobile shell ------------------------------------------------
-   Below 761px the sidebar hands over to the persistent bottom navigation.
-   The player and the navigation are still reserved exactly once, as grid
-   rows, so the final focused row always scrolls fully above both bands. */
+/* TR02/TR09 tablet/mobile shell -------------------------------------------
+   Below 761px the sidebar hands over to the persistent bottom navigation and
+   the band becomes the mobile composition (mini-player + navigation). This is
+   the single decision boundary for the shell: 761..1024 is the tablet ladder
+   (sidebar + desktop player, no navigation bar), <=760 is the mobile one. Both
+   bands are reserved exactly once, as grid rows, so the final focused row
+   always scrolls fully above them and the safe-area inset is counted once. */
 @media (max-width:760px) {
   :root {
     --vela-sidebar-width:0px; --vela-topbar-height:63px;
     --vela-content-top:25px;
+    --vela-player-height:var(--vela-mobile-player-height);
+    --vela-bottom-reserve:calc(
+      var(--vela-player-height) + var(--vela-mobile-nav-height) + var(--vela-safe-bottom)
+    );
   }
   .app-shell {
     display:grid; grid-template-columns:minmax(0,1fr);
     grid-template-rows:minmax(0,1fr) var(--vela-player-height)
-      calc(var(--vela-mobile-nav-height) + env(safe-area-inset-bottom));
+      calc(var(--vela-mobile-nav-height) + var(--vela-safe-bottom));
     padding:0; height:calc(100dvh / var(--app-zoom,1)); overflow:hidden;
   }
   .sidebar { display:none; }
   .main-content { grid-column:1; grid-row:1; min-width:0; min-height:0; padding:0; }
   .topbar {
-    flex:0 0 var(--vela-topbar-height); height:var(--vela-topbar-height);
-    min-height:var(--vela-topbar-height); padding:0 var(--vela-gutter);
+    flex:0 0 calc(var(--vela-topbar-height) + var(--vela-safe-top));
+    height:calc(var(--vela-topbar-height) + var(--vela-safe-top));
+    min-height:calc(var(--vela-topbar-height) + var(--vela-safe-top));
+    padding:var(--vela-safe-top) max(var(--vela-gutter), var(--vela-safe-right)) 0
+      max(var(--vela-gutter), var(--vela-safe-left));
     flex-wrap:nowrap; row-gap:0;
   }
   .topbar-actions { flex-shrink:0; }
-  .app-shell>.player-bar { grid-column:1; grid-row:2; position:relative; inset:auto; width:100%; }
+  .app-shell>.player-bar {
+    grid-column:1; grid-row:2; position:relative; inset:auto; width:100%;
+    padding-left:max(16px, var(--vela-safe-left));
+    padding-right:max(16px, var(--vela-safe-right));
+  }
   .app-shell>.mobile-nav {
     display:flex; grid-column:1; grid-row:3; position:relative; inset:auto;
     width:100%; height:100%; z-index:45; align-items:stretch;
+    padding-left:max(6px, var(--vela-safe-left));
+    padding-right:max(6px, var(--vela-safe-right));
+    padding-bottom:max(9px, var(--vela-safe-bottom));
   }
   .app-shell>.mobile-nav>button {
     flex:1 1 0; min-width:0; min-height:44px; display:flex; gap:2px;
@@ -1030,12 +1061,8 @@ input::placeholder { color:var(--quiet); opacity:1; }
     color:var(--vela-nav-active-text); background:var(--vela-nav-active);
   }
   .content-inner { padding-bottom:20px; }
-  .queue-panel {
-    bottom:calc(var(--vela-player-height) + var(--vela-mobile-nav-height) + env(safe-area-inset-bottom));
-  }
-  .playback-status {
-    bottom:calc(var(--vela-player-height) + var(--vela-mobile-nav-height) + 16px + env(safe-area-inset-bottom));
-  }
+  .queue-panel { bottom:var(--vela-bottom-reserve); }
+  .playback-status { bottom:calc(var(--vela-bottom-reserve) + 16px); }
 }
 /* The narrowest supported reference width uses the 16px gutter. */
 @media (max-width:360px) {
@@ -1194,30 +1221,37 @@ input::placeholder { color:var(--quiet); opacity:1; }
   .player-buttons .mobile-queue { display: none; }
 }
 @media (max-width: 760px) {
-  .player-bar { grid-template-columns: minmax(0, 1fr) minmax(0, 300px) minmax(0, 1fr); gap: 12px; }
   /* Fixed status feedback clears the same player + navigation reservation, so a
      real receipt never covers the transport or the volume/queue zone. */
   .content-inner > .alert.success {
-    bottom: calc(var(--vela-player-height) + var(--vela-mobile-nav-height) + 16px + env(safe-area-inset-bottom));
+    bottom: calc(var(--vela-bottom-reserve) + 16px);
   }
 }
-/* Below 621px the existing two-zone mini-player composition stays: art/title,
-   favorite, Play/Pause, Next and Queue above a full-width seek rail. The
-   transport/volume details remain in the expanded player. The shell already
-   reserves the player row above the navigation row plus the safe area. */
-@media (max-width: 620px) {
+/* TR09: <=760px is one mobile composition, not two. The two-zone mini-player
+   (art/title, favorite, Play/Pause, Next and Queue above a full-width seek rail)
+   now starts at the same boundary as the navigation bar, so 671..760px is no
+   longer a touch-width screen wearing the desktop transport. The transport and
+   volume details stay in the expanded player. The right column is sized by its
+   content instead of a fixed 140px, so three 44px targets can never overflow
+   into the title zone at 320px. */
+@media (max-width: 760px) {
   .player-bar {
-    grid-template-columns: minmax(0, 1fr) 140px; gap: 8px;
-    height: var(--vela-player-height); padding: 12px 16px 48px;
+    grid-template-columns: minmax(0, 1fr) auto; gap: 8px;
+    height: var(--vela-player-height);
+    padding: 12px max(16px, var(--vela-safe-right)) 48px max(16px, var(--vela-safe-left));
   }
+  /* The approved mobile band surfaces: a lifted #1c2318 mini-player above the
+     darker #10140e navigation, both from the canonical role layer. */
+  .app-shell>.player-bar { background: var(--vela-mobile-player); }
+  .app-shell>.mobile-nav { background: var(--vela-mobile-nav); }
   .player-now { gap: 8px; }
   .now-playing { gap: 10px; }
-  .now-playing-trigger { gap: 10px; }
+  .now-playing-trigger { gap: 10px; min-height: 44px; }
   .now-playing .artwork { width: 42px; height: 42px; min-width: 42px; border-radius: 5px; }
   .now-playing strong.player-title { font-size: 12px; }
   .now-playing .player-artist { font-size: 10px; }
   .now-playing .player-album { display: none; }
-  .player-now .player-favorite { display: inline-grid; width: 40px; min-width: 40px; height: 40px; }
+  .player-now .player-favorite { display: inline-grid; width: 44px; min-width: 44px; height: 44px; }
   .player-center { flex-direction: row; align-items: center; justify-content: flex-end; max-width: none; }
   .player-buttons { gap: 8px; justify-content: flex-end; }
   .player-buttons .icon-button { width: 44px; min-width: 44px; height: 44px; }
@@ -1225,7 +1259,10 @@ input::placeholder { color:var(--quiet); opacity:1; }
   .player-buttons .player-shuffle, .player-buttons .player-previous, .player-buttons .player-repeat { display: none; }
   .player-buttons .mobile-queue { display: inline-grid; }
   .player-right { display: none; }
-  .seek-row { position: absolute; left: 0; right: 0; bottom: 0; height: 44px; padding: 0 16px; gap: 0; }
+  .seek-row {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 44px; gap: 0;
+    padding: 0 max(16px, var(--vela-safe-right)) 0 max(16px, var(--vela-safe-left));
+  }
   .seek-row .player-time { display: none; }
   .seek-control { height: 44px; }
   .play-toggle-face { width: 36px; height: 36px; }
@@ -1362,28 +1399,30 @@ input[type="range"]:focus { outline:2px solid var(--accent); outline-offset:3px;
 .track-menu-panel button { min-height:36px; padding:8px 10px; border-radius:6px; background:none; color:var(--text); text-align:left; font-size:11px; }
 .track-menu-panel button:hover, .track-menu-panel button:focus-visible { background:var(--surface-hover); }
 
-/* TR07b: at touch widths the row More menu is a real modal bottom action
+/* TR07b/TR09: at touch widths the row More menu is a real modal bottom action
    sheet. It is anchored above the reserved player + navigation bands, so the
    shell keeps counting the safe area exactly once (the navigation row owns it)
    instead of hiding the sheet behind the transport. The backdrop is the real
    click-away layer, each action stays a full-width >=44px row, and the panel
    scrolls internally rather than overflowing on short landscape viewports.
+   The sheet boundary is the shell's own mobile boundary (760px), so 671..760px
+   no longer gets an anchored desktop panel on a phone composition.
    Desktop keeps the compact anchored panel above; both surfaces are the same
    signal-backed menu dispatching the same root actions, never a second audio
    owner. */
 .track-menu-backdrop { display:none; }
-@media (max-width:670px) {
+@media (max-width:760px) {
   .track-menu-backdrop {
     display:block; position:fixed; inset:0; z-index:70;
     background:#050a07b3;
   }
   .track-menu-panel {
     position:fixed; left:0; right:0; top:auto; z-index:71;
-    bottom:calc(var(--vela-player-height) + var(--vela-mobile-nav-height) + env(safe-area-inset-bottom));
+    bottom:var(--vela-bottom-reserve);
     width:100%; max-width:none; min-width:0;
-    max-height:calc((100dvh - var(--vela-player-height) - var(--vela-mobile-nav-height) - env(safe-area-inset-bottom) - 16px) / var(--app-zoom, 1));
+    max-height:calc((100dvh - var(--vela-bottom-reserve) - 16px) / var(--app-zoom, 1));
     overflow-y:auto; overscroll-behavior:contain; gap:2px;
-    padding:8px max(10px, env(safe-area-inset-right)) 10px max(10px, env(safe-area-inset-left));
+    padding:8px max(10px, var(--vela-safe-right)) 10px max(10px, var(--vela-safe-left));
     border:0; border-top:1px solid var(--control-line); border-radius:20px 20px 0 0;
     background:var(--vela-popover); box-shadow:0 -18px 50px #0007;
   }
@@ -1420,13 +1459,111 @@ input[type="range"]:focus { outline:2px solid var(--accent); outline-offset:3px;
 .playlist-picker-sheet > .alert { margin:12px 22px 0; }
 .playlist-picker-foot { display:flex; justify-content:flex-end; gap:10px; padding:14px 22px 18px; margin-top:14px; border-top:1px solid var(--line); }
 .playlist-picker-foot .button { min-height:44px; }
-@media (max-width:620px) {
-  .playlist-picker { align-items:flex-end; padding:0 0 calc(var(--vela-player-height) + var(--vela-mobile-nav-height) + env(safe-area-inset-bottom)); }
-  .playlist-picker-sheet { width:100%; max-height:calc((100dvh - var(--vela-player-height) - var(--vela-mobile-nav-height) - env(safe-area-inset-bottom) - 16px) / var(--app-zoom,1)); border-radius:20px 20px 0 0; }
+@media (max-width:760px) {
+  .playlist-picker {
+    align-items:flex-end;
+    padding:0 0 var(--vela-bottom-reserve);
+  }
+  .playlist-picker-sheet { width:100%; max-height:calc((100dvh - var(--vela-bottom-reserve) - 16px) / var(--app-zoom,1)); border-radius:20px 20px 0 0; }
   .playlist-picker-head { padding:18px 18px 0; }
   .playlist-picker-hint { margin:8px 18px 12px; }
   .playlist-picker-sheet > input[type="search"] { margin:0 18px; width:calc(100% - 36px); }
   .playlist-choice { min-height:48px; font-size:13px; }
   .playlist-picker-foot { padding:12px 18px 16px; }
   .playlist-picker-foot .button { flex:1; }
+}
+
+/* ============================================================================
+   TR09 responsive recovery — one mobile composition, tablet boundaries, touch
+   targets, safe-area insets and short-height behavior ----------------------
+   The shell tokens at the top of this file stay the only layout authority:
+   every band, sheet and gutter below consumes --vela-player-height,
+   --vela-mobile-nav-height, --vela-safe-* and --vela-bottom-reserve instead of
+   inventing its own offset. Bands: <=760 mobile (mini-player + navigation),
+   761..1024 tablet (sidebar + desktop player, no navigation bar), >=1025 the
+   full desktop composition. No rule here adds a second scroller, a second
+   navigation surface or a second audio owner.
+   ============================================================================ */
+
+/* --- Desktop/tablet: the side and top insets are consumed, not assumed ----
+   A landscape cutout must not clip the first or last control of the topbar or
+   the player. With no inset these are exactly the reference 33/48px gutters. */
+@media (min-width:761px) {
+  .topbar {
+    flex:0 0 calc(var(--vela-topbar-height) + var(--vela-safe-top));
+    height:calc(var(--vela-topbar-height) + var(--vela-safe-top));
+    min-height:calc(var(--vela-topbar-height) + var(--vela-safe-top));
+    padding:var(--vela-safe-top) max(var(--vela-gutter), var(--vela-safe-right)) 0
+      max(var(--vela-gutter), var(--vela-safe-left));
+  }
+  .player-bar {
+    padding-left:max(var(--vela-player-gutter), var(--vela-safe-left));
+    padding-right:max(var(--vela-player-gutter), var(--vela-safe-right));
+  }
+}
+
+/* --- Coarse pointer (real tablet/touch): 44px primary targets --------------
+   The composition does not change; only the hit boxes grow to the product
+   goal and the transport column yields width back to the side zones so three
+   44px controls can never overlap the title. */
+@media (pointer: coarse) {
+  .player-buttons { gap:8px; }
+  .player-buttons .icon-button { width:44px; min-width:44px; height:44px; }
+  .player-buttons .icon-button .vela-icon { width:19px; height:19px; }
+  .player-right .icon-button { width:44px; min-width:44px; height:44px; }
+  .track-menu-panel { min-width:min(230px, 100%); }
+}
+@media (pointer: coarse) and (min-width:761px) and (max-width:1100px) {
+  .player-bar { grid-template-columns:minmax(0,1fr) auto minmax(0,1fr); }
+  .player-center { max-width:none; }
+}
+/* The 761..900 tablet band keeps the reference three zones but caps the
+   transport at its own content width, so the title and the queue/volume zone
+   are not squeezed into 125px while the middle column holds unused space. */
+@media (min-width:761px) and (max-width:900px) {
+  .player-bar { grid-template-columns:minmax(0,1fr) minmax(0,300px) minmax(0,1fr); }
+}
+
+/* --- Mobile composition: primary actions reach 44px ---------------------- */
+@media (max-width:760px) {
+  .topbar .button, .topbar .button.small, .topbar .icon-button { min-height:44px; }
+  .topbar .icon-button { min-width:44px; }
+  .home-filter { min-height:44px; padding:0 16px; }
+  .text-button { min-height:44px; }
+  .pagination .button,
+  .playlist-detail .section-toolbar .button,
+  .playlist-detail .section-toolbar .text-button,
+  .job-card .button,
+  .settings-grid .button,
+  .inline-form .button { min-height:44px; }
+  .share-form select, .import-card input, .inline-form input { min-height:44px; }
+  /* The personal-mix card actions are that card's primary controls on a phone;
+     they reach the same 44px goal from the same boundary as the rest. */
+  .personal-mix-actions .icon-button { min-width:44px; width:44px; }
+  .personal-mix-actions .text-button { min-width:44px; min-height:44px; }
+  /* The navigation labels sit in their own line of the tab: a 20px icon, a
+     2px gap and a 10px label. A longer localized label is clipped to its own
+     tab with an ellipsis (and keeps its full accessible name) instead of
+     covering the icon, the neighbour or the tab's own hit box. */
+  .app-shell>.mobile-nav>button>small {
+    max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+    line-height:1.15;
+  }
+  /* A focused tab paints its ring inside the band: the shell clips overflow at
+     the viewport edge, so an outside ring would lose its bottom edge. */
+  .app-shell>.mobile-nav>button:focus-visible {
+    outline:2px solid var(--vela-primary); outline-offset:-2px;
+  }
+}
+
+/* --- Short-height recovery ----------------------------------------------
+   390x600, landscape phones and an onscreen keyboard keep both bands reserved
+   and the central scroller intact; only the decorative top padding yields so a
+   first primary action is never pushed under the transport. */
+@media (max-width:760px) and (max-height:640px) {
+  :root { --vela-content-top:16px; }
+  .content-inner { padding-bottom:16px; }
+  .content-footer { margin:28px 0 14px; padding-top:16px; }
+  .empty-state, .empty-state.compact { min-height:180px; }
+  .home-header { margin-bottom:12px; }
 }
