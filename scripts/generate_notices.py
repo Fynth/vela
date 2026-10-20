@@ -50,7 +50,14 @@ def main():
     parser.add_argument('--output', type=Path, default=Path('dist/THIRD_PARTY_NOTICES.txt'))
     parser.add_argument('--fetch-missing', action='store_true', help='Fetch public upstream license files at packaged VCS commits')
     args = parser.parse_args()
-    metadata = json.loads(subprocess.check_output(['cargo', 'metadata', '--locked', '--offline', '--format-version=1']))
+    # The metadata is read from the lockfile and the manifest; requiring a warm
+    # local cache would fail on a fresh runner, so the offline mode is only used
+    # when the cache already holds everything.
+    command = ['cargo', 'metadata', '--locked', '--format-version=1']
+    try:
+        metadata = json.loads(subprocess.check_output(command + ['--offline']))
+    except subprocess.CalledProcessError:
+        metadata = json.loads(subprocess.check_output(command))
     used = {node['id'] for node in metadata['resolve']['nodes']}
     sections = ['Vela Music — dependency notices\nGenerated from the resolved Cargo.lock graph.\nProject license: AGPL-3.0-or-later; see LICENSE.\n\nLicense expressions and upstream shipped texts are preserved below.\n']
     missing = []

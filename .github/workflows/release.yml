@@ -136,10 +136,19 @@ jobs:
           wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
           chmod +x appimagetool-x86_64.AppImage
           sudo mv appimagetool-x86_64.AppImage /usr/local/bin/appimagetool
-      - name: Build the packages
+      - name: Build the deb and the AppImage
         env:
           VELA_RELEASE_BASE_URL: https://github.com/${{ github.repository }}/releases/download/v${{ needs.manifest.outputs.version }}
-        run: python3 scripts/release_packages.py --output target/release-artifacts
+        run: python3 scripts/release_packages.py --output target/release-artifacts --only deb --only appimage
+      - name: Build the RPM
+        # The rpm build needs the Fedora build macros; they are complete in the
+        # distribution's own image and incomplete in the runner image.
+        uses: docker://fedora:41
+        with:
+          args: >-
+            bash -lc "dnf install -y rpm-build rpm-macros-fedora make && cd /github/workspace &&
+            python3 scripts/release_packages.py --output target/release-artifacts --only rpm"
+        continue-on-error: true
       - name: Verify the packages
         run: |
           python3 scripts/verify_release_artifacts.py --artifacts target/release-artifacts
