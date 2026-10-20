@@ -4,7 +4,7 @@
 //! public popularity signal. Every write serializes consent and ownership with
 //! the progress mutation; a privacy change invalidates all prior revisions.
 //!
-//! Owner reads (`history`, `export`) run in one deferred read snapshot: they
+//! Owner reads (`preferences`, `devices`, `history`, `export`) run in one deferred read snapshot: they
 //! take no writer reservation and perform no physical deletion. Retention is
 //! applied to the read as a cutoff only, so expired rows stay invisible even
 //! though they may outlive the read until the scheduled retention worker calls
@@ -30,8 +30,7 @@ impl ListeningService {
 
     pub async fn preferences(&self, user: &User, device_id: &str) -> Result<ListeningPreferences> {
         uuid(device_id)?;
-        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        prune_owner(&mut tx, &user.id, now()).await?;
+        let mut tx = self.read_snapshot().await?;
         let preferences = preferences(&mut tx, &user.id, device_id).await?;
         tx.commit().await?;
         Ok(preferences)
@@ -303,11 +302,9 @@ impl ListeningService {
         })
     }
 
-    /// Erasure also revokes collection, so delayed batches cannot resurrect it.
+    /// A device read never competes with consent writes for SQLite's writer slot.
     pub async fn devices(&self, user: &User) -> Result<ListeningDevices> {
-        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        prune_owner(&mut tx, &user.id, now()).await?;
-        ensure_preferences(&mut tx, &user.id, now()).await?;
+        let mut tx = self.read_snapshot().await?;
         let devices = devices_in(&mut tx, &user.id).await?;
         tx.commit().await?;
         Ok(devices)
@@ -385,7 +382,7 @@ impl ListeningService {
         Ok(result)
     }
 
-    /// The only entry point for owner history/export reads. SQLite `BEGIN` is
+    /// The only entry point for owner listening reads. SQLite `BEGIN` is
     /// deferred, so this transaction reserves no writer slot: it runs
     /// concurrently with records, erasure and retention while still seeing one
     /// consistent snapshot of consent, retention and events. `BEGIN IMMEDIATE`
@@ -457,14 +454,18 @@ async fn retention(tx: &mut Transaction<'_, Sqlite>, owner: &str) -> Result<u16>
     .await? as u16)
 }
 async fn devices_in(tx: &mut Transaction<'_, Sqlite>, owner: &str) -> Result<ListeningDevices> {
-    let revision: i64 =
-        sqlx::query_scalar("SELECT revision FROM listening_preferences WHERE user_id=?")
-            .bind(owner)
-            .fetch_one(&mut **tx)
-            .await?;
-    let rows = sqlx::query(
-        "SELECT d.device_id,d.enabled,(SELECT COUNT(*) FROM listening_sessions s WHERE s.user_id=d.user_id AND s.device_id=d.device_id) session_count,(SELECT MAX(s.updated_at) FROM listening_sessions s WHERE s.user_id=d.user_id AND s.device_id=d.device_id) last_activity_at FROM listening_devices d WHERE d.user_id=? ORDER BY last_activity_at IS NULL,last_activity_at DESC,d.device_id ASC",
+    let revision: i64 = sqlx::query_scalar(
+        "SELECT COALESCE((SELECT revision FROM listening_preferences WHERE user_id=?),0)",
     )
+    .bind(owner)
+    .fetch_one(&mut **tx)
+    .await?;
+    let cutoff = now() - i64::from(retention(tx, owner).await?) * DAY;
+    let rows = sqlx::query(
+        "SELECT d.device_id,d.enabled,(SELECT COUNT(*) FROM listening_sessions s WHERE s.user_id=d.user_id AND s.device_id=d.device_id AND s.started_at>=?) session_count,(SELECT MAX(s.updated_at) FROM listening_sessions s WHERE s.user_id=d.user_id AND s.device_id=d.device_id AND s.started_at>=?) last_activity_at FROM listening_devices d WHERE d.user_id=? ORDER BY last_activity_at IS NULL,last_activity_at DESC,d.device_id ASC",
+    )
+    .bind(cutoff)
+    .bind(cutoff)
     .bind(owner)
     .fetch_all(&mut **tx)
     .await?;
@@ -1416,6 +1417,12 @@ mod tests {
             .export(&fixture.alice)
             .await
             .expect("export must not require a writer reservation");
+        let devices = fixture.service.devices(&fixture.alice).await.unwrap();
+        let preferences = fixture
+            .service
+            .preferences(&fixture.alice, &fixture.device)
+            .await
+            .unwrap();
         let elapsed = started.elapsed();
         assert!(
             elapsed < std::time::Duration::from_secs(2),
@@ -1423,6 +1430,8 @@ mod tests {
         );
         assert_eq!((page.total_listens, page.items.len()), (1, 1));
         assert_eq!(exported.events.len(), 1);
+        assert_eq!(devices.devices[0].session_count, 1);
+        assert_eq!(preferences.revision, prefs.revision);
         // The uncommitted row stays invisible until its writer commits, then
         // both reads observe it: one snapshot per call, no stale reuse.
         writer.commit().await.unwrap();
@@ -1475,6 +1484,17 @@ mod tests {
         assert!(exported.events.is_empty());
         assert!(exported.enabled);
         assert_eq!(exported.retention_days, 90);
+        let devices = fixture.service.devices(&fixture.alice).await.unwrap();
+        assert_eq!(devices.devices[0].session_count, 0);
+        assert!(devices.devices[0].last_activity_at.is_none());
+        assert!(
+            fixture
+                .service
+                .preferences(&fixture.alice, &fixture.device)
+                .await
+                .unwrap()
+                .enabled
+        );
         assert_eq!(
             fixture.count(&fixture.alice).await,
             1,
@@ -1535,6 +1555,18 @@ mod tests {
             .export(&fixture.alice)
             .await
             .expect("export must issue no writer statement");
+        let devices = reader.devices(&fixture.alice).await.unwrap();
+        assert_eq!(devices.devices[0].session_count, 1);
+        assert!(
+            reader
+                .preferences(&fixture.alice, &fixture.device)
+                .await
+                .unwrap()
+                .enabled
+        );
+        let untouched = reader.devices(&fixture.bob).await.unwrap();
+        assert_eq!(untouched.revision, 0);
+        assert!(untouched.devices.is_empty());
         assert_eq!(exported.events.len(), 1);
         assert_eq!(exported.events[0].progress, event);
         // The probe is meaningful: the same connection rejects the writer path.

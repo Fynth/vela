@@ -2,6 +2,20 @@
 
 ## Distribution CI/CD0.12.7 — 2026-10-20
 
+CI follow-up: Firefox now has real PulseAudio output, exposing a genuine10s
+SQLite writer wait from GET preferences/devices. These reads now use one deferred
+snapshot with retention-filtered device counts, never prune/insert/reserve a writer.
+Existing open-writer/query-only/retention tests cover all four listening read paths.
+TR03 observes the covered one-second original's genuine EOF before paused favorite
+checks, then separately checks source identity and advancing time through favorite
+mutations on its30s original. No assertion was removed or skipped.
+
+Quality browser/worker tests use the debug server; optimized native builds and
+extracted release-server/worker smoke checks run in the package job. The pinned
+wasm-bindgen binary replaces recompilation of its separate CLI dependency graph.
+Compiler caches survive downstream test failures. This avoids duplicate optimized
+builds without omitting release package runtime checks.
+
 User authorized push and release/AUR distribution. Replaced the broken duplicated
 package paths with reusable quality/packages workflows, required Linux tar.gz/deb/
 AppImage, native Windows exe/zip and Dioxus-generated Android APK builds. Added

@@ -2,7 +2,9 @@
 
 The release workflow runs on main pushes, pull requests, version tags and manual
 requests. Its reusable quality and packages workflows build with the tracked lock
-and two Cargo jobs. Main/PR builds retain verified Actions artifacts. Only a pushed
+and two Cargo jobs. Quality uses the debug server for real browser/worker
+regressions and release WASM; the package job starts the extracted optimized server
+and checks its real shutdown/workers, and builds optimized native clients. Main/PR builds retain verified Actions artifacts. Only a pushed
 `v<workspace version>` tag publishes a GitHub release, after quality, all required
 package jobs, the real Arch makepkg build and aggregate verification succeed.
 Manual runs build artifacts without publishing. Tags must refer to the source

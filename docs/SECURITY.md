@@ -1,5 +1,9 @@
 # Threat model and security architecture
 
+Listening GET preferences/devices/history/export use deferred owner snapshots;
+only mutation/retention paths reserve writers or delete rows. Device counts exclude
+expired sessions without physically deleting them during a read.
+
 ## Distribution pipeline2026-10-20
 
 Release0.12.7 verifies source/version, required payloads and SHA256 for all artifacts before tag publication. AUR uses a private temporary SSH key, strict pinned host identity and the selected repository only. Android signing secrets never enter artifacts; preview APKs use an ephemeral preview identity. Checksums are not publisher signatures. See [DISTRIBUTION](DISTRIBUTION.md).

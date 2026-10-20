@@ -21,17 +21,18 @@ jobs:
           python-version: "3.12"
       - run: python3 -m pip install -r scripts/requirements-release.txt
       - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
       - name: Linux native Dioxus and audio build dependencies
         run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libasound2-dev libudev-dev libxdo-dev pulseaudio pulseaudio-utils
       - run: cargo fmt --all -- --check
       - run: cargo clippy --locked --workspace --all-targets -- -D warnings
       - run: cargo test --locked --workspace -- --test-threads=2
       - run: cargo clippy --locked -p vela-desktop --all-targets --features native-qa -- -D warnings
-      - run: cargo build --locked --release -p vela-desktop
-      - run: cargo build --locked --release -p vela-server
-      - run: python3 scripts/verify_shutdown.py --runs 10 --worker-failure
+      - run: cargo build --locked -p vela-server
+      - run: python3 scripts/verify_shutdown.py --binary target/debug/vela-server --runs 10 --worker-failure
       - run: cargo clippy --locked -p vela-web --target wasm32-unknown-unknown -- -D warnings
-      - run: cargo install wasm-bindgen-cli --version 0.2.129 --locked
+      - uses: ./.github/actions/setup-wasm-bindgen
       - run: scripts/build-web.sh
       - run: python3 scripts/generate_notices.py
       - run: python3 -m unittest discover -s tests -p 'test_*.py'
@@ -51,11 +52,11 @@ jobs:
           pactl info
           echo "PULSE_SINK=vela_ci" >> "$GITHUB_ENV"
       - name: Chromium real-server regression
-        run: cd tests/browser && VELA_TEST_BINARY=target/release/vela-server npx playwright test --browser=chromium
+        run: cd tests/browser && VELA_TEST_BINARY=target/debug/vela-server npx playwright test --browser=chromium
       - name: Preserve Chromium evidence before the fresh Firefox run
         run: mv tests/browser/test-results tests/browser/chromium-results
       - name: Firefox real-server regression
-        run: cd tests/browser && VELA_TEST_BINARY=target/release/vela-server npx playwright test --browser=firefox
+        run: cd tests/browser && VELA_TEST_BINARY=target/debug/vela-server npx playwright test --browser=firefox
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

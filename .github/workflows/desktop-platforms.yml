@@ -38,7 +38,7 @@ jobs:
           ./appimagetool-x86_64.AppImage --appimage-extract > /dev/null
           ln -s "$RUNNER_TEMP/appimage/squashfs-root/AppRun" "$RUNNER_TEMP/appimage/appimagetool"
           echo "$RUNNER_TEMP/appimage" >> "$GITHUB_PATH"
-      - run: cargo install wasm-bindgen-cli --version 0.2.129 --locked
+      - uses: ./.github/actions/setup-wasm-bindgen
       - name: Build portable archives
         run: python3 scripts/release_build.py --only server-linux-x86-64 web-linux-x86-64 desktop-linux-x86-64
       - name: Build required Linux packages
@@ -49,6 +49,8 @@ jobs:
       - name: Verify package payloads and launch entry points
         run: |
           python3 scripts/verify_release_artifacts.py
+          python3 scripts/verify_package.py target/release-artifacts/vela-server-*.tar.gz
+          python3 scripts/verify_shutdown.py --runs 10 --worker-failure
           mkdir -p "$RUNNER_TEMP/deb"
           dpkg-deb --extract target/release-artifacts/*.deb "$RUNNER_TEMP/deb"
           "$RUNNER_TEMP/deb/usr/bin/vela-desktop" --version

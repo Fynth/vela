@@ -17,6 +17,6 @@ user-selected available name vela-music-bin; vela-desktop-bin belongs to another
 
 Main and pull requests produce Actions artifacts without a public release. Tags
 publish only when their version matches Cargo. Manual dispatch remains build-only.
-APK debug-signing previews are labelled and distinct from an optional durable release
+APK preview signatures are labelled and distinct from an optional durable release
 identity. No credentials in outputs, no local data/runtime upgrades, no store/device
 validation inferred from compilation or archive verification. See DISTRIBUTION.md.

@@ -1,26 +1,11 @@
-# Channel recipes
+# Publishing channels
 
-Each file in this directory is the executable recipe for one publishing channel.
-The release pipeline calls it with two arguments:
+The current release workflow calls `aur.sh <validated-recipe-directory> vela-music-bin`
+only after GitHub assets exist. It publishes PKGBUILD and .SRCINFO, using the configured
+AUR account key and pinned host identity. The recipe uses the actual package archive
+checksum and carries the private xdo ABI compatibility library plus its notice.
 
-    <recipe> <artifact-path> <target-id>
-
-A recipe publishes the artifact and exits 0 on success. It must never publish
-something that was not verified: the pipeline re-checks the artifact checksum
-immediately before the recipe runs.
-
-A channel without a recipe is reported as `not-implemented` by the pipeline. That
-is deliberate. The project ships one Linux desktop today, and the other targets
-are blocked on missing platform support in the code base, not on missing
-upload commands. Writing an upload command for a target that cannot be built
-would make the release look further along than it is.
-
-Channels that need an account expect these environment variables (the names
-come from `release/targets.yaml`):
-
-    AUR_SSH_KEY / AUR_REPO     push the AUR PKGBUILD
-    WINGET_TOKEN               submit a winget manifest
-    HOMEBREW_TAP_TOKEN         push a Homebrew tap
-    PLAY_SERVICE_ACCOUNT_JSON  upload an Android App Bundle
-    APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID
-                                upload a macOS or iOS build
+Other channel scripts and `release_publish.py` are legacy/manual helpers; they are
+not automatically invoked by the current release workflow. Google Play, App Store,
+winget and Homebrew submissions remain separate work. Android APK signing does not
+imply Play upload or device/background validation. See [distribution](../../docs/DISTRIBUTION.md).

@@ -597,8 +597,12 @@ test('TR03 persistent player projects the root engine with reference geometry an
     expect(artworkResponse.status()).toBe(200);
     expect(artworkResponse.headers()['content-type']).toMatch(/^image\//);
 
+    // Finish this one-second original before measuring favorite mutations, so
+    // natural EOF cannot race the independent source-preservation assertion.
+    await expect.poll(() => audio.evaluate(node => node.ended), { timeout: 15000 }).toBeTruthy();
+    await expect(page.locator('#player-toggle')).toHaveAttribute('aria-label', 'Play');
     // The player's favorite is the same real mutation as rows and Now Playing;
-    // it never touches the source generation or position.
+    // it never touches the settled source generation or position.
     const playerFavorite = page.locator('.player-favorite');
     await expect(playerFavorite).toHaveAttribute('aria-pressed', 'false');
     const favoriteSource = await page.evaluate(() => {
@@ -709,6 +713,21 @@ test('TR03 persistent player projects the root engine with reference geometry an
     const longQuality = await page.locator('.player-quality-format').innerText();
     expect(longQuality).toBe(expectedQuality(longA));
     expect(longQuality).not.toMatch(/lossless|bit-?perfect|hi-?res/i);
+
+    // Verify the same favorite invariant during advancing playback on a long
+    // original, independently of the one-second artwork fixture's natural EOF.
+    const playingSource = await audio.evaluate(node => ({
+      generation: node.getAttribute('data-source-generation'), src: node.getAttribute('src'), time: node.currentTime,
+    }));
+    await playerFavorite.click();
+    await expect(playerFavorite).toHaveAttribute('aria-pressed', 'true');
+    await expect(playerFavorite).toBeEnabled();
+    await playerFavorite.click();
+    await expect(playerFavorite).toHaveAttribute('aria-pressed', 'false');
+    await expect(audio).toHaveAttribute('data-source-generation', playingSource.generation);
+    await expect(audio).toHaveAttribute('src', playingSource.src);
+    await expect(audio).toHaveJSProperty('paused', false);
+    await expect.poll(() => audio.evaluate(node => node.currentTime)).toBeGreaterThan(playingSource.time);
 
     // Next/Previous move the real queue occurrence on the same element.
     await page.locator('#player-next').click();
