@@ -48,6 +48,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.0
       - uses: Swatinem/rust-cache@v2
       - name: Desktop build dependencies
         run: |
