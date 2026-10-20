@@ -1,5 +1,9 @@
 # Row transport and Linux window repair2026-10-19
 
+## Distribution pipeline2026-10-20
+
+Distribution0.12.7 uses [DISTRIBUTION](DISTRIBUTION.md) and [ADR0025](DECISIONS/0025-release-artifact-gates.md): required artifact/payload/hash/source/version gates, real makepkg, tag-only publication and AUR after release assets. No migrations, privacy defaults or original runtime/data changes.
+
 Root audio/auth/cancellation ownership remains unchanged. Current-row actions pause/
 resume; explicit context Play starts context. Native requested intent survives
 preparation and governs final autoplay. Duplicate occurrences remain distinct.

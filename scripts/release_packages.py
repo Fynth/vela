@@ -35,6 +35,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
+from release_build import sha256, write_sidecar
 from release_manifest import ManifestError, load, validate  # noqa: E402
 
 MANIFEST_PATH = REPO_ROOT / "release" / "targets.yaml"
@@ -85,7 +86,7 @@ def desktop_payload(version: str, commit: str) -> Path:
     if readme.is_file():
         shutil.copy2(readme, stage / "usr" / "share" / "doc" / "vela-desktop" / "README.md")
     shutil.copy2(REPO_ROOT / "LICENSE", stage / "usr" / "share" / "licenses" / "vela" / "LICENSE")
-    (stage / "BUILD.txt").write_text(
+    (stage / "usr/share/doc/vela-desktop/BUILD.txt").write_text(
         f"version={version}\ntarget=x86_64-unknown-linux-gnu\n"
         f"commit={commit}\nruntime=GTK3, WebKitGTK 4.1, ALSA, libxdo\n",
         encoding="utf-8",
@@ -104,15 +105,11 @@ def build_deb(stage: Path, version: str, commit: str, output: Path) -> Path:
         "Priority: optional\n"
         "Architecture: amd64\n"
         "Maintainer: Vela Music <vela@example.invalid>\n"
-        "Depends: libgtk-3-0, libwebkit2gtk-4.1-0, libasound2, libxdo1\n"
+        "Depends: libc6 (>= 2.39), libgtk-3-0t64, libwebkit2gtk-4.1-0, libasound2t64, libxdo3, libudev1\n"
         "Description: Vela private local music player\n"
         " A private music library, offline copies and public catalogs.\n",
         encoding="utf-8",
     )
-    (control.parent / "postinst").write_text(
-        "set -e\nldconfig\n", encoding="utf-8"
-    )
-    (control.parent / "postinst").chmod(0o755)
     package = output / f"vela-desktop_{version}_amd64.deb"
     package.parent.mkdir(parents=True, exist_ok=True)
     run(["dpkg-deb", "--root-owner-group", "--build", str(stage), str(package)])
@@ -170,106 +167,53 @@ def build_rpm(stage: Path, version: str, commit: str, output: Path) -> Path:
 
 def build_appimage(stage: Path, version: str, commit: str, output: Path) -> Path:
     """A single-file AppImage built from the same payload."""
-    root = output / "appimage-root"
-    if root.exists():
-        shutil.rmtree(root)
-    shutil.copytree(stage, root)
-    appdir = root / "vela-desktop.AppDir"
-    appdir.mkdir(parents=True)
-    (appdir / "usr" / "bin").mkdir(parents=True)
-    (appdir / "usr" / "lib").mkdir(parents=True)
-    shutil.copy2(stage / "usr" / "lib" / "vela" / "vela-desktop", appdir / "usr" / "lib" / "vela-desktop")
-    (appdir / "usr" / "bin" / "vela-desktop").symlink_to("../lib/vela-desktop")
-    (appdir / "vela-desktop.desktop").write_text(
-        (stage / "usr" / "share" / "applications" / "vela-desktop.desktop").read_text(
-            encoding="utf-8"
-        ),
-        encoding="utf-8",
-    )
-    (appdir / "vela.svg").write_text(
-        (stage / "usr" / "share" / "icons" / "hicolor" / "scalable" / "apps" / "vela-desktop.svg").read_text(
-            encoding="utf-8"
-        ),
-        encoding="utf-8",
-    )
+    appdir = Path(tempfile.mkdtemp(prefix="vela-appimage-"))
+    shutil.copytree(stage / "usr", appdir / "usr", symlinks=True)
+    shutil.copy2(stage / "usr/share/applications/vela-desktop.desktop", appdir / "vela-desktop.desktop")
+    shutil.copy2(REPO_ROOT / "apps/web/vela.svg", appdir / "vela-desktop.svg")
     (appdir / "AppRun").write_text(
-        "#!/bin/sh\nexec \"$(dirname \"$0\")/usr/lib/vela-desktop\" \"$@\"\n", encoding="utf-8"
+        '#!/bin/sh\nexec "$(dirname "$0")/usr/lib/vela/vela-desktop" "$@"\n', encoding="utf-8"
     )
     (appdir / "AppRun").chmod(0o755)
     package = output / f"vela-desktop-{version}-x86_64.AppImage"
-    run(
-        [
-            "appimagetool",
-            "--no-appstream",
-            str(appdir),
-            str(package),
-        ]
-    )
+    try:
+        run(["appimagetool", "--no-appstream", str(appdir), str(package)])
+    finally:
+        shutil.rmtree(appdir)
     package.chmod(package.stat().st_mode | stat.S_IXUSR)
     return package
 
 
 def build_aur(stage: Path, version: str, commit: str, output: Path) -> Path:
-    """An AUR source recipe plus the source tarball it points at."""
+    """Binary AUR package with ordinary makepkg arrays and a complete package()."""
     aur_dir = output / "aur"
     aur_dir.mkdir(parents=True, exist_ok=True)
-    source_name = f"vela-{version}.tar.gz"
-    sources = output / "aur-sources"
-    sources.mkdir(parents=True, exist_ok=True)
-    licence_dir = stage / "usr" / "share" / "licenses" / "vela"
-    licence_dir.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(REPO_ROOT / "LICENSE", licence_dir / "LICENSE")
-    with tarfile.open(sources / source_name, "w:gz") as bundle:
-        for relative in (
-            "usr/lib/vela/vela-desktop",
-            "usr/share/applications/vela-desktop.desktop",
-            "usr/share/licenses/vela/LICENSE",
-            "BUILD.txt",
-        ):
-            bundle.add(stage / relative, arcname=f"vela-{version}/{relative}")
-    # A published PKGBUILD must point at a real, checksummed source. When no
-    # release base URL is configured the recipe stays local and says so, rather
-    # than shipping a placeholder URL and a skipped checksum to the AUR.
+    source_name = f"vela-music-bin-{version}-x86_64.tar.gz"
+    source = output / source_name
+    with tarfile.open(source, "w:gz") as bundle:
+        bundle.add(stage / "usr", arcname="usr")
     base_url = os.environ.get("VELA_RELEASE_BASE_URL", "").rstrip("/")
-    source_sha256 = hashlib.sha256((sources / source_name).read_bytes()).hexdigest()
-    # The recipe downloads the source from the GitHub release, so the tarball
-    # has to be a release asset of its own and not only a build by-product.
-    shutil.copy2(sources / source_name, output / source_name)
-    if base_url:
-        source_url = f"{base_url}/{source_name}"
-        source_line = f'  echo "$pkgname-$pkgver.tar.gz::{source_url}"\n'
-        checksum_line = f"  sha256sums=('{source_sha256}')\n"
-    else:
-        source_line = f'  echo "$pkgname-$pkgver.tar.gz"\n'
-        checksum_line = "  sha256sums=('SKIP')  # local build: set VELA_RELEASE_BASE_URL for a published recipe\n"
+    source_url = f"{base_url}/{source_name}" if base_url else source_name
+    digest = sha256(source)
     (aur_dir / "PKGBUILD").write_text(
-        "# Maintainer: Vela Music <vela@example.invalid>\n"
-        "pkgname=vela\n"
+        "# Maintainer: Fynth <https://github.com/Fynth>\n"
+        "pkgname=vela-music-bin\n"
         f"pkgver={version}\n"
         "pkgrel=1\n"
+        "pkgdesc='Private Vela music library and native player'\n"
         "arch=('x86_64')\n"
+        "url='https://github.com/Fynth/vela'\n"
         "license=('AGPL-3.0-or-later')\n"
-        "url=\"https://github.com/Fynth/vela\"\n"
-        "depends=('gtk3' 'webkit2gtk-4.1' 'alsa-lib' 'libxdo')\n"
-        "options=('!strip')\n"
-        "source(){\n"
-        + source_line
-        + checksum_line
-        + "}\n"
-        "build(){\n"
-        '  cd "$srcdir/$pkgname-$pkgver"\n'
-        '  install -Dm0755 usr/lib/vela/vela-desktop "$pkgdir/usr/lib/vela/vela-desktop"\n'
-        '  install -Dm0644 usr/share/applications/vela-desktop.desktop '
-        '"$pkgdir/usr/share/applications/vela-desktop.desktop"\n'
-        "}\n"
-        "package(){\n"
-        '  cd "$srcdir/$pkgname-$pkgver"\n'
-        '  install -Dm0644 BUILD.txt "$pkgdir/usr/share/doc/$pkgname/BUILD.txt"\n'
-        '  install -Dm0644 usr/share/licenses/vela/LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"\n'
-        "}\n",
-        encoding="utf-8",
+        "depends=('glibc>=2.39' 'gtk3' 'webkit2gtk-4.1' 'alsa-lib' 'libxdo' 'systemd-libs')\n"
+        "optdepends=('libsecret: remember a session through Secret Service')\n"
+        "options=('!strip' '!debug')\n"
+        f"source=('{source_url}')\n"
+        f"sha256sums=('{digest}')\n"
+        "\npackage() {\n"
+        '  cp -a "$srcdir/usr" "$pkgdir/"\n'
+        "}\n", encoding="utf-8"
     )
-    return aur_dir
+    return source
 
 
 def relative_to_repo(path: Path) -> str:
@@ -315,7 +259,7 @@ def main() -> int:
         raise SystemExit("the working tree is not clean; commit before packaging")
 
     wanted = arguments.only or ["deb", "rpm", "appimage", "aur"]
-    output = arguments.output
+    output = arguments.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
 
     stage = desktop_payload(version, commit)
@@ -327,6 +271,8 @@ def main() -> int:
                 print(f"  {kind}: unavailable (builder not installed)")
                 continue
             if kind in TOOLS and not tool_available(TOOLS[kind]):
+                if arguments.only:
+                    raise SystemExit(f"required tool missing: {TOOLS[kind]}")
                 results.append(
                     {"kind": kind, "status": "unavailable", "reason": f"{TOOLS[kind]} not installed"}
                 )
@@ -341,19 +287,26 @@ def main() -> int:
                 package = build_appimage(stage, version, commit, output)
             else:
                 package = build_aur(stage, version, commit, output)
+            write_sidecar(package)
             results.append(
                 {
+                    "target": f"desktop-linux-{kind}",
+                    "sha256": sha256(package),
+                    "size": package.stat().st_size,
+                    "platform": "linux",
+                    "arch": "x86-64",
+                    "channel": kind,
                     "kind": kind,
                     "status": "built",
-                    "file": relative_to_repo(package),
+                    "file": package.name,
                 }
             )
     finally:
         shutil.rmtree(stage, ignore_errors=True)
 
-    report = output / "linux-packages.json"
+    report = output / "release-report-packages.json"
     report.write_text(
-        json.dumps({"version": version, "commit": commit, "packages": results}, indent=2) + "\n",
+        json.dumps({"version": version, "commit": commit, "artifacts": [entry for entry in results if entry["status"] == "built"], "packages": results}, indent=2) + "\n",
         encoding="utf-8",
     )
     print(f"wrote {report}")

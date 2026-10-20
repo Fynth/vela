@@ -1,5 +1,9 @@
 # Reproducible performance measurements
 
+## Distribution pipeline2026-10-20
+
+Distribution0.12.7 limits Cargo builds to two jobs and reuses runner Cargo caches. This is build resource policy, with no new playback/startup/package-size benchmark claim. AppImage uses host GTK/WebKit libraries. See [DISTRIBUTION](DISTRIBUTION.md).
+
 ## Personal recommendation query/ranking0.10 (2026-10-18)
 
 Actual release example `target/release/examples/benchmark_recommendations --tracks N --iterations 5`, N=10000/100000/1000000. Same AMD Ryzen7 8845HS/16logicalCPU, Linux x86_64/CachyOS7.2.10-1/glibc2.44, approximately14.9GiB RAM, Rust1.99.0. Each workload creates its own temporary real migrated SQLite/WAL store with synthetic metadata only:64artists/eight genre tags/10tracks per album,12favorites, at most50 qualified sessions over20tracks,20exclusions. No audio or user library is accessed. Seeding, JSON serialization, HTTP/auth/UI, network and physical playback are excluded from per-call latency. One warmup+five sequential measurements; filesystem caches warm, normal browser/build activity may overlap. Different-date before/after runs are not dedicated isolated-host experiments.

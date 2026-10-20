@@ -1,5 +1,9 @@
 # Authoritative architecture
 
+## Distribution pipeline2026-10-20
+
+Distribution0.12.7 uses reusable quality/package workflows, native Windows/Linux and Dioxus-generated Android APKs, distinct platform reports and a complete-set publication gate. See [distribution contract](DISTRIBUTION.md) and [ADR0025](DECISIONS/0025-release-artifact-gates.md). Runtime/data ownership is unchanged.
+
 ## Private listening and local audio discovery0.9
 
 Additive migrations0008/0009 preserve existing catalog, playlist and media semantics. Domain listening/audio_analysis modules own framework-free contracts. Core ListeningService owns explicit account/device consent, CAS privacy revisions, cumulative idempotent sessions, private keyset history, export/delete and retention. The server adds authenticated/no-store listening routes, CSRF writes and an hourly supervised physical retention task. Root BrowserPlayer owns a conservative monotonic/media-time collector beside its existing source generations. Source recovery is not a new listening occurrence; actual replay after EOF is. Account changes, consent changes and erasure invalidate pending work and export generations.

@@ -31,7 +31,6 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import yaml
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MANIFEST_PATH = REPO_ROOT / "release" / "targets.yaml"
@@ -245,6 +244,7 @@ def stage_desktop(
     output_root: Path,
     channel: str,
     platform: str = "linux",
+    arch: str = "x86-64",
 ) -> Path:
     """Packs the portable desktop archive the project already ships."""
     stage = Path(tempfile.mkdtemp(prefix="vela-release-desktop-"))
@@ -255,7 +255,8 @@ def stage_desktop(
         icons.mkdir(parents=True)
         docs = stage / "share" / "doc" / "vela-desktop"
         docs.mkdir(parents=True)
-        shutil.copy2(binary, stage / "bin" / "vela-desktop")
+        binary_name = "vela-desktop.exe" if platform == "windows" else "vela-desktop"
+        shutil.copy2(binary, stage / "bin" / binary_name)
         shutil.copy2(
             REPO_ROOT / "apps" / "desktop" / "vela-desktop.desktop",
             stage / "share" / "applications" / "vela-desktop.desktop",
@@ -266,14 +267,14 @@ def stage_desktop(
             shutil.copy2(readme, docs / "README.md")
         shutil.copy2(REPO_ROOT / "LICENSE", stage / "LICENSE")
         (stage / "BUILD.txt").write_text(
-            f"version={version}\ntarget=x86_64-unknown-linux-gnu\n"
-            f"commit={commit}\nruntime=GTK3, WebKitGTK 4.1, ALSA, libxdo\n",
+            f"version={version}\nplatform={platform}\narch={arch}\n"
+            f"commit={commit}\n",
             encoding="utf-8",
         )
         suffix = ".zip" if platform in {"windows", "android"} else ".tar.gz"
         target_name = {
             "windows": "windows-x86_64",
-            "macos": "macos-aarch64",
+            "macos": f"macos-{arch}",
             "android": "android-arm64",
         }.get(platform, "linux-x86_64")
         archive = output_root / f"vela-desktop-{version}-{target_name}-{channel}{suffix}"
@@ -327,7 +328,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--only",
-        action="append",
+        action="extend",
+        nargs="+",
         default=[],
         help="build only these target ids (repeatable)",
     )
@@ -404,6 +406,8 @@ def main() -> int:
             )
         elif target["kind"] == "desktop":
             platform = target["platform"]
+            if target["channel"] not in {"local-review", "winget", "homebrew"}:
+                raise SystemExit(f"use the platform package builder for {identifier}")
             if platform == "windows":
                 desktop = build_desktop_for("x86_64-pc-windows-msvc", "windows")
             elif platform == "macos":
@@ -417,11 +421,11 @@ def main() -> int:
                 desktop = build_mobile_for("aarch64-linux-android")
             else:
                 desktop = desktop or build_desktop(version, commit)
-            archive = stage_desktop(desktop, version, commit, output_root, target["channel"], platform)
+            archive = stage_desktop(desktop, version, commit, output_root, target["channel"], platform, target["arch"])
             verify_archive(
                 archive,
                 [
-                    "bin/vela-desktop",
+                    "bin/vela-desktop.exe" if platform == "windows" else "bin/vela-desktop",
                     "share/applications/vela-desktop.desktop",
                     "BUILD.txt",
                 ],
@@ -431,8 +435,8 @@ def main() -> int:
                     identifier,
                     archive,
                     "desktop",
-                    "linux",
-                    "x86_64",
+                    platform,
+                    target["arch"],
                     target["channel"],
                     sha256(archive),
                     archive.stat().st_size,
@@ -440,6 +444,13 @@ def main() -> int:
             )
         else:
             print(f"skip {identifier}: unsupported artifact kind {target['kind']!r}")
+
+    for artifact in list(produced):
+        if artifact.platform == "windows":
+            exe = output_root / f"vela-desktop-{version}-windows-x86_64.exe"
+            shutil.copy2(REPO_ROOT / "target/release/vela-desktop.exe", exe)
+            produced.append(Artifact("desktop-windows-exe", exe, "exe", "windows", "x86-64",
+                                     "github-release", sha256(exe), exe.stat().st_size))
 
     for artifact in produced:
         write_sidecar(artifact.path)
@@ -449,7 +460,8 @@ def main() -> int:
         "commit": commit,
         "artifacts": [describe(artifact) for artifact in produced],
     }
-    report_path = output_root / "release-report.json"
+    platforms = "-".join(sorted({a.platform for a in produced}))
+    report_path = output_root / f"release-report-{platforms}.json"
     report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(f"wrote {report_path}")
     for artifact in produced:

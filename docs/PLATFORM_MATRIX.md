@@ -1,5 +1,9 @@
 # Platform evidence
 
+## Distribution pipeline2026-10-20
+
+Distribution0.12.7 updates the build recipes for Linux tar.gz/deb/AppImage, native Windows exe/zip, Android APK and AUR makepkg. Recipe presence is not successful CI/device evidence; see [DISTRIBUTION](DISTRIBUTION.md) and the current QA_EVIDENCE entry. Historical evidence rows below are not upgraded by this change.
+
 Latest source/debug repair2026-10-19 (baseline91867f2), separate from the package
 matrix below: Chromium43 pass/1skip and Firefox43 pass/1skip; Linux X11 native
 fixture89 checks/10 screenshots; actual native Wayland Hyprland normally tiled

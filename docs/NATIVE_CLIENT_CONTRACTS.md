@@ -1,5 +1,9 @@
 # Native Linux client0.12 — verified bounded increment
 
+## Distribution pipeline2026-10-20
+
+Distribution0.12.7 adds Windows portable exe/zip, Linux tar.gz/deb/AppImage and Dioxus-generated Android APK build paths without adding another HTTP/audio owner. Android API26+ manifest disables backups and cleartext. Stable signing and actual device/background validation are separate. See [DISTRIBUTION](DISTRIBUTION.md).
+
 Status: verified Linux x86_64 source and portable-package slice (0.12.6). It includes
 explicit offline device copies, opt-in Secret Service session resume and native
 playlist folders. It is not a system installer/auto-updater, not mobile/background

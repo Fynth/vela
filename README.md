@@ -1,5 +1,7 @@
 # Vela Music
 
+Release downloads and CI artifacts: [distribution formats, requirements and AUR setup](docs/DISTRIBUTION.md).
+
 A Rust-first, self-hosted music cloud with a Dioxus web interface. This is an early implementation under active development, not a finished alternative to established servers.
 
 The2026-10-19 [audit and planning index](docs/PLANS/2026-10-19/README.md) covers

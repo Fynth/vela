@@ -1,5 +1,9 @@
 # Unsupported and unverified functionality
 
+## Distribution pipeline2026-10-20
+
+Distribution0.12.7 supplies packaging workflows for exe/tar.gz/deb/AppImage/APK and the user-selected AUR name vela-music-bin. AUR requires owner credentials; APKs without a keystore are explicit previews with ephemeral signatures. Native packaging smoke is not device/audio/background certification. See [DISTRIBUTION](DISTRIBUTION.md); dated platform rows below retain their historical scope.
+
 ## Interaction/window source repair2026-10-19
 
 The newer [interaction review](UX_INTERACTION_REVIEW_2026-10-19.md) supersedes the

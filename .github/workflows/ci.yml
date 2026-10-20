@@ -1,7 +1,11 @@
 name: quality
-on: [push, pull_request]
+on:
+  workflow_call:
+  workflow_dispatch:
 permissions:
   contents: read
+env:
+  CARGO_BUILD_JOBS: 2
 jobs:
   rust:
     runs-on: ubuntu-latest
@@ -12,6 +16,10 @@ jobs:
           toolchain: 1.99.0
           components: rustfmt, clippy
           targets: wasm32-unknown-unknown
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python3 -m pip install -r scripts/requirements-release.txt
       - uses: Swatinem/rust-cache@v2
       - name: Linux native Dioxus and audio build dependencies
         run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libasound2-dev libudev-dev libxdo-dev

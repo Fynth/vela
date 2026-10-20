@@ -1,5 +1,9 @@
 # Authoritative backlog
 
+## Distribution pipeline2026-10-20
+
+Distribution0.12.7 adds the required exe/zip, Linux tar.gz/deb/AppImage and Android APK pipeline plus real makepkg validation. AUR publication needs the owner account/key; stable APK update signing needs a keystore. Hardware/device/background, macOS/iOS packaging and store submissions remain separate. See [DISTRIBUTION](DISTRIBUTION.md).
+
 ## Approved prototype transfer 2026-10-19 — documentation only
 
 The [prototype transfer package](PLANS/2026-10-19/PROTOTYPE_TRANSFER/README.md)

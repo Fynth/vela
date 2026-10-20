@@ -1,5 +1,22 @@
 # Verified progress
 
+## Distribution CI/CD0.12.7 — 2026-10-20
+
+User authorized push and release/AUR distribution. Replaced the broken duplicated
+package paths with reusable quality/packages workflows, required Linux tar.gz/deb/
+AppImage, native Windows exe/zip and Dioxus-generated Android APK builds. Added
+real unprivileged makepkg and .SRCINFO, distinct reports and a full-set hash/payload/
+source/version gate. Tags publish assets before the selected vela-music-bin AUR
+recipe; main/PR/manual runs retain Actions artifacts. See DISTRIBUTION and ADR0025.
+
+Local fmt, strict workspace/all-target Clippy, cargo check, actionlint1.7.12 and
+38 Python regressions passed. Workspace Rust/API tests and WASM checks are running;
+remote builds/publication are pending and are not claimed as passing. AUR host
+Ed25519 fingerprint matched the official HTTPS homepage; AUR_REPO and the pinned
+AUR_KNOWN_HOSTS were configured. No AUR secret or Android signing identity exists
+in GitHub yet. Frozen runtime, original data and preserved target snapshots remain
+untouched. No device/UI/audio/Docker validation was performed by this change.
+
 ## AUD-05 cold offline launch — fixed (2026-10-20)
 
 `3aeee09`: a private non-secret profile (canonical origin+account only,0600, atomic,

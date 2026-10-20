@@ -1,5 +1,15 @@
 # Verified0.12.0 package and preserved runtime checkpoint
 
+## Distribution CI/CD2026-10-20
+
+Local: fmt PASS, strict workspace/all-target Clippy PASS, cargo check PASS,
+actionlint1.7.12 PASS, Python38 PASS (including exe extension/ZIP metadata, tar
+payloads, report merge/source mismatch, tamper/missing formats and AUR arrays).
+Logs: target/checks/distribution/. Rust/API/WASM and remote package jobs PENDING.
+No G01–G24 or EXP/PLAY/RES/NET/AUTH/NP behavior changed or reclassified. Native
+windows/audio/device/background, browser and Docker evidence remain separate; no
+new claim for those classes. See DISTRIBUTION.md for exact ABI/signing limitations.
+
 ## AUD-09 measured performance
 
 | Check | Paths | Commit | Evidence | Status | NOT_RUN |

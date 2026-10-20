@@ -1,370 +1,102 @@
 name: release
-#
-# The release pipeline. It follows the target manifest in release/targets.yaml:
-# every job reads the manifest, so a new channel is a manifest entry plus a
-# recipe, not a new pipeline.
-#
-# The pipeline never publishes on its own initiative. A release is created from
-# a signed tag, and uploading to a store additionally requires the credentials
-# that target names in the manifest.
-
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
+    tags: ['v*']
+  pull_request:
   workflow_dispatch:
-    inputs:
-      dry_run:
-        description: "Build and verify everything, publish nothing"
-        type: boolean
-        default: true
-
 permissions:
   contents: read
-
 concurrency:
   group: release-${{ github.ref }}
-  cancel-in-progress: false
-
-env:
-  CARGO_BUILD_JOBS: 2
-  RUST_TOOLCHAIN: 1.99.0
-  WASM_BINDGEN_VERSION: 0.2.129
-
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 jobs:
-  manifest:
-    name: validate the release manifest
-    runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.version.outputs.version }}
+  quality:
+    uses: ./.github/workflows/ci.yml
+  packages:
+    uses: ./.github/workflows/desktop-platforms.yml
+    secrets: inherit
+  verify:
+    needs: [quality, packages]
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
-      - name: Install the release tooling dependencies
-        run: python3 -m pip install --upgrade pyyaml
-      - name: Validate the target manifest
-        run: python3 scripts/release_manifest.py
-      - id: version
-        run: |
-          version="$(cargo metadata --locked --no-deps --format-version=1 | python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"]=="vela-server"))')"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "release version: $version"
-
-  linux:
-    name: linux server, web and desktop packages
-    needs: manifest
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.99.0
-          targets: wasm32-unknown-unknown
-      - uses: Swatinem/rust-cache@v2
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Install the build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libgtk-3-dev libwebkit2gtk-4.1-dev libasound2-dev libudev-dev libxdo-dev \
-            dpkg-dev rpm fakeroot
-      - name: Install the pinned wasm-bindgen
-        run: cargo install wasm-bindgen-cli --version "${WASM_BINDGEN_VERSION}" --locked
-      - name: Build the server and the web client
-        run: |
-          cargo build --locked --release -p vela-server
-          VELA_WEB_PROFILE=release scripts/build-web.sh
-          python3 scripts/generate_notices.py
-      - name: Package the server, the web client and the desktop client
-        run: |
-          python3 scripts/release_build.py --output target/release-artifacts \
-            --only server-linux-x86-64 web-linux-x86-64 desktop-linux-x86-64
-      - name: Build the Linux packages
-        # dpkg-deb and rpmbuild come from the image; the AppImage and the AUR
-        # recipe are built here too, and the AUR recipe is checked with
-        # makepkg in the Arch container below.
-        run: python3 scripts/release_packages.py --output target/release-artifacts
-      - name: Build the AUR package
-        env:
-          VELA_RELEASE_BASE_URL: https://github.com/${{ github.repository }}/releases/download/v${{ needs.manifest.outputs.version }}
-        run: python3 scripts/release_packages.py --output target/release-artifacts --only aur
-      - name: Check the AUR recipe with makepkg
-        uses: docker://archlinux:base-devel
-        with:
-          args: >-
-            bash -lc "mkdir -p /build && cp -r /work/aur-sources /work/aur /build/ &&
-            cd /build/aur && sed -i 's|^  echo .*|  source=(\'vela-0.12.6.tar.gz\')|' PKGBUILD &&
-            cp ../aur-sources/*.tar.gz . && makepkg --printsrcinfo"
-        # The container only validates the recipe; the real build happens on an
-        # Arch runner or a developer machine.
-        continue-on-error: true
-      - name: Verify every artifact
-        run: python3 scripts/verify_release_artifacts.py --artifacts target/release-artifacts
-      - uses: actions/upload-artifact@v4
-        with:
-          name: release-linux
-          path: target/release-artifacts
-          if-no-files-found: error
-
-  linux-packages:
-    name: linux packages (deb, rpm, AppImage)
-    needs: manifest
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.99.0
-      - uses: Swatinem/rust-cache@v2
-      - name: Desktop build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libgtk-3-dev libwebkit2gtk-4.1-dev libasound2-dev libudev-dev libxdo-dev \
-            dpkg-dev rpm fakeroot wget
-      - name: Build the desktop binary
-        run: cargo build --locked --release -p vela-desktop
-      - name: Install the AppImage tooling
-        run: |
-          wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
-          chmod +x appimagetool-x86_64.AppImage
-          sudo mv appimagetool-x86_64.AppImage /usr/local/bin/appimagetool
-      - name: Build the deb and the AppImage
-        env:
-          VELA_RELEASE_BASE_URL: https://github.com/${{ github.repository }}/releases/download/v${{ needs.manifest.outputs.version }}
-        run: python3 scripts/release_packages.py --output target/release-artifacts --only deb --only appimage
-      - name: Build the RPM
-        # The rpm build needs the Fedora build macros; they are complete in the
-        # distribution's own image and incomplete in the runner image.
-        uses: docker://fedora:41
-        with:
-          args: >-
-            bash -lc "dnf install -y rpm-build rpm-macros-fedora make && cd /github/workspace &&
-            python3 scripts/release_packages.py --output target/release-artifacts --only rpm"
-        continue-on-error: true
-      - name: Verify the packages
-        run: |
-          python3 scripts/verify_release_artifacts.py --artifacts target/release-artifacts
-          for package in target/release-artifacts/*.deb; do
-            [ -e "$package" ] || continue
-            dpkg-deb --contents "$package" | grep -q "usr/lib/vela/vela-desktop"
-          done
-      - uses: actions/upload-artifact@v4
-        with:
-          name: release-linux-packages
-          path: |
-            target/release-artifacts/*.deb
-            target/release-artifacts/*.rpm
-            target/release-artifacts/*.AppImage
-            target/release-artifacts/aur
-            target/release-artifacts/aur-sources
-
-  windows:
-    name: windows desktop (exe)
-    needs: manifest
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.99.0
-      - uses: Swatinem/rust-cache@v2
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Install the release tooling dependencies
-        run: python3 -m pip install --upgrade pyyaml
-      - name: Build the Windows client
-        run: cargo build --locked --release -p vela-desktop
-      - name: Package the Windows client
-        shell: bash
-        run: python3 scripts/release_build.py --output target/release-artifacts --only desktop-windows-x86-64
-      - name: Check the Windows binary runs
-        shell: pwsh
-        run: |
-          & .\target\release\vela-desktop.exe --version
-          if ($LASTEXITCODE -ne 0) { throw "the Windows desktop binary did not report its version" }
-      - uses: actions/upload-artifact@v4
-        with:
-          name: release-windows
-          path: |
-            target/release/vela-desktop.exe
-            target/release-artifacts/*
-
-  macos:
-    name: macos desktop
-    needs: manifest
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.99.0
-      - uses: Swatinem/rust-cache@v2
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Install the release tooling dependencies
-        run: python3 -m pip install --upgrade pyyaml
-      - name: Build the macOS client
-        run: cargo build --locked --release -p vela-desktop
-      - name: Package the macOS client
-        run: python3 scripts/release_build.py --output target/release-artifacts --only desktop-macos-aarch64
-      - name: Check the macOS binary runs
-        run: ./target/release/vela-desktop --version
-      - uses: actions/upload-artifact@v4
-        with:
-          name: release-macos
-          path: |
-            target/release/vela-desktop
-            target/release-artifacts/*
-
-  android:
-    name: android client
-    needs: manifest
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.99.0
-          targets: aarch64-linux-android
-      - uses: Swatinem/rust-cache@v2
-      - name: Install the Android NDK
-        uses: nttld/setup-ndk@v1
-        with:
-          ndk-version: r26d
-      - name: Prepare the Android toolchain
-        # The NDK names its compilers after the API level, while the crates that
-        # compile C code look for the plain target name. Both names are provided,
-        # and the toolchain directory is put on the path for the crates that
-        # look for the compiler by name.
-        run: |
-          bin="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
-          for prefix in aarch64-linux-android armv7a-linux-androideabi x86_64-linux-android; do
-            ln -sf "${prefix}26-clang" "$bin/${prefix}-clang"
-          done
-          echo "$bin" >> "$GITHUB_PATH"
-          cargo build --locked --release -p vela-desktop --bin vela-mobile --features mobile --target aarch64-linux-android
-      - name: Package the Android client
-        run: python3 scripts/release_build.py --output target/release-artifacts --only android-arm64
-      - name: Check the Android binary
-        run: |
-          file target/aarch64-linux-android/release/vela-mobile
-          readelf -d target/aarch64-linux-android/release/vela-mobile | grep -q libaaudio.so
-      - uses: actions/upload-artifact@v4
-        with:
-          name: release-android
-          path: |
-            target/aarch64-linux-android/release/vela-mobile
-            target/release-artifacts/*
-
-  sign:
-    name: sign the artifacts
-    needs: [linux, linux-packages, windows, macos, android]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+          python-version: '3.12'
+      - run: python3 -m pip install -r scripts/requirements-release.txt
       - uses: actions/download-artifact@v4
         with:
+          pattern: packages-*
           path: target/release-artifacts
           merge-multiple: true
-      - name: Sign with the release key
-        env:
-          GPG_KEY: ${{ secrets.RELEASE_GPG_PRIVATE_KEY }}
-          RELEASE_GPG_FINGERPRINT: ${{ vars.RELEASE_GPG_FINGERPRINT }}
-        run: |
-          if [ -n "${GPG_KEY:-}" ]; then
-            export GNUPGHOME="$(mktemp -d)"
-            chmod 700 "$GNUPGHOME"
-            printf '%s' "$GPG_KEY" | base64 -d > "$GNUPGHOME/key.asc"
-            gpg --batch --import "$GNUPGHOME/key.asc"
-            python3 scripts/release_sign.py --gpg-key "${RELEASE_GPG_FINGERPRINT:-}" --artifacts target/release-artifacts
-          else
-            echo "::warning::RELEASE_GPG_PRIVATE_KEY is not configured; the artifacts stay unsigned"
-            python3 scripts/release_sign.py --artifacts target/release-artifacts
-          fi
-      - uses: actions/upload-artifact@v4
-        with:
-          name: release-signed
-          path: target/release-artifacts
-          if-no-files-found: error
-
-  publish:
-    name: publish to the channels
-    needs: [manifest, sign]
-    runs-on: ubuntu-latest
-    # A dry run never touches a store, so it is safe to run on every tag.
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == false }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
       - uses: actions/download-artifact@v4
         with:
-          name: release-signed
-          path: target/release-artifacts
-      - name: Publish
+          name: aur-validated
+          path: target/release-artifacts/aur
+      - name: Verify complete artifact set and tag version
         env:
-          AUR_SSH_KEY: ${{ secrets.AUR_SSH_KEY }}
-          AUR_REPO: ${{ vars.AUR_REPO }}
-          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          ANDROID_KEY_ALIAS: ${{ vars.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
-        run: python3 scripts/release_publish.py --artifacts target/release-artifacts
-
+          RELEASE_TAG: ${{ github.ref_name }}
+          IS_TAG: ${{ startsWith(github.ref, 'refs/tags/') }}
+        run: |
+          python3 scripts/verify_release_artifacts.py --require-all
+          python3 - <<'PY'
+          import json, os, pathlib
+          r = json.loads(pathlib.Path('target/release-artifacts/release-report.json').read_text())
+          assert r['commit'] == os.environ['GITHUB_SHA'], 'artifacts name a different commit'
+          if os.environ['IS_TAG'] == 'true':
+              assert os.environ['RELEASE_TAG'] == 'v' + r['version'], 'tag does not match Cargo version'
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-verified
+          path: target/release-artifacts/
+          include-hidden-files: true
+          if-no-files-found: error
   github-release:
-    name: attach the artifacts to the GitHub release
-    needs: [manifest, sign]
-    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v') && github.event_name == 'push'
+    needs: verify
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: release-signed
-          path: target/release-artifacts
-      - name: Collect the release assets
-        run: |
-          mkdir -p target/release-assets
-          cp target/release-artifacts/*.tar.gz target/release-artifacts/*.zip \
-            target/release-artifacts/*.deb target/release-artifacts/*.rpm \
-            target/release-artifacts/*.AppImage target/release-assets/ 2>/dev/null || true
-          # The AUR recipe and its source tarball are release assets too, so that
-          # the published recipe can actually download what it names.
-          cp target/release-artifacts/aur/PKGBUILD target/release-assets/ 2>/dev/null || true
-          cp target/release-artifacts/aur-sources/*.tar.gz target/release-assets/ 2>/dev/null || true
-          ls -l target/release-assets
+          name: release-verified
+          path: release-assets
       - uses: softprops/action-gh-release@v2
         with:
-          files: target/release-assets/*
-          generate_release_notes: true
+          files: |
+            release-assets/*.tar.gz
+            release-assets/*.zip
+            release-assets/*.exe
+            release-assets/*.deb
+            release-assets/*.AppImage
+            release-assets/*.apk
+            release-assets/*.sha256
+            release-assets/SHA256SUMS
+            release-assets/release-report.json
+            release-assets/aur/PKGBUILD
           fail_on_unmatched_files: true
+          generate_release_notes: true
+          body: |
+            Linux x86_64 packages require GTK3, WebKitGTK 4.1, ALSA and libxdo on Ubuntu 24.04+ or current Arch. The AppImage packages the application and requires these system libraries.
+            Windows requires the WebView2 runtime. Executables have no Authenticode signature.
+            Android arm64 APK is a preview; device audio/background behavior is not certified. A filename ending in -preview.apk uses a temporary CI signing key and may require reinstalling between builds. Stable APK signing uses the repository Android keystore secrets.
+            AUR installation: yay -S vela-music-bin (available after the separate AUR publish job succeeds).
+  aur:
+    if: startsWith(github.ref, 'refs/tags/v') && github.event_name == 'push'
+    needs: github-release
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-verified
+          path: target/release-artifacts
+      - name: Publish validated AUR recipe after release assets exist
+        env:
+          AUR_SSH_KEY: ${{ secrets.AUR_SSH_KEY }}
+          AUR_REPO: ${{ vars.AUR_REPO }}
+          AUR_KNOWN_HOSTS: ${{ vars.AUR_KNOWN_HOSTS }}
+        run: bash release/channels/aur.sh target/release-artifacts/aur vela-music-bin

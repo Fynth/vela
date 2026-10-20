@@ -1,0 +1,20 @@
+[application]
+name = "Vela Music"
+public_dir = ""
+
+[bundle]
+identifier = "io.github.fynth.vela"
+publisher = "Fynth"
+short_description = "Private music library and player"
+category = "Music"
+
+[android]
+min_sdk = 26
+target_sdk = 35
+compile_sdk = 35
+
+[android.application]
+uses_cleartext_traffic = false
+
+[android.raw]
+application_attrs = 'android:allowBackup="false"'

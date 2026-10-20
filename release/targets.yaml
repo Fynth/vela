@@ -95,9 +95,9 @@ targets:
     platform: linux
     arch: x86-64
     channel: aur
-    publish: none
+    publish: upload
     requires: [desktop-linux-x86-64]
-    credentials: []
+    credentials: [AUR_SSH_KEY, AUR_KNOWN_HOSTS]
     status: buildable
 
   - id: desktop-windows-x86-64
@@ -144,15 +144,13 @@ targets:
     kind: desktop
     platform: android
     arch: aarch64
-    channel: google-play
+    channel: github-release
     publish: none
-    requires: [desktop-linux-x86-64]
-    credentials: [ANDROID_KEYSTORE_BASE64, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD, PLAY_SERVICE_ACCOUNT_JSON]
-    # The client builds for aarch64-linux-android with the Dioxus 0.7.10 mobile
-    # renderer and the Android NDK; the binary asks for the platform audio stack
-    # (libaaudio). What is still missing for a store upload is the Android
-    # application project that packages the binary as an App Bundle and signs
-    # it, so publishing stays off until that exists.
+    requires: []
+    credentials: []
+    # Dioxus CLI generates the Android application and builds a signed preview
+    # APK, or a release-signed APK when the optional keystore is configured.
+    # Build/signature checks do not certify device audio/background behavior.
     status: buildable
 
   - id: ios-arm64

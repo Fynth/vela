@@ -1,5 +1,9 @@
 # Threat model and security architecture
 
+## Distribution pipeline2026-10-20
+
+Release0.12.7 verifies source/version, required payloads and SHA256 for all artifacts before tag publication. AUR uses a private temporary SSH key, strict pinned host identity and the selected repository only. Android signing secrets never enter artifacts; preview APKs use an ephemeral debug identity. Checksums are not publisher signatures. See [DISTRIBUTION](DISTRIBUTION.md).
+
 Source-review update2026-10-19: [AUD-01–20 and proposed repairs](PLANS/2026-10-19/01_AUDIT.md)
 record native account/keyring/offline lifecycle concerns still awaiting regressions/fixes.
 The fresh cargo-deny gate failed on3INFO Unmaintained notices in the MPRIS/ZBus5 chain;

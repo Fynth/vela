@@ -7038,7 +7038,7 @@ checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
 
 [[package]]
 name = "vela-core"
-version = "0.12.6"
+version = "0.12.7"
 dependencies = [
  "anyhow",
  "argon2",
@@ -7058,7 +7058,7 @@ dependencies = [
 
 [[package]]
 name = "vela-desktop"
-version = "0.12.6"
+version = "0.12.7"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -7082,7 +7082,7 @@ dependencies = [
 
 [[package]]
 name = "vela-domain"
-version = "0.12.6"
+version = "0.12.7"
 dependencies = [
  "serde",
  "url",
@@ -7090,7 +7090,7 @@ dependencies = [
 
 [[package]]
 name = "vela-imports"
-version = "0.12.6"
+version = "0.12.7"
 dependencies = [
  "anyhow",
  "axum",
@@ -7113,7 +7113,7 @@ dependencies = [
 
 [[package]]
 name = "vela-media"
-version = "0.12.6"
+version = "0.12.7"
 dependencies = [
  "anyhow",
  "blake3",
@@ -7136,7 +7136,7 @@ dependencies = [
 
 [[package]]
 name = "vela-scanner"
-version = "0.12.6"
+version = "0.12.7"
 dependencies = [
  "anyhow",
  "blake3",
@@ -7159,7 +7159,7 @@ dependencies = [
 
 [[package]]
 name = "vela-server"
-version = "0.12.6"
+version = "0.12.7"
 dependencies = [
  "anyhow",
  "axum",
@@ -7188,7 +7188,7 @@ dependencies = [
 
 [[package]]
 name = "vela-web"
-version = "0.12.6"
+version = "0.12.7"
 dependencies = [
  "dioxus",
  "gloo-net",
