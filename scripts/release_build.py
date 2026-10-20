@@ -192,6 +192,31 @@ def stage_server(
         shutil.rmtree(stage, ignore_errors=True)
 
 
+def build_mobile_for(target_triple: str) -> Path:
+    """Builds the mobile client for a platform.
+
+    The mobile client is the same application behind the platform webview shell,
+    so it is built from the same crate and the same lockfile as the desktop one.
+    """
+    run(
+        [
+            "cargo",
+            "build",
+            "--locked",
+            "--release",
+            "-p",
+            "vela-desktop",
+            "--bin",
+            "vela-mobile",
+            "--features",
+            "mobile",
+            "--target",
+            target_triple,
+        ]
+    )
+    return REPO_ROOT / "target" / target_triple / "release" / "vela-mobile"
+
+
 def build_desktop_for(target_triple: str, runner: str) -> Path:
     """Builds the desktop client for a native platform.
 
@@ -245,10 +270,12 @@ def stage_desktop(
             f"commit={commit}\nruntime=GTK3, WebKitGTK 4.1, ALSA, libxdo\n",
             encoding="utf-8",
         )
-        suffix = ".zip" if platform == "windows" else ".tar.gz"
-        target_name = "windows-x86_64" if platform == "windows" else (
-            "macos-aarch64" if platform == "macos" else "linux-x86_64"
-        )
+        suffix = ".zip" if platform in {"windows", "android"} else ".tar.gz"
+        target_name = {
+            "windows": "windows-x86_64",
+            "macos": "macos-aarch64",
+            "android": "android-arm64",
+        }.get(platform, "linux-x86_64")
         archive = output_root / f"vela-desktop-{version}-{target_name}-{channel}{suffix}"
         archive.parent.mkdir(parents=True, exist_ok=True)
         if archive.suffix == ".zip":
@@ -380,7 +407,14 @@ def main() -> int:
             if platform == "windows":
                 desktop = build_desktop_for("x86_64-pc-windows-msvc", "windows")
             elif platform == "macos":
-                desktop = build_desktop_for("aarch64-apple-darwin", "macos")
+                triple = (
+                    "aarch64-apple-darwin"
+                    if target["arch"] == "aarch64"
+                    else "x86_64-apple-darwin"
+                )
+                desktop = build_desktop_for(triple, "macos")
+            elif platform == "android":
+                desktop = build_mobile_for("aarch64-linux-android")
             else:
                 desktop = desktop or build_desktop(version, commit)
             archive = stage_desktop(desktop, version, commit, output_root, target["channel"], platform)

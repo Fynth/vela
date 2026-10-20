@@ -34,6 +34,8 @@ jobs:
   manifest:
     name: validate the release manifest
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -41,9 +43,14 @@ jobs:
           python-version: "3.12"
       - name: Validate the target manifest
         run: python3 scripts/release_manifest.py
+      - id: version
+        run: |
+          version="$(cargo metadata --locked --no-deps --format-version=1 | python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"]=="vela-server"))')"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "release version: $version"
 
-  build:
-    name: build the release artifacts
+  linux:
+    name: linux server, web and desktop packages
     needs: manifest
     runs-on: ubuntu-latest
     steps:
@@ -55,40 +62,148 @@ jobs:
           toolchain: 1.99.0
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: |
-            . -> target
-            crates/core -> target
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install the pinned wasm-bindgen
-        run: |
-          cargo install wasm-bindgen-cli --version "${WASM_BINDGEN_VERSION}" --locked
-      - name: Build the verified artifacts
-        env:
-          VELA_WEB_PROFILE: release
-        run: python3 scripts/release_build.py --output target/release-artifacts
-      - name: Build the Linux packages
+      - name: Install the build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends dpkg-dev rpm fakeroot
-          python3 scripts/release_packages.py --output target/release-artifacts
-      - name: Verify the artifacts and their checksums
+          sudo apt-get install -y --no-install-recommends \
+            libgtk-3-dev libwebkit2gtk-4.1-dev libasound2-dev libudev-dev libxdo-dev \
+            dpkg-dev rpm fakeroot
+      - name: Install the pinned wasm-bindgen
+        run: cargo install wasm-bindgen-cli --version "${WASM_BINDGEN_VERSION}" --locked
+      - name: Build the server and the web client
         run: |
-          cd target/release-artifacts
-          for artifact in *.tar.gz *.deb *.rpm *.AppImage; do
-            [ -e "$artifact" ] || continue
-            sha256sum -c "$artifact.sha256" 2>/dev/null || true
-          done
-          python3 - <<'PY'
-          import json, pathlib
-          report = json.loads(pathlib.Path("release-report.json").read_text())
-          if not report["artifacts"]:
-              raise SystemExit("no artifacts were produced")
-          print(f"{len(report['artifacts'])} artifacts built at {report['commit'][:12]}")
-          PY
-      - name: Sign the artifacts
+          cargo build --locked --release -p vela-server
+          VELA_WEB_PROFILE=release scripts/build-web.sh
+          python3 scripts/generate_notices.py
+      - name: Package the server, the web client and the desktop client
+        run: |
+          python3 scripts/release_build.py --output target/release-artifacts \
+            --only server-linux-x86-64 web-linux-x86-64 desktop-linux-x86-64
+      - name: Build the Linux packages
+        run: python3 scripts/release_packages.py --output target/release-artifacts
+      - name: Verify every artifact
+        run: python3 scripts/verify_release_artifacts.py --artifacts target/release-artifacts
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-linux
+          path: target/release-artifacts
+          if-no-files-found: error
+
+  windows:
+    name: windows desktop (exe)
+    needs: manifest
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.0
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build the Windows client
+        run: cargo build --locked --release -p vela-desktop
+      - name: Package the Windows client
+        shell: bash
+        run: python3 scripts/release_build.py --output target/release-artifacts --only desktop-windows-x86-64
+      - name: Check the Windows binary runs
+        shell: pwsh
+        run: |
+          & .\target\release\vela-desktop.exe --version
+          if ($LASTEXITCODE -ne 0) { throw "the Windows desktop binary did not report its version" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: |
+            target/release/vela-desktop.exe
+            target/release-artifacts/*
+
+  macos:
+    name: macos desktop
+    needs: manifest
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.0
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build the macOS client
+        run: cargo build --locked --release -p vela-desktop
+      - name: Package the macOS client
+        run: python3 scripts/release_build.py --output target/release-artifacts --only desktop-macos-aarch64
+      - name: Check the macOS binary runs
+        run: ./target/release/vela-desktop --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-macos
+          path: |
+            target/release/vela-desktop
+            target/release-artifacts/*
+
+  android:
+    name: android client
+    needs: manifest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.0
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+      - name: Install the Android NDK
+        uses: nttld/setup-ndk@v3
+        with:
+          ndk-version: r26d
+      - name: Build the Android client
+        run: |
+          echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME" >> "$GITHUB_ENV"
+          echo "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin" >> "$GITHUB_PATH"
+          cargo build --locked --release -p vela-desktop --bin vela-mobile --features mobile --target aarch64-linux-android
+      - name: Package the Android client
+        run: python3 scripts/release_build.py --output target/release-artifacts --only android-arm64
+      - name: Check the Android binary
+        run: |
+          file target/aarch64-linux-android/release/vela-mobile
+          readelf -d target/aarch64-linux-android/release/vela-mobile | grep -q libaaudio.so
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-android
+          path: |
+            target/aarch64-linux-android/release/vela-mobile
+            target/release-artifacts/*
+
+  sign:
+    name: sign the artifacts
+    needs: [linux, windows, macos, android]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          path: target/release-artifacts
+          merge-multiple: true
+      - name: Sign with the release key
         env:
           GPG_KEY: ${{ secrets.RELEASE_GPG_PRIVATE_KEY }}
           RELEASE_GPG_FINGERPRINT: ${{ vars.RELEASE_GPG_FINGERPRINT }}
@@ -103,41 +218,15 @@ jobs:
             echo "::warning::RELEASE_GPG_PRIVATE_KEY is not configured; the artifacts stay unsigned"
             python3 scripts/release_sign.py --artifacts target/release-artifacts
           fi
-      - name: Publish a dry run of the channel plan
-        run: python3 scripts/release_publish.py --dry-run --artifacts target/release-artifacts
       - uses: actions/upload-artifact@v4
         with:
-          name: release-artifacts
+          name: release-signed
           path: target/release-artifacts
           if-no-files-found: error
 
-  linux-desktop:
-    name: linux desktop package
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.99.0
-      - name: Linux desktop build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libgtk-3-dev libwebkit2gtk-4.1-dev libasound2-dev libudev-dev libxdo-dev
-      - name: Build the desktop release binary
-        run: cargo build --locked --release -p vela-desktop
-      - name: Verify the desktop package launches
-        run: python3 scripts/verify_desktop_package.py
-      - uses: actions/upload-artifact@v4
-        with:
-          name: desktop-linux
-          path: |
-            target/desktop-releases/*
-            target/checks/desktop-*-verify.log
-
   publish:
     name: publish to the channels
-    needs: [build, linux-desktop]
+    needs: [manifest, sign]
     runs-on: ubuntu-latest
     # A dry run never touches a store, so it is safe to run on every tag.
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == false }}
@@ -145,13 +234,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: actions/download-artifact@v4
-        with:
-          name: release-artifacts
-          path: target/release-artifacts
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-signed
+          path: target/release-artifacts
       - name: Publish
         env:
           AUR_SSH_KEY: ${{ secrets.AUR_SSH_KEY }}
@@ -169,14 +258,14 @@ jobs:
 
   github-release:
     name: attach the artifacts to the GitHub release
-    needs: [build, linux-desktop]
+    needs: [manifest, sign]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: release-artifacts
+          name: release-signed
           path: target/release-artifacts
       - uses: softprops/action-gh-release@v2
         with:
