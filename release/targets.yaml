@@ -1,0 +1,161 @@
+# Release target manifest.
+#
+# One machine-readable description of every distribution channel Vela ships to.
+# The release pipeline reads this file; it never hardcodes a channel anywhere
+# else, so adding a target means adding one entry here and one job.
+#
+# Fields
+#   id           stable identifier used by CI job names and artifact names
+#   kind         what the artifact is
+#   platform     the operating system the artifact runs on
+#   arch         the CPU architecture
+#   channel      where the artifact is published
+#   publish      how the artifact reaches the channel
+#   requires     what must be true before this target may be built
+#   credentials  the secrets a publish step needs (names only, never values)
+#   status       honest state of the target
+#
+# status values
+#   ready        built, verified and published by CI on every release
+#   buildable    the artifact is built and verified, but publishing needs
+#                credentials or a channel that cannot be reached from CI
+#   blocked      the target cannot be built on the current code base
+#
+# `publish: none` means the pipeline produces and verifies the artifact and
+# attaches it to the release, but never uploads it anywhere on its own. That is
+# the honest default for every channel that needs an account or a store
+# credential: the pipeline must not pretend to publish.
+
+version: 1
+artifact-naming: vela-{name}-{version}-{target}
+
+targets:
+  - id: server-linux-x86-64
+    kind: server
+    platform: linux
+    arch: x86-64
+    channel: local-review
+    publish: none
+    requires: []
+    credentials: []
+    status: ready
+
+  - id: web-linux-x86-64
+    kind: web
+    platform: linux
+    arch: x86-64
+    channel: local-review
+    publish: none
+    requires: []
+    credentials: []
+    status: ready
+
+  - id: desktop-linux-x86-64
+    kind: desktop
+    platform: linux
+    arch: x86-64
+    channel: local-review
+    publish: none
+    requires: []
+    credentials: []
+    status: ready
+
+  - id: desktop-linux-deb
+    kind: desktop
+    platform: linux
+    arch: x86-64
+    channel: debian-archive
+    publish: none
+    requires: [desktop-linux-x86-64]
+    credentials: []
+    status: buildable
+
+  - id: desktop-linux-rpm
+    kind: desktop
+    platform: linux
+    arch: x86-64
+    channel: fedora
+    publish: none
+    requires: [desktop-linux-x86-64]
+    credentials: []
+    status: buildable
+
+  - id: desktop-linux-appimage
+    kind: desktop
+    platform: linux
+    arch: x86-64
+    channel: appimage
+    publish: none
+    requires: [desktop-linux-x86-64]
+    credentials: []
+    status: buildable
+
+  - id: desktop-linux-aur
+    kind: desktop
+    platform: linux
+    arch: x86-64
+    channel: aur
+    publish: none
+    requires: [desktop-linux-x86-64]
+    credentials: []
+    status: buildable
+
+  - id: desktop-windows-x86-64
+    kind: desktop
+    platform: windows
+    arch: x86-64
+    channel: winget
+    publish: none
+    requires: [desktop-linux-x86-64]
+    credentials: []
+    status: blocked
+
+  - id: desktop-macos-aarch64
+    kind: desktop
+    platform: macos
+    arch: aarch64
+    channel: homebrew
+    publish: none
+    requires: [desktop-linux-x86-64]
+    credentials: []
+    status: blocked
+
+  - id: desktop-macos-x86-64
+    kind: desktop
+    platform: macos
+    arch: x86-64
+    channel: homebrew
+    publish: none
+    requires: [desktop-linux-x86-64]
+    credentials: []
+    status: blocked
+
+  - id: desktop-macos-app
+    kind: desktop
+    platform: macos
+    arch: universal
+    channel: app-store-macos
+    publish: none
+    requires: [desktop-macos-aarch64, desktop-macos-x86-64]
+    credentials: [APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID]
+    status: blocked
+
+  - id: android-arm64
+    kind: desktop
+    platform: android
+    arch: aarch64
+    channel: google-play
+    publish: none
+    requires: [desktop-linux-x86-64]
+    credentials: [ANDROID_KEYSTORE_BASE64, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD, PLAY_SERVICE_ACCOUNT_JSON]
+    status: blocked
+
+  - id: ios-arm64
+    kind: desktop
+    platform: ios
+    arch: aarch64
+    channel: app-store-ios
+    publish: none
+    requires: [desktop-linux-x86-64]
+    credentials: [APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID]
+    status: blocked
