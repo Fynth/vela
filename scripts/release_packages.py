@@ -253,7 +253,6 @@ def build_aur(stage: Path, version: str, commit: str, output: Path) -> Path:
         + source_line
         + checksum_line
         + "}\n"
-        "sha256sums=('SKIP')\n"
         "build(){\n"
         '  cd "$srcdir/$pkgname-$pkgver"\n'
         '  install -Dm0755 usr/lib/vela/vela-desktop "$pkgdir/usr/lib/vela/vela-desktop"\n'
