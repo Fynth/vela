@@ -20,7 +20,7 @@ submission remain separate work. Existing source compile reports are not store o
 device evidence. RPM is outside the required release set.
 
 Android without a configured signing identity produces a visibly named
-`-preview.apk` signed by the runner's ephemeral debug key. It is installable but
+`-preview.apk` signed by the runner's ephemeral preview key. It is installable but
 may require uninstall/reinstall between builds. Stable update signatures require
 GitHub secrets `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`,
 `ANDROID_KEY_PASSWORD` and variable `ANDROID_KEY_ALIAS`. Partial signing config

@@ -1,6 +1,8 @@
 [application]
 name = "Vela Music"
 public_dir = ""
+android_min_sdk_version = 26
+android_manifest = "AndroidManifest.xml"
 
 [bundle]
 identifier = "io.github.fynth.vela"
@@ -15,6 +17,3 @@ compile_sdk = 35
 
 [android.application]
 uses_cleartext_traffic = false
-
-[android.raw]
-application_attrs = 'android:allowBackup="false"'

@@ -12,3 +12,6 @@
 /tests/browser/playwright-report/
 
 __pycache__/
+
+# Local AUR publishing credentials.
+/AUR_SSH_KEY

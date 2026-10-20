@@ -5,7 +5,9 @@
 Local: fmt PASS, strict workspace/all-target Clippy PASS, cargo check PASS,
 actionlint1.7.12 PASS, Python38 PASS (including exe extension/ZIP metadata, tar
 payloads, report merge/source mismatch, tamper/missing formats and AUR arrays).
-Logs: target/checks/distribution/. Rust/API/WASM and remote package jobs PENDING.
+Logs: target/checks/distribution/. Rust/API374 passed/3 ignored; strict WASM/native-QA Clippy and release WASM PASS.
+Remote run39471846727 Android initial APK and Windows exe/zip PASS; final artifact
+set and release publication PENDING. Docker image build PASS, Docker runtime NOT_RUN.
 No G01–G24 or EXP/PLAY/RES/NET/AUTH/NP behavior changed or reclassified. Native
 windows/audio/device/background, browser and Docker evidence remain separate; no
 new claim for those classes. See DISTRIBUTION.md for exact ABI/signing limitations.

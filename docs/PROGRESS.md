@@ -10,12 +10,15 @@ source/version gate. Tags publish assets before the selected vela-music-bin AUR
 recipe; main/PR/manual runs retain Actions artifacts. See DISTRIBUTION and ADR0025.
 
 Local fmt, strict workspace/all-target Clippy, cargo check, actionlint1.7.12 and
-38 Python regressions passed. Workspace Rust/API tests and WASM checks are running;
-remote builds/publication are pending and are not claimed as passing. AUR host
+38 Python regressions passed. Workspace Rust/API tests374 passed/3 ignored, strict WASM/native-QA Clippy and
+release WASM build passed. Remote run39471846727 already built the first real
+Android preview APK and Windows exe/zip; complete-set publication remains pending. AUR host
 Ed25519 fingerprint matched the official HTTPS homepage; AUR_REPO and the pinned
-AUR_KNOWN_HOSTS were configured. No AUR secret or Android signing identity exists
-in GitHub yet. Frozen runtime, original data and preserved target snapshots remain
-untouched. No device/UI/audio/Docker validation was performed by this change.
+AUR_KNOWN_HOSTS were configured. A dedicated private AUR key was generated into ignored private0600 storage and
+uploaded to the repository secret; its public half was added to the owner-authorized AUR profile while preserving
+existing keys. Login credentials/cookies stayed only in process memory.
+No Android release signing identity is configured. Frozen runtime, original data and preserved target snapshots remain
+untouched. No device/UI/audio/Docker-runtime validation was performed by this change.
 
 ## AUD-05 cold offline launch — fixed (2026-10-20)
 
