@@ -17,7 +17,9 @@ Ed25519 fingerprint matched the official HTTPS homepage; AUR_REPO and the pinned
 AUR_KNOWN_HOSTS were configured. A dedicated private AUR key was generated into ignored private0600 storage and
 uploaded to the repository secret; its public half was added to the owner-authorized AUR profile while preserving
 existing keys. Login credentials/cookies stayed only in process memory.
-No Android release signing identity is configured. Frozen runtime, original data and preserved target snapshots remain
+A durable Android PKCS12 signing identity was generated, backed up privately
+under ignored target/private-release-keys and configured through repository secrets.
+The AUR key authenticated as Rasul after the key-only profile update. Frozen runtime, original data and preserved target snapshots remain
 untouched. No device/UI/audio/Docker-runtime validation was performed by this change.
 
 ## AUD-05 cold offline launch — fixed (2026-10-20)

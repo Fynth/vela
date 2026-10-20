@@ -86,7 +86,8 @@ def main() -> None:
         aligned = stage / 'aligned.apk'
         subprocess.run(['zipalign', '-f', '-p', '4', str(unsigned), str(aligned)], check=True)
         signed = stage / 'signed.apk'
-        subprocess.run(['apksigner', 'sign', '--ks', str(key), '--ks-key-alias', alias,
+        keystore_type = 'JKS' if key.read_bytes().startswith(b'\xfe\xed\xfe\xed') else 'PKCS12'
+        subprocess.run(['apksigner', 'sign', '--ks', str(key), '--ks-type', keystore_type, '--ks-key-alias', alias,
                         '--ks-pass', 'env:ANDROID_KEYSTORE_PASSWORD', '--key-pass', 'env:ANDROID_KEY_PASSWORD',
                         '--out', str(signed), str(aligned)], env=env, check=True)
         check_archive(signed, ['AndroidManifest.xml', 'classes.dex', 'lib/arm64-v8a/libmain.so'])

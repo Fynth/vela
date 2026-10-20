@@ -24,7 +24,9 @@ Android without a configured signing identity produces a visibly named
 may require uninstall/reinstall between builds. Stable update signatures require
 GitHub secrets `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`,
 `ANDROID_KEY_PASSWORD` and variable `ANDROID_KEY_ALIAS`. Partial signing config
-fails. Temporary signing files are private and removed even after a failed build;
+fails. The repository owner-authorized pipeline now has a dedicated stable signing
+identity; its private backup is in ignored `target/private-release-keys` (directory0700,
+files0600). Preserve it across rebuilds and back it up securely. Temporary signing files are private and removed even after a failed build;
 no keys enter artifacts. Android manifest disables backups and cleartext traffic.
 
 For `yay -S vela-music-bin`, the repository owner must provide an AUR account with
