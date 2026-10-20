@@ -241,7 +241,7 @@ fn audio_stream_report() -> Value {
         let stream = std::mem::take(current);
         stream.sink.is_some().then_some(stream)
     }
-    let pid = u32::try_from(std::process::id()).unwrap_or_default();
+    let pid = std::process::id();
     let sink_name = std::env::var("PULSE_SINK").unwrap_or_default();
     let sink_index = std::process::Command::new("pactl")
         .args(["list", "short", "sinks"])
