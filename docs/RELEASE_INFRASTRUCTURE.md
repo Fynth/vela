@@ -21,13 +21,20 @@ built. It rejects a target that requires itself, an unknown or cyclic
 dependency, a target that holds credentials it never uses, a store target that
 publishes while it is blocked, and a ready target that keeps unused secrets.
 
-The current state of the project is that **only the Linux desktop exists in
-code**. The Windows, macOS, Android and iOS targets are `blocked` because the
-Dioxus desktop shell is currently built for GTK3/WebKitGTK on Linux. They are
-listed with their real channels (winget, Homebrew, the Mac App Store, Google
-Play, the App Store) and their real credential names, so that enabling a
-platform is a code change plus a manifest status change — not a redesign of the
-pipeline.
+The platform state is measured, not guessed:
+
+| Platform | State | Why |
+| --- | --- | --- |
+| Linux x86_64 | `ready` | the client that exists, built, verified and launched here |
+| Windows x86_64 | `buildable` | the same client compiles for `x86_64-pc-windows-msvc`; the CI job builds it on a Windows runner and checks the binary |
+| macOS aarch64 | `buildable` | the same, on a macOS runner |
+| Android arm64 | `buildable` | the same client builds for `aarch64-linux-android` against the Android NDK and asks for the platform audio stack (`libaaudio`); it is built and inspected by the CI job |
+| iOS arm64 | `buildable` | the same, on a macOS runner |
+| Store uploads | not yet | a store needs an application project that packages, signs and uploads the binary. The channels and their credential names are ready; the application projects are the remaining work |
+
+The mobile client is not a second application. It is the same UI, the same HTTP
+client, the same queue and the same audio authority behind the platform webview
+shell; `apps/desktop/src/bin/vela_mobile.rs` only chooses the shell.
 
 ## Building
 
