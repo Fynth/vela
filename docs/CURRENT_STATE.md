@@ -1,5 +1,11 @@
 # Current state index
 
+> 2026-10-20 update: source `main` is `58aa0dc` (TR10–TR12 docs/evidence); the live
+> server runtime and original `data/` remain the frozen `0.12.6` build from `7fe1ca0`.
+> The TR10 desktop archive was rebuilt from `4ceafdc`; see
+> [RELEASE_LEDGER_2026-10-20.md](RELEASE_LEDGER_2026-10-20.md). Everything below
+> anchored to `05b4c37` is a historical audit, not the current source head.
+
 Latest2026-10-19 English [product/settings/native plan](PLANS/2026-10-19/PRODUCT_EXPANSION/README.md)
 is documentation only:320 feature briefs/120 settings plus native artwork/cache/
 prefetch/platform delivery and copyable agent mandates. Inspection anchor6fa2346 with
