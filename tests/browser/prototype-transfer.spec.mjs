@@ -106,6 +106,9 @@ async function settle(page) {
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 }
 
+// TR08: on the mobile composition "More" opens Settings directly (no second
+// navigation sheet) and every remaining route is a real entry in the compact
+// "More from Vela" list inside Settings.
 async function navigate(page, name) {
   const mobile = page.getByRole('navigation', { name: 'Mobile navigation', exact: true });
   if (await mobile.isVisible()) {
@@ -113,7 +116,8 @@ async function navigate(page, name) {
     if (await tab.count()) await tab.click();
     else {
       await mobile.getByRole('button', { name: 'More destinations', exact: true }).click();
-      await page.getByRole('dialog', { name: 'More from your library', exact: true })
+      if (name === 'Settings') return;
+      await page.getByRole('navigation', { name: 'More from Vela', exact: true })
         .getByRole('button', { name, exact: true }).click();
     }
   } else {
@@ -463,6 +467,8 @@ test('TR02 shell reserves one sidebar offset and one player band with one centra
 
     // Every currently shipped destination remains reachable at the reference
     // desktop width and on the mobile composition. Jobs stays administrator-only.
+    // TR08: on the mobile composition the bottom bar's More control is what opens
+    // Settings, and Settings carries the "More from Vela" list for the rest.
     const routes = [
       ['Home', null],
       ['Search', 'Search'],
@@ -486,6 +492,29 @@ test('TR02 shell reserves one sidebar offset and one player band with one centra
         if (heading) await expect(page.getByRole('heading', { name: heading, exact: true, level: 1 })).toBeVisible();
         else await expect(page.getByRole('heading', { name: 'New in your library', exact: true })).toBeVisible();
         expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth), `${width} ${destination} overflow`).toBeLessThanOrEqual(1);
+      }
+      if (width === 390) {
+        // "More" lands on Settings itself — no sheet, dialog or backdrop — and the
+        // Settings list reaches Albums/History/Add music/Network/Jobs for the
+        // administrator, with the mobile bar stating the current group.
+        await page.goto(runtime.origin);
+        await settle(page);
+        const mobileNav = page.getByRole('navigation', { name: 'Mobile navigation', exact: true });
+        const moreTab = mobileNav.getByRole('button', { name: 'More destinations', exact: true });
+        await expect(mobileNav.getByRole('button')).toHaveCount(5);
+        await moreTab.click();
+        await expect(page.getByRole('heading', { name: 'Settings', exact: true, level: 1 })).toBeVisible();
+        await expect(moreTab).toHaveAttribute('aria-current', 'page');
+        await expect(page.getByRole('dialog')).toHaveCount(0);
+        await expect(page.locator('.more-sheet, .more-backdrop')).toHaveCount(0);
+        const list = page.getByRole('navigation', { name: 'More from Vela', exact: true });
+        for (const destination of ['Albums', 'Artists', 'Favorites', 'Listening history', 'Add music', 'Network', 'Jobs']) {
+          await expect(list.getByRole('button', { name: destination, exact: true })).toBeVisible();
+        }
+        await list.getByRole('button', { name: 'Listening history', exact: true }).click();
+        await expect(page.getByRole('heading', { name: 'Listening history', exact: true, level: 1 })).toBeVisible();
+        await expect(moreTab).toHaveAttribute('aria-current', 'true');
+        expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth), '390 settings destinations overflow').toBeLessThanOrEqual(1);
       }
     }
 

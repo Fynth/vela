@@ -38,6 +38,9 @@ async function isolatedServer(output) {
     },
   };
 }
+// TR08: on the mobile composition "More" is a destination that opens Settings
+// directly — there is no intermediate navigation sheet — and Settings carries
+// the "More from Vela" list for every remaining real route.
 async function navigate(page, name) {
   const mobile = page.getByRole('navigation', { name: 'Mobile navigation', exact: true });
   if (await mobile.isVisible()) {
@@ -45,7 +48,9 @@ async function navigate(page, name) {
     if (await tab.count()) await tab.click();
     else {
       await mobile.getByRole('button', { name: 'More destinations', exact: true }).click();
-      await page.getByRole('dialog', { name: 'More from your library', exact: true }).getByRole('button', { name, exact: true }).click();
+      if (name === 'Settings') return;
+      await page.getByRole('navigation', { name: 'More from Vela', exact: true })
+        .getByRole('button', { name, exact: true }).click();
     }
   } else await page.getByRole('button', { name, exact: true }).first().click();
 }
@@ -117,8 +122,32 @@ test('DESIGN01 high contrast, responsive music surfaces and navigation retain ac
     expect(libraryGroup.y + libraryGroup.height).toBeLessThanOrEqual(utilityGroup.y);
     await sidebar.getByRole('button', { name: 'Settings', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible();
+    await expect(sidebar.getByRole('button', { name: 'Settings', exact: true })).toHaveAttribute('aria-current', 'page');
     await navigate(page, 'Library');
     await sidebar.evaluate(node => { node.scrollTop = 0; });
+
+    // TR08: at 390px the bottom bar's More control opens Settings itself and the
+    // "More from Vela" list there reaches the remaining real routes. No sheet,
+    // dialog or backdrop stands between the two.
+    await page.setViewportSize({ width: 390, height: 844 });
+    const mobileNav = page.getByRole('navigation', { name: 'Mobile navigation', exact: true });
+    const moreTab = mobileNav.getByRole('button', { name: 'More destinations', exact: true });
+    await expect(mobileNav.getByRole('button')).toHaveCount(5);
+    await moreTab.click();
+    await expect(page.getByRole('heading', { name: 'Settings', exact: true, level: 1 })).toBeVisible();
+    await expect(moreTab).toHaveAttribute('aria-current', 'page');
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.locator('.more-sheet, .more-backdrop')).toHaveCount(0);
+    const moreFromVela = page.getByRole('navigation', { name: 'More from Vela', exact: true });
+    for (const name of ['Albums', 'Artists', 'Favorites', 'Listening history', 'Add music', 'Network']) {
+      await expect(moreFromVela.getByRole('button', { name, exact: true })).toHaveCount(1);
+    }
+    await moreFromVela.getByRole('button', { name: 'Albums', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Albums', exact: true, level: 1 })).toBeVisible();
+    await expect(moreTab).toHaveAttribute('aria-current', 'true');
+    await navigate(page, 'Library');
+    await expect(page.getByRole('heading', { name: 'Your library', exact: true, level: 1 })).toBeVisible();
+    await expect(moreTab).toHaveAttribute('aria-current', 'false');
 
     const capture = process.env.VELA_DESIGN_CAPTURE_SCRIPT
       ? await readFile(process.env.VELA_DESIGN_CAPTURE_SCRIPT, 'utf8') : null;

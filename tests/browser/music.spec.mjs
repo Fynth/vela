@@ -44,6 +44,8 @@ async function openAdminSession(page) {
 }
 
 
+// TR08: "More" opens Settings directly on the mobile composition; every other
+// route is a real entry in the "More from Vela" list inside Settings.
 async function navigate(page, name) {
   const mobile = page.getByRole('navigation', { name: 'Mobile navigation', exact: true });
   if (await mobile.isVisible()) {
@@ -51,7 +53,9 @@ async function navigate(page, name) {
     if (await tab.count()) { await tab.click(); }
     else {
       await mobile.getByRole('button', { name: 'More destinations', exact: true }).click();
-      await page.getByRole('dialog', { name: 'More from your library', exact: true }).getByRole('button', { name, exact: true }).click();
+      if (name === 'Settings') return;
+      await page.getByRole('navigation', { name: 'More from Vela', exact: true })
+        .getByRole('button', { name, exact: true }).click();
     }
   } else { await page.getByRole('button', { name, exact: true }).first().click(); }
 }
@@ -788,14 +792,25 @@ test('job center controls genuine scans and pages their preserved history on mob
   await page.setViewportSize({ width: 320, height: 780 });
   const mobile = page.getByRole('navigation', { name: 'Mobile navigation' });
   await expect(mobile.getByRole('button')).toHaveCount(5);
+  // TR08: More is a destination that opens Settings itself — no intermediate
+  // sheet — and Settings lists every remaining authorized route, including the
+  // administrator-only Jobs view, as a real navigation control.
   await mobile.getByRole('button', { name: 'More destinations', exact: true }).click();
-  const destinations = page.getByRole('dialog', { name: 'More from your library', exact: true });
-  for (const name of ['Jobs', 'Settings', 'Add music']) {
-    await expect(destinations.getByRole('button', { name, exact: true })).toBeInViewport();
+  await expect(page.getByRole('heading', { name: 'Settings', exact: true, level: 1 })).toBeVisible();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  const destinations = page.getByRole('navigation', { name: 'More from Vela', exact: true });
+  for (const name of ['Albums', 'Artists', 'Favorites', 'Listening history', 'Add music', 'Network', 'Jobs']) {
+    await expect(destinations.getByRole('button', { name, exact: true })).toBeVisible();
   }
-  await page.keyboard.press('Escape');
-  await expect(destinations).toHaveCount(0);
+  // The hub is the first Settings surface, so More cannot land below it.
+  expect(await page.evaluate(() => {
+    const hub = document.querySelector('[data-testid="settings-destinations"]');
+    const appearance = document.querySelector('[data-testid="settings-appearance"]');
+    return !!hub && !!appearance && Boolean(hub.compareDocumentPosition(appearance) & Node.DOCUMENT_POSITION_FOLLOWING);
+  })).toBeTruthy();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+  await destinations.getByRole('button', { name: 'Jobs', exact: true }).click();
+  await expect(page.locator('.background-job').first()).toBeVisible();
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({ path: 'test-results/jobs-mobile.png' });
   await page.locator('.job-center-links').getByRole('button', { name: 'Add music', exact: true }).click();
@@ -938,16 +953,23 @@ test('Home and global search use real music while navigation preserves the playe
     }
   }
   await page.setViewportSize({ width: 320, height: 780 });
+  // TR08: keyboard activation of the "More" destination opens Settings itself and
+  // the replacement list is reachable the same way. No intermediate sheet, so no
+  // dialog focus containment/Escape contract is asserted here any more.
   const more = page.getByRole('button', { name: 'More destinations', exact: true });
   await more.focus();
   await page.keyboard.press('Enter');
-  const sheet = page.getByRole('dialog', { name: 'More from your library', exact: true });
-  await expect(sheet).toBeVisible();
-  await page.keyboard.press('Shift+Tab');
-  expect(await sheet.evaluate(node => node.contains(document.activeElement))).toBeTruthy();
-  await page.keyboard.press('Escape');
-  await expect(sheet).toHaveCount(0);
-  await expect(more).toBeFocused();
+  await expect(page.getByRole('heading', { name: 'Settings', exact: true, level: 1 })).toBeVisible();
+  await expect(more).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.locator('.more-sheet, .more-backdrop')).toHaveCount(0);
+  const destinations = page.getByRole('navigation', { name: 'More from Vela', exact: true });
+  const albums = destinations.getByRole('button', { name: 'Albums', exact: true });
+  await albums.focus();
+  expect(await albums.evaluate(node => node === document.activeElement)).toBeTruthy();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('heading', { name: 'Albums', exact: true, level: 1 })).toBeVisible();
+  await expect(more).toHaveAttribute('aria-current', 'true');
   await checkPlayer();
   await page.reload();
   await navigate(page, 'Library');
@@ -2615,5 +2637,15 @@ test('private job replies cannot reappear after logout and another account signs
   await expect(page.getByText('Job center archive', { exact: true })).toHaveCount(0);
   await expect(page.locator('#job-type option[value="scan"]')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Music folder settings', exact: true })).toHaveCount(0);
+  // TR08: Settings remains the hub of the remaining routes for this account, and
+  // Jobs is not offered where this listener cannot open it.
+  await navigate(page, 'Settings');
+  const settingsRoutes = page.getByRole('navigation', { name: 'More from Vela', exact: true });
+  for (const name of ['Albums', 'Artists', 'Favorites', 'Listening history', 'Add music', 'Network']) {
+    await expect(settingsRoutes.getByRole('button', { name, exact: true })).toBeVisible();
+  }
+  await expect(settingsRoutes.getByRole('button', { name: 'Jobs', exact: true })).toHaveCount(0);
+  await expect(settingsRoutes.getByRole('button', { name: 'Track radio', exact: true })).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
   expect(errors).toEqual([]);
 });

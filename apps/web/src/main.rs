@@ -2800,7 +2800,13 @@ fn App() -> Element {
                     }
 
                     if page() == "settings" {
-                        section { class: "settings-grid", settings::Appearance { device, status: device_save, repair: device_repair, zoom_supported: device_zoom_supported } div { class: "panel", h2 { "A space that is yours" } p { "Your library is private. Music files stay on this server, and your session credentials stay in a secure browser cookie." }
+                        section { class: "settings-grid",
+                            /* TR08: Settings is the mobile "More" destination, so it also
+                               owns the compact list of every remaining implemented route.
+                               Each entry dispatches the same root navigation callback the
+                               sidebar uses; Jobs and track radio stay gated on real access. */
+                            shell::SettingsDestinations { page: page(), administrator: auth.read().as_ref().is_some_and(|a| a.user.is_admin), radio_available: radio_seed.read().is_some(), onnav: actions.navigate }
+                            settings::Appearance { device, status: device_save, repair: device_repair, zoom_supported: device_zoom_supported } div { class: "panel", h2 { "A space that is yours" } p { "Your library is private. Music files stay on this server, and your session credentials stay in a secure browser cookie." }
                                 dl { dt { "Server version" } dd { "{version}" } dt { "Collection storage" } dd { {stats.read().as_ref().map(|s| bytes(s.size_bytes)).unwrap_or_else(|| "—".into())} } dt { "Playback" } dd { "Original audio · Browser native" } dt { "Signed federation" } dd { "Not implemented" } }
                                 button { class: "button secondary", onclick: move |_| { spawn_authorized(auth, async move { match mutate("POST", "/api/logout", None, &token(auth)).await { Ok(()) => { engine.peek().bind(String::new(),None); auth.set(None); invalidate_library(library); clear_catalog(catalog); tracks.set(Vec::new()); queue.set(Vec::new()); playlists.set(Vec::new()); selected_playlist.set(None); stats.set(None); jobs.set(Vec::new()); share_url.set(String::new()); let next_sleep = sleep_generation.peek().wrapping_add(1); sleep_generation.set(next_sleep); sleep_minutes.set("0".into()); sleep_remaining.set(0); page.set("home".into());  error.set(String::new()); username.set(String::new()); } Err(message) => error.set(message) } }); }, "Sign out" }
                             }
@@ -3056,7 +3062,7 @@ fn App() -> Element {
                             }
                         }
                 }
-                shell::MobileNavigation {page:page(),administrator:auth.read().as_ref().is_some_and(|a|a.user.is_admin),onnav:actions.navigate}
+                shell::MobileNavigation {page:page(),onnav:actions.navigate}
                 if show_queue() { queue_drawer::QueueDrawer {
                     queue: queue.read().clone(),
                     projection: playback.order.read().projection(),

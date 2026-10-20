@@ -551,7 +551,6 @@
 .skeleton-card,.skeleton-row { border-radius:14px; background:var(--surface-raised); animation:vela-pulse 1.4s ease-in-out infinite alternate; }
 .skeleton-card { height:235px; }.skeleton-row { height:66px; }
 @keyframes vela-pulse { from {opacity:.45;} to {opacity:1;} }
-.more-backdrop { display:none; }
 @media(max-width:900px) { .home-hero {padding:28px;} .home-artwork {width:155px;} }
 @media(max-width:620px) {
   .mobile-nav.listening-mobile-nav { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); grid-template-rows:1fr; height:calc(70px + env(safe-area-inset-bottom)); padding:7px 6px max(7px,env(safe-area-inset-bottom)); gap:2px; }
@@ -581,12 +580,6 @@
   .filter-chip {min-height:44px;padding:8px 13px;}
   .search-track-row {align-items:stretch;flex-direction:column;gap:8px;padding:12px 0;}
   .search-track-row .listening-actions {justify-content:flex-end;}
-  .more-backdrop {position:fixed;inset:0;z-index:100;display:block;background:#0009;}
-  .more-sheet {position:absolute;bottom:0;left:0;right:0;max-height:85dvh;overflow-y:auto;padding:24px 22px max(24px,env(safe-area-inset-bottom));border-radius:22px 22px 0 0;background:var(--surface);box-shadow:var(--shadow);}
-  .more-sheet h2 {font-size:21px;}
-  .more-sheet nav {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;}
-  .more-destination {display:flex;align-items:center;gap:12px;min-height:56px;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--surface-raised);color:var(--text);text-align:left;font-size:12px;}
-  .more-sheet .icon-button {min-width:44px;height:44px;}
 }
 @media(prefers-reduced-motion:reduce) {*,*::before,*::after {animation:none!important;transition:none!important;scroll-behavior:auto!important;}}
 
@@ -900,6 +893,21 @@ input::placeholder { color:var(--quiet); opacity:1; }
    back out to stay exactly one zoomed viewport tall. At 100% this is a no-op. */
 .boot-screen, .auth-shell { min-height: calc(100vh / var(--app-zoom)); }
 .modal { max-height: calc(90vh / var(--app-zoom)); }
+
+/* TR08: Settings is the mobile "More" destination, so it also carries the
+   compact list of the remaining implemented routes. The columns adapt from one
+   real touch target per row (320px at 150% app size) to a wide desktop strip. */
+.settings-destinations { grid-column: 1 / -1; }
+.settings-destinations > .eyebrow { margin-bottom: 10px; }
+.settings-destinations h2 { margin-bottom: 6px; }
+.settings-destinations > p { max-width: 660px; font-size: 12px; line-height: 1.7; margin-bottom: 16px; }
+.settings-destination-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+.settings-destination { display: flex; align-items: center; gap: 9px; min-width: 0; min-height: 44px; padding: 9px 14px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg); color: var(--text); font-size: 12px; font-weight: 500; text-align: left; }
+.settings-destination:hover { background: var(--surface-hover); }
+.settings-destination .vela-icon { width: 18px; height: 18px; flex: 0 0 18px; color: var(--muted); }
+.settings-destination span { min-width: 0; overflow-wrap: anywhere; }
+.settings-destination.active, .settings-destination[aria-current="page"] { border-color: var(--accent); color: var(--accent); }
+.settings-destination.active .vela-icon, .settings-destination[aria-current="page"] .vela-icon { color: var(--accent); }
 
 .settings-appearance { grid-column: 1 / -1; }
 .settings-appearance > .eyebrow { margin-bottom: 10px; }
