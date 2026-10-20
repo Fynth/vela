@@ -21,6 +21,7 @@ not build is worse than one that says it cannot. Missing tooling is reported as
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -222,6 +223,18 @@ def build_aur(stage: Path, version: str, commit: str, output: Path) -> Path:
             "BUILD.txt",
         ):
             bundle.add(stage / relative, arcname=f"vela-desktop-{version}/{relative}")
+    # A published PKGBUILD must point at a real, checksummed source. When no
+    # release base URL is configured the recipe stays local and says so, rather
+    # than shipping a placeholder URL and a skipped checksum to the AUR.
+    base_url = os.environ.get("VELA_RELEASE_BASE_URL", "").rstrip("/")
+    source_sha256 = hashlib.sha256((sources / source_name).read_bytes()).hexdigest()
+    if base_url:
+        source_url = f"{base_url}/{source_name}"
+        source_line = f'  echo "$_pkgname-$_pkgver.tar.gz::{source_url}"\n'
+        checksum_line = f"  sha256sums=('{source_sha256}')\n"
+    else:
+        source_line = f'  echo "$_pkgname-$_pkgver.tar.gz"\n'
+        checksum_line = "  sha256sums=('SKIP')  # local build: set VELA_RELEASE_BASE_URL for a published recipe\n"
     (aur_dir / "PKGBUILD").write_text(
         "# Maintainer: Vela Music <vela@example.invalid>\n"
         f"_pkgname=vela-desktop\n_pkgver={version}\n"
@@ -231,9 +244,9 @@ def build_aur(stage: Path, version: str, commit: str, output: Path) -> Path:
         f'  echo "$_pkgname-$_pkgver-$_pkgrel-$_arch"\n'
         "}\n"
         "source(){\n"
-        f'  echo "$_pkgname-$_pkgver.tar.gz::https://example.invalid/vela/$_pkgname-$_pkgver.tar.gz"\n'
-        "  sha256sums=('SKIP')\n"
-        "}\n"
+        + source_line
+        + checksum_line
+        + "}\n"
         "build(){\n"
         "  cd \"$srcdir/$_pkgname-$_pkgver\"\n"
         "  install -Dm0755 usr/lib/vela/vela-desktop \"$pkgdir/usr/lib/vela/vela-desktop\"\n"
