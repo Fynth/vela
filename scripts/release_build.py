@@ -183,7 +183,7 @@ def stage_server(
             f"commit={commit}\nschema_version=13\n",
             encoding="utf-8",
         )
-        archive = OUTPUT_ROOT / f"vela-server-{version}-linux-x86_64.tar.gz"
+        archive = output_root / f"vela-server-{version}-linux-x86_64-{channel}.tar.gz"
         archive.parent.mkdir(parents=True, exist_ok=True)
         with tarfile.open(archive, "w:gz") as bundle:
             bundle.add(stage, arcname=".")
@@ -219,7 +219,7 @@ def stage_desktop(
             f"commit={commit}\nruntime=GTK3, WebKitGTK 4.1, ALSA, libxdo\n",
             encoding="utf-8",
         )
-        archive = OUTPUT_ROOT / f"vela-desktop-{version}-linux-x86_64.tar.gz"
+        archive = output_root / f"vela-desktop-{version}-linux-x86_64-{channel}.tar.gz"
         archive.parent.mkdir(parents=True, exist_ok=True)
         with tarfile.open(archive, "w:gz") as bundle:
             bundle.add(stage, arcname=".")
