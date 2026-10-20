@@ -362,6 +362,7 @@ audio/manifest exist at0600 and the v2 manifest carries a64-hex BLAKE3 digest.
 - TR10 portable package (source `4ceafdc`, version0.12.6): the release build and
   `scripts/package-desktop-linux.sh` produced the archive above, and
   `scripts/verify_desktop_package.py --launch` passed (real `Vela Music` window,
-  screenshot, normal close, exit0,0 temporary originals). This is not a
+  screenshot, normal close, exit0,0 temporary originals). Evidence:
+  `target/checks/tr10-package-verify.json`, `tr10-package-evidence.txt`. This is not a
   `.deb`/AppImage/Flatpak, signature, app-store or hardware-audio certification;
   Windows/macOS/mobile packaging remains NOT_RUN.
