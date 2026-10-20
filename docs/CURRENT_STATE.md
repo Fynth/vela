@@ -63,7 +63,17 @@ changed for this page.
     desktop56/3 ignored, core26+7, API31, red/green AUD-13 tests, and the real
     two-process Secret Service/offline native-window QA. Not deployed.
 
-## 2. Deployed runtime — frozen0.12.6, schema12
+## 2. Deployed runtime — frozen0.12.6, schema13
+
+The deployed runtime was rebuilt from source `8d355e8` (schema13, the AUD-09
+covering indexes) and verified with `scripts/install-user-service.py --install`.
+The previous `7fe1ca0` runtime is preserved under
+`target/runtime/previous-vela-0.12.6-7fe1ca0/`, the previous release archives under
+`target/releases/previous/`, and a data backup under `target/upgrade-backups/`.
+
+`cargo run -p vela-server` now serves the same web client as the source tree: a
+debug build refreshes the WASM bundle once, and only when a tracked web source is
+newer than the built bundle.
 
 Source now migrates to schema13 (`migrations/0013_stats_covering_indexes.sql`,
 AUD-09 read-path indexes). The deployed runtime below is still schema12 and is not
