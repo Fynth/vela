@@ -26,7 +26,6 @@
     }
     if (event.key === "Escape") document.querySelectorAll("details.track-info-menu[open]").forEach(menu => menu.removeAttribute("open"));
   });
-  window.addEventListener("resize", () => { if (innerWidth > 620) document.querySelector('[aria-labelledby="more-title"] [data-dialog-dismiss]')?.click(); });
   document.addEventListener("click", event => {
     document.querySelectorAll("details.track-info-menu[open]").forEach(menu => { if (!menu.contains(event.target)) menu.removeAttribute("open"); });
   });
