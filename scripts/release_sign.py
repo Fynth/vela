@@ -107,7 +107,11 @@ def main() -> int:
     artifacts = sorted(
         path
         for path in arguments.artifacts.iterdir()
-        if path.is_file() and path.suffix in {".tar.gz", ".deb", ".rpm", ".AppImage"}
+        if path.is_file()
+        and (
+            path.name.endswith(".tar.gz")
+            or path.suffix in {".deb", ".rpm", ".AppImage"}
+        )
     )
     if not artifacts:
         raise SystemExit(f"no artifacts to sign in {arguments.artifacts}")

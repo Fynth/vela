@@ -88,6 +88,21 @@ jobs:
               raise SystemExit("no artifacts were produced")
           print(f"{len(report['artifacts'])} artifacts built at {report['commit'][:12]}")
           PY
+      - name: Sign the artifacts
+        env:
+          GPG_KEY: ${{ secrets.RELEASE_GPG_PRIVATE_KEY }}
+          RELEASE_GPG_FINGERPRINT: ${{ vars.RELEASE_GPG_FINGERPRINT }}
+        run: |
+          if [ -n "${GPG_KEY:-}" ]; then
+            export GNUPGHOME="$(mktemp -d)"
+            chmod 700 "$GNUPGHOME"
+            printf '%s' "$GPG_KEY" | base64 -d > "$GNUPGHOME/key.asc"
+            gpg --batch --import "$GNUPGHOME/key.asc"
+            python3 scripts/release_sign.py --gpg-key "${RELEASE_GPG_FINGERPRINT:-}" --artifacts target/release-artifacts
+          else
+            echo "::warning::RELEASE_GPG_PRIVATE_KEY is not configured; the artifacts stay unsigned"
+            python3 scripts/release_sign.py --artifacts target/release-artifacts
+          fi
       - name: Publish a dry run of the channel plan
         run: python3 scripts/release_publish.py --dry-run --artifacts target/release-artifacts
       - uses: actions/upload-artifact@v4
