@@ -6,6 +6,12 @@
 | --- | --- | --- | --- | --- | --- |
 | Release ledger | docs/RELEASE_LEDGER_2026-10-20.md; desktop tar; dist assets | SHA256 `58da18db…`, BUILD `4ceafdc` | Source-vs-artifact docs-only diff; package launch PASS; dist CSS/player byte-identical; release WASM and font/brand hashes; frozen runtime/data untouched; preserved `7fe1ca0` tar | PASS local artifact ledger | Public deploy/push, other platforms, hardware audio/SR/WebKit/full Wayland |
 
+## AUD-06 offline origin scoping
+
+| Check | Paths | Commit | Evidence | Status | NOT_RUN |
+| --- | --- | --- | --- | --- | --- |
+| Origin-scoped offline | apps/desktop/src/{offline,ui}.rs; verify_native_client.py | `a913574` | Namespace<blake3(origin)>/<account>, manifest origin validation, legacy preserved-not-read; desktop118/3 ignored, strict clippy/fmt, native X11 peer/session260 checks PASS incl tampered-copy integrity | PASS native offline | AUD-05 cold launch, hardware/SR/other OS NOT_RUN |
+
 ## Current-source TR11 integration matrix — executed2026-10-20
 
 Baseline `e4c425d` on `main`; docs-only diff, no source/Cargo/test/package change.

@@ -5,7 +5,7 @@ explicit offline device copies, opt-in Secret Service session resume and native
 playlist folders. It is not a system installer/auto-updater, not mobile/background
 audio and not completion of G18. The audit's keyring/offline lifecycle defects
 AUD-01/02/04/11 are fixed in source `3094754` (real two-process Secret Service QA);
-AUD-03/07/08/12 fixed in source `e225b63` (basic native offline QA passed); AUD-05/06 remain open; see [CURRENT_STATE.md](CURRENT_STATE.md).
+AUD-03/07/08/12 fixed in source `e225b63` (basic native offline QA passed); AUD-06 fixed in `a913574` (origin-scoped offline namespace); AUD-05 (cold offline launch) remains open; see [CURRENT_STATE.md](CURRENT_STATE.md).
 Evidence is listed at the end; see ADR0017 for the decision record.
 
 TR10 (2026-10-20, source `4ceafdc`; typography/QA `47fb518`+`d314a2c`): the packaged
@@ -265,9 +265,14 @@ the user's unlocked keyring collection.
 
 An explicit per-track **Save offline** action downloads through the same validated
 authorized original path (exact size, BLAKE3 ETag,250MiB cap) and then copies the
-completed unnamed original into an account-scoped private cache. Layout:
-`$XDG_DATA_HOME/vela/offline/<account-id>/<track-id>.audio` plus a versioned JSON
-manifest; directories are0700 and files0600, written via private temp+rename. Limits
+completed unnamed original into an account- and origin-scoped private cache. Layout:
+`$XDG_DATA_HOME/vela/offline/<blake3(canonical origin)>/<account-id>/<track-id>.audio`
+plus a versioned JSON manifest that also records the canonical origin. Directories are
+0700 and files0600, written via private temp+rename. AUD-06: two origins that hand out
+the same account/track UUIDs cannot share a namespace, and a manifest whose recorded
+origin/account does not match the requested canonical namespace is ignored. Legacy
+account-only copies from before origin scoping are preserved byte-for-byte but are not
+derived, read or played as a copy of whichever origin asks next. Limits
 are100 tracks/2GiB; malformed, mismatched-size or orphaned entries are ignored. New
 manifests are v2 and carry the BLAKE3 digest of the copied device bytes; Play offline
 re-hashes the file from the same opened descriptor and refuses a same-size tampered copy

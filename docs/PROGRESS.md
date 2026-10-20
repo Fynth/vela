@@ -1,5 +1,18 @@
 # Verified progress
 
+## AUD-06 origin-scoped offline namespace — fixed (2026-10-20)
+
+`a913574`: offline copies now live under
+`$XDG_DATA_HOME/vela/offline/<blake3(canonical origin)>/<account>/` and every manifest
+records the canonical origin. A manifest whose origin/account does not match the
+requested namespace is ignored, so two origins with identical UUIDs cannot share a
+copy or grant. Legacy account-only files are preserved byte-for-byte but never
+reinterpreted as a current-origin copy. UI calls pass `account.origin`; the native
+harness matches the new depth. Desktop tests118 passed/3 ignored (offline module15
+passed), strict clippy/fmt PASS, full native X11 peer/session QA260 checks PASS with
+the new layout and tampered-copy integrity evidence. AUD-05 cold offline launch
+remains open.
+
 ## TR12 release ledger / asset verification — 2026-10-20
 
 Created [RELEASE_LEDGER_2026-10-20.md](RELEASE_LEDGER_2026-10-20.md). Package source
