@@ -385,3 +385,29 @@ visibility EXISTS to `tracks_catalog_album`/`tracks_catalog_artist` and the
 album-credit arm to albums-first (`http-bench-100k-stats.json`). Its remaining
 ~300ms is the owner-wide `COUNT/SUM` join to `media_assets`; fixing that needs a
 covering index migration or incremental counters, not a query hint.
+
+## AUD-09 measured 100k read costs (2026-10-20)
+
+Executed on an isolated 100k-owner fixture with the release binary and the real
+migrations/setup API (no audio, private temporary data, same host as the older
+entries above; single client unless stated). Full numbers, method and artifacts:
+[PROGRESS.md](PROGRESS.md) and `target/checks/aud09/`.
+
+| Endpoint | Before | After |
+| --- | --- | --- |
+| `/api/stats` p50, 8 clients | 531ms | 119ms |
+| `/api/search?q=Signal` p50, 8 clients | 138ms | 121ms |
+| `/api/search?q=Signal` p50, 1 client | 22ms | 20ms |
+| `/api/artists?limit=50` p50 | 30.9ms | 27.0ms |
+
+The fix is migration 0013 (covering `tracks(owner_id, media_asset_id, duration_ms)`,
+`media_assets(id, size_bytes)`, `tracks(owner_id, album_id)`), an index-only stats
+aggregate whose three groups run on separate pool connections, and a two-phase
+search that matches bounded identities before building summaries. Search identity
+is unchanged (returned ids/titles match the authoritative FTS selection exactly).
+Write cost: 2,000 metadata inserts took 5.1ms with the new indexes and 4.0ms
+without (+1.1ms), +4.5MiB per 100k rows. These are single-host, single-client
+lower bounds; the 4-connection SQLite pool bounds concurrency, so no capacity or
+RPS-superiority claim is made. Live runtime was not upgraded: the migration was
+verified on an isolated copy of the live data directory (schema 12->13,
+`quick_check ok`, 0 FK violations).
