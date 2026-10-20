@@ -402,6 +402,42 @@ audio/manifest exist at0600 and the v2 manifest carries a64-hex BLAKE3 digest.
   on the real stepper, and exactly one `AudioEngine` output stream. Wayland remains
   the earlier window-only evidence; hardware output, screen readers, physical media
   keys, Internet/two-host and every non-Linux target remain NOT_RUN.
+- AUD-05 cold offline launch (source `3aeee09`, test `d20faec`): `cargo fmt --all --
+  --check` passed; strict Clippy `-p vela-desktop --all-targets --features native-qa --
+  -D warnings` passed; `cargo test --locked -p vela-desktop` ran127 tests with124
+  passed,3 ignored (opt-in audio/MPRIS) and0 failed (new `offline_profile` tests:
+  roundtrip/permissions, refused identities, corrupt+oversized+foreign-shaped documents
+  ignored and kept, foreign-origin profile naming no other namespace while the tree and
+  a synthetic copy pair stay byte-identical, and sign-out superseding a pending
+  sign-in write; plus a new `OfflineOwner` profile-identity guard test); `cargo build
+  --locked -p vela-desktop` and the `native-ui-qa` example build. The combined real X11
+  run — `python3 scripts/verify_native_client.py --backend x11 --server
+  target/debug/vela-server --test-peer --test-session --test-offline-launch` — exited0
+  with `report.json` ok=true (260 checks,15 screenshots), `offline-report.json`
+  ok=true (26 checks, `native-offline-dark.png`) and `session-resume-report.json`
+  ok=true (6 checks), plus0 temporary originals after every process exit and3 TLS peer
+  connections. The cold launch started a second real window while the fixture server
+  was stopped: the private profile at `…/vela/offline/profile.json` is0600 and carries
+  exactly `account_id`/`origin`/`version` (unchanged by the offline launch), the offline
+  library rendered instead of the sign-in form for the saved copy's canonical origin,
+  it listed the real saved copy and no server catalog row, exposed no search, removal,
+  favorite, server queue, account navigation or sign-out, rendered one `.native-player`
+  with one `[data-audio-generation]` and zero HTML media/iframe elements, played the
+  saved copy through the offline path to900 ms with exactly one process-matched output
+  stream on the owned `vela_native_test_null` sink, offered repeat off/one but never
+  shuffle or repeat-all, kept one source and position across pause/resume, closed
+  normally and left0 temporary originals. The saved session then resumed automatically
+  from the profile at startup (one attempt, no retry), the tampered device copy still
+  disabled Play offline, and the explicit sign-out withdrew the keyring item and the
+  offline profile. Evidence: `target/checks/aud05-native/`. NOT_RUN: Wayland/full-backend
+  cold launch, hardware audio output, screen readers, physical media keys and every
+  non-Linux target. An earlier attempt of the same combined command failed the
+  pre-existing `TR03 narrow band renders the real paused and muted states` check because
+  it ran against a stale `native-ui-qa` driver binary (the JS driver is `include_str!`d)
+  while a Cargo build competed for the host; that report and a stale-but-green run are
+  preserved as `target/checks/aud05-native-failed-run1/` and
+  `target/checks/aud05-native-stale-green/`, and the final run above is the only
+  evidence claimed.
 - TR10 portable package (source `4ceafdc`, version0.12.6): the release build and
   `scripts/package-desktop-linux.sh` produced the archive above, and
   `scripts/verify_desktop_package.py --launch` passed (real `Vela Music` window,

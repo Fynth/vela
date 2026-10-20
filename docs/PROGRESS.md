@@ -7,8 +7,9 @@ generation-guarded, cleared on sign-out) lets a cold start open a read/play-only
 Offline library when the server is unreachable/expired or no session exists. Startup
 reads profile+copies locally, attempts the existing saved-session resume once when it
 names that origin, and otherwise/after failure shows real saved tracks with Play via
-offline::prepare and the single AudioEngine. A real sign-in wins; nothing autoplays or
-retries; saving/removing/favorites/search/playlists/server routes stay unavailable.
+offline::prepare and the single AudioEngine. A real sign-in wins; one automatic startup resume occurs only when a profile
+with real copies names the same canonical origin as the saved session, as documented;
+nothing autoplays or retries; saving/removing/favorites/search/playlists/server routes stay unavailable.
 Native QA `--test-offline-launch` (server stopped) asserts offline rows, one source and
 advancing position, no server controls, normal close,0 temp originals. Desktop124
 passed/3 ignored; combined X11 260 + offline26 + resume6 PASS. Hardware/SR/Wayland
