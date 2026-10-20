@@ -11,7 +11,7 @@ offline::prepare and the single AudioEngine. A real sign-in wins; nothing autopl
 retries; saving/removing/favorites/search/playlists/server routes stay unavailable.
 Native QA `--test-offline-launch` (server stopped) asserts offline rows, one source and
 advancing position, no server controls, normal close,0 temp originals. Desktop124
-passed/3 ignored; combined X11 260 + offline23 + resume5 PASS. Hardware/SR/Wayland
+passed/3 ignored; combined X11 260 + offline26 + resume6 PASS. Hardware/SR/Wayland
 full/other OS remain NOT_RUN.
 
 ## Queue snapshot canonical origin — fixed (2026-10-20)

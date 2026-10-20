@@ -10,7 +10,7 @@
 
 | Check | Paths | Commit | Evidence | Status | NOT_RUN |
 | --- | --- | --- | --- | --- | --- |
-| Cold offline launch | apps/desktop/src/{offline_profile,ui,offline,lib}.rs; native QA + harness | `3aeee09` | Non-secret0600 profile; startup falls through to read/play-only offline library on unreachable/expired/no session; real server off, Play advances one AudioEngine; desktop124/3 ignored; combined260 + offline23 + resume5 PASS | PASS native cold launch | Hardware/SR/full Wayland/other OS NOT_RUN |
+| Cold offline launch | apps/desktop/src/{offline_profile,ui,offline,lib}.rs; native QA + harness | `3aeee09` | Non-secret0600 profile; startup falls through to read/play-only offline library on unreachable/expired/no session; real server off, Play advances one AudioEngine; desktop124/3 ignored; combined260 + offline26 + resume6 PASS | PASS native cold launch | Hardware/SR/full Wayland/other OS NOT_RUN |
 
 ## AUD-06 offline origin scoping
 
