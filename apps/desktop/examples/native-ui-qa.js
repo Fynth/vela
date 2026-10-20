@@ -276,7 +276,6 @@ if (config.windowOnly) {
     const title = (rows[0].querySelector('.native-queue-select strong')?.textContent || '').trim();
     assert(title.length > 0, 'Offline rows carry their real saved title');
     assert(!button(`Play ${title}`), 'The saved copy is played only through the offline path, never as a server original');
-    assert(button('Shuffle')?.disabled && !button('Repeat off')?.disabled, 'The offline screen exposes repeat one but disables the shuffle it cannot execute');
     await capture('offline-dark');
     await click(`Play offline ${title}`);
     await wait(() => phase() === 'Playing' && position() > 200, 'Cold-start offline playback advances the native clock');
@@ -293,6 +292,15 @@ if (config.windowOnly) {
     assert(engine.processStreams === null || Number(engine.processStreams) === 1,
       `Every stream on the QA-owned sink belongs to this window process (process-matched ${engine.processStreams}, sink total ${engine.sinkInputs})`);
     assert((el('.native-player-status small')?.textContent || '').includes(`Offline · ${title}`), 'The player states the offline source context');
+    // The local offline source exposes only the modes it executes: repeat off/one,
+    // never shuffle or repeat-all.
+    assert(button('Shuffle')?.disabled && !button('Repeat off')?.disabled && !button('Repeat all'),
+      `The offline screen exposes repeat one but disables the shuffle it cannot execute (shuffle ${button('Shuffle')?.disabled}, repeat off ${button('Repeat off')?.disabled}, repeat all ${!!button('Repeat all')})`);
+    await click('Repeat off');
+    assert(button('Repeat one')?.getAttribute('aria-pressed') === 'true' && !button('Repeat all'),
+      'Offline repeat cycles directly to one track without offering repeat all');
+    await click('Repeat one');
+    assert(button('Repeat off')?.getAttribute('aria-pressed') === 'false', 'Offline repeat returns to off');
     await click(`Pause offline ${title}`);
     await wait(() => phase() === 'Paused', 'Cold-start offline pause');
     const paused = position(); await sleep(300);
