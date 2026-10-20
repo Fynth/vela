@@ -35,7 +35,9 @@ sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 from release_manifest import ManifestError, load, validate  # noqa: E402
 
-MANIFEST_PATH = REPO_ROOT / "release" / "targets.yaml"
+MANIFEST_PATH = Path(
+    os.environ.get("VELA_RELEASE_MANIFEST") or REPO_ROOT / "release" / "targets.yaml"
+)
 CHANNELS_DIR = REPO_ROOT / "release" / "channels"
 
 

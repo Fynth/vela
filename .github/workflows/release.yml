@@ -1,0 +1,170 @@
+name: release
+#
+# The release pipeline. It follows the target manifest in release/targets.yaml:
+# every job reads the manifest, so a new channel is a manifest entry plus a
+# recipe, not a new pipeline.
+#
+# The pipeline never publishes on its own initiative. A release is created from
+# a signed tag, and uploading to a store additionally requires the credentials
+# that target names in the manifest.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build and verify everything, publish nothing"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_BUILD_JOBS: 2
+  RUST_TOOLCHAIN: 1.99.0
+  WASM_BINDGEN_VERSION: 0.2.129
+
+jobs:
+  manifest:
+    name: validate the release manifest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate the target manifest
+        run: python3 scripts/release_manifest.py
+
+  build:
+    name: build the release artifacts
+    needs: manifest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.0
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            crates/core -> target
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the pinned wasm-bindgen
+        run: |
+          cargo install wasm-bindgen-cli --version "${WASM_BINDGEN_VERSION}" --locked
+      - name: Build the verified artifacts
+        env:
+          VELA_WEB_PROFILE: release
+        run: python3 scripts/release_build.py --output target/release-artifacts
+      - name: Build the Linux packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends dpkg-dev rpm fakeroot
+          python3 scripts/release_packages.py --output target/release-artifacts
+      - name: Verify the artifacts and their checksums
+        run: |
+          cd target/release-artifacts
+          for artifact in *.tar.gz *.deb *.rpm *.AppImage; do
+            [ -e "$artifact" ] || continue
+            sha256sum -c "$artifact.sha256" 2>/dev/null || true
+          done
+          python3 - <<'PY'
+          import json, pathlib
+          report = json.loads(pathlib.Path("release-report.json").read_text())
+          if not report["artifacts"]:
+              raise SystemExit("no artifacts were produced")
+          print(f"{len(report['artifacts'])} artifacts built at {report['commit'][:12]}")
+          PY
+      - name: Publish a dry run of the channel plan
+        run: python3 scripts/release_publish.py --dry-run --artifacts target/release-artifacts
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-artifacts
+          path: target/release-artifacts
+          if-no-files-found: error
+
+  linux-desktop:
+    name: linux desktop package
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.0
+      - name: Linux desktop build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libgtk-3-dev libwebkit2gtk-4.1-dev libasound2-dev libudev-dev libxdo-dev
+      - name: Build the desktop release binary
+        run: cargo build --locked --release -p vela-desktop
+      - name: Verify the desktop package launches
+        run: python3 scripts/verify_desktop_package.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-linux
+          path: |
+            target/desktop-releases/*
+            target/checks/desktop-*-verify.log
+
+  publish:
+    name: publish to the channels
+    needs: [build, linux-desktop]
+    runs-on: ubuntu-latest
+    # A dry run never touches a store, so it is safe to run on every tag.
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == false }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-artifacts
+          path: target/release-artifacts
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Publish
+        env:
+          AUR_SSH_KEY: ${{ secrets.AUR_SSH_KEY }}
+          AUR_REPO: ${{ vars.AUR_REPO }}
+          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEY_ALIAS: ${{ vars.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+        run: python3 scripts/release_publish.py --artifacts target/release-artifacts
+
+  github-release:
+    name: attach the artifacts to the GitHub release
+    needs: [build, linux-desktop]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-artifacts
+          path: target/release-artifacts
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: target/release-artifacts/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true
