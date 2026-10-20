@@ -128,9 +128,16 @@ test('first-run setup, real FLAC upload, artwork, decode, favorites and safe sha
   await page.getByRole('button', { name: '+ Create', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Evening signals' })).toBeVisible();
   await page.getByRole('button', { name: /Library/ }).first().click();
-  await page.locator('#playlist-target').selectOption({ label: 'Evening signals' });
-  await page.getByRole('button', { name: 'Add to selected playlist', exact: true }).click();
-  await expect(page.getByText("Track added to your playlist.", { exact: true })).toBeVisible();
+  // TR07: a row's own menu opens the real searchable add-to-playlist picker; the
+  // destination is chosen inside it and the receipt names that playlist.
+  await page.getByRole('button', { name: 'More actions for Signal', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Add to playlist…', exact: true }).click();
+  const playlistPicker = page.locator('#playlist-picker');
+  await expect(playlistPicker).toBeVisible();
+  await playlistPicker.getByRole('option', { name: /Evening signals/ }).click();
+  await playlistPicker.getByRole('button', { name: 'Add to Evening signals', exact: true }).click();
+  await expect(playlistPicker).toBeHidden();
+  await expect(page.locator('.playlist-undo')).toContainText('Added “Signal” to Evening signals.');
   await page.getByRole('button', { name: /Playlists/ }).first().click();
   await page.locator('.playlist-card').filter({ hasText: 'Evening signals' }).click();
   await page.locator('#collaborator').fill('listener');

@@ -4,6 +4,11 @@
   window.addEventListener("pagehide", checkpoint);
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") checkpoint(); });
   const modalOpen = () => document.querySelector('dialog[open], [role="dialog"]:not(dialog)');
+  // TR07: an open row menu (or its add-to-playlist picker layer) owns its top
+  // layer. Transport shortcuts must not reach the global handler from behind
+  // it, while a real player control keeps its own behavior.
+  const surfaceOpen = () => document.querySelector('[data-vela-overlay="track-menu"], [data-vela-overlay="playlist-picker"]');
+  const playerControl = (target) => target instanceof Element && !!target.closest(".player-bar, #vela-audio");
   const audio = () => document.getElementById("vela-audio");
   const destinations = new Set(["home", "search", "library", "albums", "artists", "favorites", "playlists", "imports", "jobs", "network", "settings", "history", "radio"]);
   document.addEventListener("vela-route", ({detail}) => {
@@ -27,6 +32,9 @@
   });
 
   document.addEventListener("keydown", (event) => {
+    // TR07: Space/Arrow stay with the open menu or picker layer unless the event
+    // really targets a player control. Normal shortcuts elsewhere are unchanged.
+    if (surfaceOpen() && !playerControl(event.target)) return;
     if (modalOpen() || event.altKey || event.ctrlKey || event.metaKey || /INPUT|TEXTAREA|SELECT|BUTTON|A|SUMMARY/.test(event.target.tagName) || event.target.isContentEditable) return;
     if (event.code === "Space") { const button = document.getElementById("player-toggle"); if (button) { event.preventDefault(); button.click(); } }
     if (event.code === "ArrowRight" && audio()) { event.preventDefault(); audio().currentTime = Math.min(audio().duration || 0, audio().currentTime + 10); }

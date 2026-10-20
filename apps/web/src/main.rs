@@ -26,6 +26,7 @@ use icons::Icon;
 use playback::{Command, PlaybackOrder, Repeat, Transition};
 use serde_json::json;
 use session::{ContextKind, PlaybackContext, SavedSession};
+use std::{cell::RefCell, rc::Rc};
 use vela_domain::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
@@ -1135,6 +1136,329 @@ struct PlaylistUndo {
     title: String,
 }
 
+/// TR07: one frozen command description per row action. The visible More
+/// trigger, right-click, Shift+F10, the context-menu key and the touch action
+/// sheet all render and dispatch this single registry, so a surface can never
+/// grow its own action list or invent an action the root command table lacks.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct RowAction {
+    id: &'static str,
+    label: &'static str,
+}
+
+const ROW_ACTIONS: [RowAction; 6] = [
+    RowAction {
+        id: "play",
+        label: "Play / Pause",
+    },
+    RowAction {
+        id: "queue",
+        label: "Add to queue",
+    },
+    RowAction {
+        id: "favorite",
+        label: "Favorite / Unfavorite",
+    },
+    RowAction {
+        id: "playlist",
+        label: "Add to playlist…",
+    },
+    RowAction {
+        id: "radio",
+        label: "Start track radio",
+    },
+    RowAction {
+        id: "edit",
+        label: "Edit metadata",
+    },
+];
+
+/// The frozen target of an open add-to-playlist picker. It is the row id and
+/// title captured when the picker opened, never a row index.
+#[derive(Clone, PartialEq, Eq)]
+struct PlaylistPickerTarget {
+    track_id: String,
+    title: String,
+}
+
+/// TR07: the row menu and the add-to-playlist picker are two layers of one
+/// surface state. `return_focus` keeps the DOM trigger that opened the layer so
+/// Escape, the backdrop and a committed action restore it exactly, while the
+/// root player's own native dialog focus handling stays untouched.
+#[derive(Clone)]
+struct Surfaces {
+    menu: Signal<Option<String>>,
+    picker: Signal<Option<PlaylistPickerTarget>>,
+    picker_query: Signal<String>,
+    picker_choice: Signal<Option<String>>,
+    picker_busy: Signal<bool>,
+    picker_error: Signal<String>,
+    return_focus: Rc<RefCell<Option<web_sys::Element>>>,
+}
+
+impl Surfaces {
+    fn open_menu_target(&self) -> Option<String> {
+        self.menu.read().clone()
+    }
+    fn picker_target(&self) -> Option<PlaylistPickerTarget> {
+        self.picker.read().clone()
+    }
+    fn picker_text(&self) -> String {
+        self.picker_query.read().clone()
+    }
+    fn picker_selection(&self) -> Option<String> {
+        self.picker_choice.read().clone()
+    }
+    fn picker_failed(&self) -> String {
+        self.picker_error.read().clone()
+    }
+    fn picker_adding(&self) -> bool {
+        *self.picker_busy.read()
+    }
+
+    /// Freeze the invoking trigger: the focused control inside this row for a
+    /// keyboard invocation, otherwise the row's stable More button (a
+    /// right-click has no focusable target of its own).
+    fn capture_focus(&self, row_id: &str) {
+        let Some(document) = web_sys::window().and_then(|window| window.document()) else {
+            return;
+        };
+        let row = document.get_element_by_id(&format!("track-row-{row_id}"));
+        let focused = document.active_element().filter(|element| {
+            row.as_ref()
+                .is_some_and(|row| row.contains(element.dyn_ref::<web_sys::Node>()))
+        });
+        let target =
+            focused.or_else(|| document.get_element_by_id(&format!("track-menu-trigger-{row_id}")));
+        *self.return_focus.borrow_mut() = target;
+    }
+
+    fn open_menu(&self, row_id: &str) {
+        self.capture_focus(row_id);
+        let mut menu = self.menu;
+        menu.set(Some(row_id.to_string()));
+    }
+
+    fn toggle_menu(&self, row_id: &str) {
+        if self.menu.peek().as_deref() == Some(row_id) {
+            self.dismiss_menu();
+        } else {
+            self.open_menu(row_id);
+        }
+    }
+
+    /// Close the row menu and put focus back on the control that invoked it.
+    fn dismiss_menu(&self) {
+        let mut menu = self.menu;
+        menu.set(None);
+        self.restore_focus();
+    }
+
+    fn restore_focus(&self) {
+        let target = self.return_focus.borrow_mut().take();
+        let Some(element) = target else {
+            return;
+        };
+        // The layer leaves the DOM in the renderer's next batch (a native modal
+        // dialog also leaves the top layer there and would otherwise pull focus
+        // to the document body), so focus is restored after that batch instead
+        // of racing it. A trigger that is no longer connected is not focused.
+        wasm_bindgen_futures::spawn_local(async move {
+            TimeoutFuture::new(0).await;
+            if element
+                .dyn_ref::<web_sys::Node>()
+                .is_some_and(web_sys::Node::is_connected)
+                && let Ok(control) = element.dyn_into::<web_sys::HtmlElement>()
+            {
+                let _ = control.focus();
+            }
+        });
+    }
+
+    /// Hand the frozen row target to the picker layer. The menu closes without
+    /// restoring focus because the picker now owns the interaction.
+    fn open_picker(&self, track: &Track) {
+        let mut menu = self.menu;
+        let mut query = self.picker_query;
+        let mut choice = self.picker_choice;
+        let mut error = self.picker_error;
+        let mut busy = self.picker_busy;
+        let mut picker = self.picker;
+        menu.set(None);
+        query.set(String::new());
+        choice.set(None);
+        error.set(String::new());
+        busy.set(false);
+        picker.set(Some(PlaylistPickerTarget {
+            track_id: track.id.clone(),
+            title: track.title.clone(),
+        }));
+    }
+
+    fn close_picker(&self) {
+        let mut picker = self.picker;
+        let mut busy = self.picker_busy;
+        let mut error = self.picker_error;
+        picker.set(None);
+        busy.set(false);
+        error.set(String::new());
+        // Leave the top layer before restoring focus: a native modal dialog that
+        // closes later would otherwise pull focus back to its own remembered
+        // opener. The deferred restore below then owns the final focus.
+        if let Some(dialog) = picker_dialog()
+            && dialog.open()
+        {
+            dialog.close();
+        }
+        self.restore_focus();
+    }
+
+    fn set_query(&self, value: String) {
+        let mut query = self.picker_query;
+        query.set(value);
+    }
+
+    fn set_choice(&self, value: Option<String>) {
+        let mut choice = self.picker_choice;
+        choice.set(value);
+    }
+
+    fn set_busy(&self, value: bool) {
+        let mut busy = self.picker_busy;
+        busy.set(value);
+    }
+
+    fn fail_picker(&self, message: String) {
+        let mut busy = self.picker_busy;
+        let mut error = self.picker_error;
+        busy.set(false);
+        error.set(message);
+    }
+
+    /// An account change drops every overlay and the captured trigger. Focus is
+    /// not restored because the previous account's DOM is already gone.
+    fn reset(&self) {
+        let mut menu = self.menu;
+        let mut picker = self.picker;
+        let mut query = self.picker_query;
+        let mut choice = self.picker_choice;
+        let mut busy = self.picker_busy;
+        let mut error = self.picker_error;
+        menu.set(None);
+        picker.set(None);
+        query.set(String::new());
+        choice.set(None);
+        busy.set(false);
+        error.set(String::new());
+        self.return_focus.borrow_mut().take();
+    }
+}
+
+/// Focus one control by DOM id after the renderer's DOM batch. Returns whether
+/// the element exists and really received focus, so a keyboard trap can skip a
+/// disabled control instead of getting stuck on it.
+fn focus_by_id(id: &str) -> bool {
+    let Some(document) = web_sys::window().and_then(|window| window.document()) else {
+        return false;
+    };
+    let Some(element) = document
+        .get_element_by_id(id)
+        .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok())
+    else {
+        return false;
+    };
+    let _ = element.focus();
+    document
+        .active_element()
+        .is_some_and(|active| active.id() == id)
+}
+
+/// The one add-to-playlist dialog element. It stays mounted so opening it is a
+/// real modal transition rather than a race with the renderer's DOM batch.
+fn picker_dialog() -> Option<web_sys::HtmlDialogElement> {
+    web_sys::window()?
+        .document()?
+        .get_element_by_id("playlist-picker")?
+        .dyn_into()
+        .ok()
+}
+
+/// Move focus by `step` through a known control ring and wrap at both ends.
+fn step_focus(controls: &[String], step: isize) {
+    if controls.is_empty() {
+        return;
+    }
+    let current = web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| document.active_element())
+        .map(|element| element.id())
+        .and_then(|id| controls.iter().position(|control| *control == id));
+    let mut at = match current {
+        Some(at) => at as isize,
+        None if step > 0 => -1,
+        None => 0,
+    };
+    for _ in 0..controls.len() {
+        at = (at + step).rem_euclid(controls.len() as isize);
+        if let Some(control) = controls.get(at as usize)
+            && focus_by_id(control)
+        {
+            return;
+        }
+    }
+}
+
+fn row_action_controls() -> Vec<String> {
+    ROW_ACTIONS
+        .iter()
+        .map(|action| format!("row-action-{}", action.id))
+        .collect()
+}
+
+/// The picker never invents a destination: it lists exactly the playlists the
+/// server says this account may edit, narrowed by the real search text.
+fn editable_playlists(playlists: &[PlaylistSummary], query: &str) -> Vec<PlaylistSummary> {
+    let needle = query.trim().to_lowercase();
+    playlists
+        .iter()
+        .filter(|list| list.can_edit)
+        .filter(|list| needle.is_empty() || list.name.to_lowercase().contains(&needle))
+        .cloned()
+        .collect()
+}
+
+fn picker_controls(editable: &[PlaylistSummary], has_editable: bool) -> Vec<String> {
+    let mut controls = vec!["playlist-picker-search".to_string()];
+    controls.extend(
+        editable
+            .iter()
+            .map(|list| format!("playlist-choice-{}", list.id)),
+    );
+    if !has_editable {
+        controls.push("playlist-picker-browse".to_string());
+    }
+    controls.push("playlist-picker-cancel".to_string());
+    controls.push("playlist-picker-add".to_string());
+    controls
+}
+
+/// The row menu froze one track id. Playback resolves that id in the list that
+/// is current now instead of reusing a row index, so a list that changed while
+/// the menu was open can never play a neighbouring row.
+fn play_row_track(
+    track: &Track,
+    tracks: Signal<Vec<Track>>,
+    context: PlaybackContext,
+    playback: PlaybackUi,
+    mut notice: Signal<String>,
+) {
+    let list = tracks.peek().clone();
+    match list.iter().position(|item| item.id == track.id) {
+        Some(at) => play_or_toggle_queue(list, at, context, playback),
+        None => notice.set("That track is no longer in this list.".into()),
+    }
+}
+
 #[allow(non_snake_case)]
 fn App() -> Element {
     let mut auth = use_signal(|| None::<AuthResponse>);
@@ -1227,28 +1551,71 @@ fn App() -> Element {
     });
     let mut share_days = use_signal(|| "7".to_string());
     let mut collaborator_edit = use_signal(|| false);
-    let mut selected_add_playlist = use_signal(String::new);
-    let mut playlist_filter = use_signal(String::new);
     let mut playlist_undo = use_signal(|| None::<PlaylistUndo>);
-    let mut open_track_menu = use_signal(|| None::<String>);
-    // TR07b: the open row menu owns the focus, so Escape closes it from the
-    // trigger, the row and the touch action sheet alike. The lean web build has
-    // no mounted event, so the panel is looked up after the renderer's DOM batch
-    // (the same pattern the queue drawer and Now Playing use).
-    use_effect(move || {
-        if open_track_menu().is_none() {
-            return;
-        }
-        spawn(async move {
-            TimeoutFuture::new(0).await;
-            if let Some(panel) = web_sys::window()
-                .and_then(|window| window.document())
-                .and_then(|document| document.get_element_by_id("track-menu-panel"))
-                .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok())
-            {
-                let _ = panel.focus();
+    // TR07: one surface state for the row menu and the add-to-playlist picker.
+    // Every invocation path (More, right-click, Shift+F10, ContextMenu, the
+    // touch sheet) opens the same frozen row target through this value.
+    let surfaces = use_hook(|| Surfaces {
+        menu: Signal::new(None::<String>),
+        picker: Signal::new(None::<PlaylistPickerTarget>),
+        picker_query: Signal::new(String::new()),
+        picker_choice: Signal::new(None::<String>),
+        picker_busy: Signal::new(false),
+        picker_error: Signal::new(String::new()),
+        return_focus: Rc::new(RefCell::new(None)),
+    });
+    // The lean web build has no mounted event, so the active layer is focused
+    // after the renderer's DOM batch (the same pattern the queue drawer and Now
+    // Playing use). The picker is a native modal dialog: the browser owns its
+    // top layer, inertness and backdrop, and the root player's legacy dialog
+    // handling is never engaged by it.
+    use_effect({
+        let surfaces = surfaces.clone();
+        move || {
+            // The renderer batches DOM work after the event handler, so the layer
+            // is found and focused with a bounded retry instead of one timer
+            // tick. A layer that closed in the meantime is never reopened.
+            if surfaces.open_menu_target().is_some() {
+                let surfaces = surfaces.clone();
+                spawn(async move {
+                    for _ in 0..40 {
+                        TimeoutFuture::new(1).await;
+                        if surfaces.menu.peek().is_none() {
+                            return;
+                        }
+                        if focus_by_id("track-menu-panel") {
+                            return;
+                        }
+                    }
+                });
             }
-        });
+            // The dialog element is always mounted: opening is a real modal
+            // transition and closing leaves the top layer, both after the
+            // renderer's DOM batch.
+            let _open = surfaces.picker_target();
+            let surfaces = surfaces.clone();
+            spawn(async move {
+                for _ in 0..40 {
+                    TimeoutFuture::new(1).await;
+                    let Some(dialog) = picker_dialog() else {
+                        return;
+                    };
+                    if surfaces.picker.peek().is_some() {
+                        if !dialog.open() {
+                            let _ = dialog.show_modal();
+                        }
+                        if dialog.open() && focus_by_id("playlist-picker-search") {
+                            return;
+                        }
+                    } else {
+                        if dialog.open() {
+                            dialog.close();
+                        }
+                        return;
+                    }
+                }
+            });
+        }
     });
     let mut new_user = use_signal(String::new);
     let mut new_password = use_signal(String::new);
@@ -1524,103 +1891,106 @@ fn App() -> Element {
             });
         }
     });
-    use_effect(move || {
-        let _session = auth.read().as_ref().map(|s| s.csrf_token.clone());
-        editing_track.set(None);
-        invalidate_library(library);
-        tracks.set(Vec::new());
-        let mut cursor = cursor;
-        cursor.set(None);
-        let mut loading = loading;
-        loading.set(false);
-        library_conditions.set(LibraryConditions::default());
-        query.set(String::new());
-        filter_draft.set(filters::FilterDraft::default());
-        filter_error.set(String::new());
-        filter_open.set(false);
-        clear_catalog(catalog);
-        busy.set(false);
-        import_busy.set(false);
-        uploading.set(false);
-        add_music.set(false);
-        preview.set(None);
-        import_url.set(String::new());
-        jobs.set(Vec::new());
-        upload_status.set(String::new());
-        new_user.set(String::new());
-        new_password.set(String::new());
-        radio_seed.set(None);
-        collaborator.set(String::new());
-        selected_add_playlist.set(String::new());
-        playlist_filter.set(String::new());
-        playlist_undo.set(None);
-        open_track_menu.set(None);
-        show_queue.set(false);
-        playback_order.write().reset(0, 0);
-        shuffle.set(false);
-        repeat.set("off".into());
-        let Some(account) = auth.peek().clone() else {
-            engine.peek().bind(String::new(), None);
-            queue.set(Vec::new());
-            index.set(0);
-            playing.set(false);
-            position.set(0.0);
-            duration.set(0.0);
-            playlists.set(Vec::new());
-            selected_playlist.set(None);
-            share_url.set(String::new());
-            stats.set(None);
-            return;
-        };
-        let mut saved = storage_get(&queue_key(auth, "playback.v1"))
-            .and_then(|raw| SavedSession::decode(&raw, &account.user.id))
-            .unwrap_or_else(|| {
-                let mut restored = storage_get(&queue_key(auth, "queue"))
-                    .filter(|raw| raw.len() <= session::MAX_SNAPSHOT_BYTES)
-                    .and_then(|raw| serde_json::from_str::<Vec<Track>>(&raw).ok())
-                    .unwrap_or_default();
-                restored.truncate(playback::MAX_QUEUE);
-                let at = storage_get(&queue_key(auth, "queue_index"))
-                    .and_then(|raw| raw.parse::<usize>().ok())
-                    .filter(|at| *at < restored.len())
-                    .unwrap_or(0);
-                let mut value = SavedSession {
-                    version: session::SNAPSHOT_VERSION,
-                    owner_id: account.user.id.clone(),
-                    cursor: at,
-                    current_track_id: restored.get(at).map(|t| t.id.clone()),
-                    queue: restored,
-                    position: 0.0,
-                    context: PlaybackContext::default(),
-                    volume: 0.8,
-                    shuffle: false,
-                    repeat: "off".into(),
-                };
-                if value.encode().is_none() {
-                    value.queue.clear();
-                    value.cursor = 0;
-                    value.current_track_id = None;
-                }
-                value
-            });
-        saved.position = session::clamp_position(
-            saved.position,
-            saved
-                .queue
-                .get(saved.cursor)
-                .map_or(0.0, |t| t.duration_ms as f64 / 1000.0),
-        );
-        playback_order
-            .write()
-            .reset(saved.queue.len(), saved.cursor);
-        queue.set(saved.queue.clone());
-        index.set(saved.cursor);
-        volume.set(saved.volume);
-        shuffle.set(saved.shuffle);
-        repeat.set(saved.repeat.clone());
-        let mut context = context;
-        context.set(saved.context.clone());
-        engine.peek().bind(account.csrf_token, Some(saved));
+    use_effect({
+        let surfaces = surfaces.clone();
+        move || {
+            let _session = auth.read().as_ref().map(|s| s.csrf_token.clone());
+            editing_track.set(None);
+            invalidate_library(library);
+            tracks.set(Vec::new());
+            let mut cursor = cursor;
+            cursor.set(None);
+            let mut loading = loading;
+            loading.set(false);
+            library_conditions.set(LibraryConditions::default());
+            query.set(String::new());
+            filter_draft.set(filters::FilterDraft::default());
+            filter_error.set(String::new());
+            filter_open.set(false);
+            clear_catalog(catalog);
+            busy.set(false);
+            import_busy.set(false);
+            uploading.set(false);
+            add_music.set(false);
+            preview.set(None);
+            import_url.set(String::new());
+            jobs.set(Vec::new());
+            upload_status.set(String::new());
+            new_user.set(String::new());
+            new_password.set(String::new());
+            radio_seed.set(None);
+            collaborator.set(String::new());
+            playlist_undo.set(None);
+            // Account change: the open menu/picker and every captured row trigger
+            // belong to the previous account and must not survive it.
+            surfaces.reset();
+            show_queue.set(false);
+            playback_order.write().reset(0, 0);
+            shuffle.set(false);
+            repeat.set("off".into());
+            let Some(account) = auth.peek().clone() else {
+                engine.peek().bind(String::new(), None);
+                queue.set(Vec::new());
+                index.set(0);
+                playing.set(false);
+                position.set(0.0);
+                duration.set(0.0);
+                playlists.set(Vec::new());
+                selected_playlist.set(None);
+                share_url.set(String::new());
+                stats.set(None);
+                return;
+            };
+            let mut saved = storage_get(&queue_key(auth, "playback.v1"))
+                .and_then(|raw| SavedSession::decode(&raw, &account.user.id))
+                .unwrap_or_else(|| {
+                    let mut restored = storage_get(&queue_key(auth, "queue"))
+                        .filter(|raw| raw.len() <= session::MAX_SNAPSHOT_BYTES)
+                        .and_then(|raw| serde_json::from_str::<Vec<Track>>(&raw).ok())
+                        .unwrap_or_default();
+                    restored.truncate(playback::MAX_QUEUE);
+                    let at = storage_get(&queue_key(auth, "queue_index"))
+                        .and_then(|raw| raw.parse::<usize>().ok())
+                        .filter(|at| *at < restored.len())
+                        .unwrap_or(0);
+                    let mut value = SavedSession {
+                        version: session::SNAPSHOT_VERSION,
+                        owner_id: account.user.id.clone(),
+                        cursor: at,
+                        current_track_id: restored.get(at).map(|t| t.id.clone()),
+                        queue: restored,
+                        position: 0.0,
+                        context: PlaybackContext::default(),
+                        volume: 0.8,
+                        shuffle: false,
+                        repeat: "off".into(),
+                    };
+                    if value.encode().is_none() {
+                        value.queue.clear();
+                        value.cursor = 0;
+                        value.current_track_id = None;
+                    }
+                    value
+                });
+            saved.position = session::clamp_position(
+                saved.position,
+                saved
+                    .queue
+                    .get(saved.cursor)
+                    .map_or(0.0, |t| t.duration_ms as f64 / 1000.0),
+            );
+            playback_order
+                .write()
+                .reset(saved.queue.len(), saved.cursor);
+            queue.set(saved.queue.clone());
+            index.set(saved.cursor);
+            volume.set(saved.volume);
+            shuffle.set(saved.shuffle);
+            repeat.set(saved.repeat.clone());
+            let mut context = context;
+            context.set(saved.context.clone());
+            engine.peek().bind(account.csrf_token, Some(saved));
+        }
     });
     use_effect(move || {
         let Some(session) = auth.read().clone() else {
@@ -1859,6 +2229,27 @@ fn App() -> Element {
         "radio" => "Track radio",
         _ => "Your library",
     };
+    // TR07: the add-to-playlist picker lists the real editable playlists. The
+    // count and the search are shared by the rendered list and its Tab ring so
+    // both always describe the same set of destinations.
+    let picker_target = surfaces.picker_target();
+    let picker_query = surfaces.picker_text();
+    let picker_choice = surfaces.picker_selection();
+    let picker_busy = surfaces.picker_adding();
+    let picker_error = surfaces.picker_failed();
+    let has_editable_playlists = playlists.read().iter().any(|list| list.can_edit);
+    let picker_lists = editable_playlists(&playlists.read(), &picker_query);
+    let picker_choice_name = picker_choice.as_ref().and_then(|choice| {
+        playlists
+            .read()
+            .iter()
+            .find(|list| list.id == *choice)
+            .map(|list| list.name.clone())
+    });
+    let picker_destination = picker_choice_name
+        .clone()
+        .map(|name| format!("Add to {name}"))
+        .unwrap_or_else(|| "Add to playlist".to_string());
 
     rsx! {
         if booting() { div { class: "boot-screen", div { class: "brand-mark", "V" } p { "Opening your music space…" } } }
@@ -1966,16 +2357,6 @@ fn App() -> Element {
                                     button { class: "button secondary small", onclick: move |_| { query.set(String::new()); search_library(String::new(), library); }, "Clear search" }
                                 }
                             }
-                            if !playlists.read().is_empty() { div { class: "playlist-target",
-                                label { r#for: "playlist-filter", "Add tracks to" }
-                                input { id: "playlist-filter", r#type: "search", placeholder: "Find a playlist", value: "{playlist_filter}", maxlength: "120", oninput: move |e| playlist_filter.set(e.value()) }
-                                select { id: "playlist-target", value: "{selected_add_playlist}", onchange: move |e| selected_add_playlist.set(e.value()),
-                                    option { value: "", "Choose a playlist" }
-                                    for list in playlists.read().iter().filter(|p| p.can_edit) {
-                                        if playlist_filter().trim().is_empty() || list.name.to_lowercase().contains(&playlist_filter().trim().to_lowercase()) { option { value: "{list.id}", "{list.name}" } }
-                                    }
-                                }
-                            } }
                             if loading() && tracks.read().is_empty() {
                                 div { class: "track-table skeleton-table", role: "status", "aria-label": "Loading your library", "aria-busy": "true",
                                     for _ in 0..8 { div { class: "track-row skeleton-track-row", "aria-hidden": "true",
@@ -1995,8 +2376,18 @@ fn App() -> Element {
                                 } }
                             else { div { class: "track-table", div { class: "track-header", span { "#" } span { "TITLE" } span { "ALBUM" } span { "QUALITY" } span { "TIME" } span { "" } }
                                     for (at, track) in tracks.read().iter().cloned().enumerate() {
-                                        { let row_track = track.clone(); let favorited_track = track.clone(); let add_track = track.clone(); let edit_track = track.clone(); let radio_track = track.clone(); let menu_play = track.clone(); let menu_queue = track.clone(); let menu_favorite = track.clone(); let menu_radio = track.clone(); let menu_title = track.title.clone(); let queue_track = track.clone();
-                                        rsx! { div { key: "{track.id}", class: if current.as_ref().is_some_and(|t| t.id == track.id) { "track-row current" } else { "track-row" }, oncontextmenu: { let id = track.id.clone(); move |event| { event.prevent_default(); open_track_menu.set(Some(id.clone())); } },
+                                        { let row_track = track.clone(); let favorited_track = track.clone(); let edit_track = track.clone(); let radio_track = track.clone(); let action_track = track.clone(); let menu_title = track.title.clone(); let queue_track = track.clone(); let menu = surfaces.clone();
+                                        rsx! { div { key: "{track.id}", id: "track-row-{track.id}", "data-track-row": "{track.id}", class: if current.as_ref().is_some_and(|t| t.id == track.id) { "track-row current" } else { "track-row" },
+                                            /* TR07: right-click, Shift+F10 and the ContextMenu key all open
+                                               the same frozen row menu. None of them starts playback. */
+                                            oncontextmenu: { let menu = menu.clone(); let id = track.id.clone(); move |event| { event.prevent_default(); menu.open_menu(&id); } },
+                                            onkeydown: { let menu = menu.clone(); let id = track.id.clone(); move |event| {
+                                                if event.key() == Key::ContextMenu || (event.key() == Key::F10 && event.modifiers().shift()) {
+                                                    event.prevent_default();
+                                                    event.stop_propagation();
+                                                    menu.open_menu(&id);
+                                                }
+                                            } },
                                             button { class: "track-play", "aria-label": actions.play_label(&track.id, &track.title), onclick: move |_| play_or_toggle_queue(tracks.peek().clone(), at, view_context(page,catalog,selected_playlist), playback), if current.as_ref().is_some_and(|t| t.id == track.id) && requested_play { Icon { name: "pause" } } else { Icon { name: "play" } } }
                                             button { class: "track-title", onclick: move |_| play_or_toggle_queue(tracks.peek().clone(), at, view_context(page,catalog,selected_playlist), playback), Art { track: row_track } div { strong { "{track.title}" } small { "{track.artist}" } } }
                                             span { class: "track-album", "{track.album}" }
@@ -2006,41 +2397,45 @@ fn App() -> Element {
                                                 button { class: "icon-button", title: "Add to playback queue", "aria-label": "Add {track.title} to playback queue", onclick: move |_| { enqueue_track(queue_track.clone(),false,playback,notice); }, "+" }
                                                 button { class: "icon-button metadata-edit", "aria-label": "Edit metadata for {edit_track.title}", title: "Edit metadata", onclick: move |_| editing_track.set(Some(edit_track.clone())), Icon { name: "edit" } }
                                                 button { class: "icon-button track-radio", "aria-label": "Start track radio for {radio_track.title}", title: "Track radio", onclick: move |_| actions.radio.call(radio_track.clone()), Icon { name: "radio" } }
-                                                div { class: "track-menu", "data-track-menu": "{track.id}", onkeydown: move |event| { if event.key() == Key::Escape { event.stop_propagation(); open_track_menu.set(None); } },
-                                                    button { class: "icon-button", "aria-label": "More actions for {menu_title}", "aria-haspopup": "menu", "aria-expanded": "{open_track_menu() == Some(track.id.clone())}", title: "More actions", onclick: { let id = track.id.clone(); move |_| { let next = open_track_menu().as_deref() != Some(id.as_str()); open_track_menu.set(next.then(|| id.clone())); } }, span { "⋯" } }
-                                                    if open_track_menu().as_deref() == Some(track.id.as_str()) {
-                                                        /* TR07b: the same signal-backed menu is the compact anchored panel on
-                                                           desktop and a modal bottom action sheet at touch widths. The
-                                                           backdrop is a real click-away target and stays out of the
-                                                           accessibility tree; it owns no action of its own. */
-                                                        div { class: "track-menu-backdrop", "aria-hidden": "true", onclick: move |_| open_track_menu.set(None) }
-                                                        div { class: "track-menu-panel", id: "track-menu-panel", tabindex: "-1", role: "menu", "aria-label": "Actions for {menu_title}",
-                                                            button { role: "menuitem", onclick: { let mut close = open_track_menu; move |_| { close.set(None); play_or_toggle_queue(tracks.peek().clone(), at, view_context(page,catalog,selected_playlist), playback); } }, "Play / Pause" }
-                                                            button { role: "menuitem", onclick: { let mut close = open_track_menu; move |_| { close.set(None); enqueue_track(menu_queue.clone(), false, playback, notice); } }, "Add to queue" }
-                                                            button { role: "menuitem", onclick: { let mut close = open_track_menu; move |_| { close.set(None); favorite_track(menu_favorite.clone(), auth, tracks, queue, catalog.tracks, facets_revision, error); } }, "Favorite / Unfavorite" }
-                                                            button { role: "menuitem", onclick: { let mut close = open_track_menu; move |_| { close.set(None); actions.radio.call(menu_radio.clone()); } }, "Start track radio" }
-                                                            button { role: "menuitem", onclick: { let mut close = open_track_menu; move |_| { close.set(None); editing_track.set(Some(menu_play.clone())); } }, "Edit metadata" }
+                                                div { class: "track-menu", "data-track-menu": "{track.id}",
+                                                    button { id: "track-menu-trigger-{track.id}", class: "icon-button", "aria-label": "More actions for {menu_title}", "aria-haspopup": "menu", "aria-expanded": "{menu.open_menu_target() == Some(track.id.clone())}", title: "More actions", onclick: { let menu = menu.clone(); let id = track.id.clone(); move |_| menu.toggle_menu(&id) }, span { "⋯" } }
+                                                    if menu.open_menu_target() == Some(track.id.clone()) {
+                                                        /* TR07: the visible More trigger, right-click, Shift+F10,
+                                                           the ContextMenu key and the touch action sheet are this one
+                                                           registered panel. The backdrop is a real click-away target
+                                                           and stays out of the accessibility tree. */
+                                                        div { class: "track-menu-backdrop", "aria-hidden": "true", onclick: { let menu = menu.clone(); move |_| menu.dismiss_menu() } }
+                                                        div { class: "track-menu-panel", id: "track-menu-panel", "data-vela-overlay": "track-menu", tabindex: "-1", role: "menu", "aria-label": "Actions for {menu_title}",
+                                                            onkeydown: { let menu = menu.clone(); move |event| {
+                                                                match event.key() {
+                                                                    Key::Escape => { event.prevent_default(); event.stop_propagation(); menu.dismiss_menu(); }
+                                                                    Key::Tab => { event.prevent_default(); step_focus(&row_action_controls(), if event.modifiers().shift() { -1 } else { 1 }); }
+                                                                    Key::ArrowDown => { event.prevent_default(); step_focus(&row_action_controls(), 1); }
+                                                                    Key::ArrowUp => { event.prevent_default(); step_focus(&row_action_controls(), -1); }
+                                                                    _ => {}
+                                                                }
+                                                            } },
+                                                            for action in ROW_ACTIONS {
+                                                                button { id: "row-action-{action.id}", key: "{action.id}", r#type: "button", role: "menuitem", tabindex: "-1", "data-row-action": "{action.id}",
+                                                                    onclick: { let menu = menu.clone(); let track = action_track.clone(); move |_| {
+                                                                        // One frozen target, one dispatch table. The menu closes before
+                                                                        // the root command runs, and each action's own receipt is real.
+                                                                        match action.id {
+                                                                            "play" => { menu.dismiss_menu(); play_row_track(&track, tracks, view_context(page,catalog,selected_playlist), playback, notice); }
+                                                                            "queue" => { menu.dismiss_menu(); enqueue_track(track.clone(), false, playback, notice); }
+                                                                            "favorite" => { menu.dismiss_menu(); favorite_track(track.clone(), auth, tracks, queue, catalog.tracks, facets_revision, error); }
+                                                                            "playlist" => menu.open_picker(&track),
+                                                                            "radio" => { menu.dismiss_menu(); actions.radio.call(track.clone()); }
+                                                                            "edit" => { menu.dismiss_menu(); editing_track.set(Some(track.clone())); }
+                                                                            _ => menu.dismiss_menu(),
+                                                                        }
+                                                                    } },
+                                                                    "{action.label}"
+                                                                }
+                                                            }
                                                         }
                                                     }
                                                 }
-                                                if !selected_add_playlist().is_empty() { button { class: "icon-button", title: "Add to selected playlist", "aria-label": "Add to selected playlist", onclick: move |_| { let track = add_track.clone(); let id = selected_add_playlist(); let mut undo_signal = playlist_undo; spawn_authorized(auth, async move {
-                                                    let track_id = track.id.clone();
-                                                    let title = track.title.clone();
-                                                    match api::<PlaylistDetail>("GET", &format!("/api/playlists/{id}"), None, "").await {
-                                                        Ok(detail) => { match mutate("POST", &format!("/api/playlists/{id}/items"), Some(json!({"revision": detail.playlist.revision, "mutation_id": uuid::Uuid::new_v4().to_string(), "track_id": track.id})), &token(auth)).await {
-                                                            Ok(()) => {
-                                                                if let Ok(updated) = api::<PlaylistDetail>("GET", &format!("/api/playlists/{id}"), None, "").await
-                                                                    && let Some(item) = updated.items.iter().rev().find(|item| item.track.id == track_id)
-                                                                {
-                                                                    undo_signal.set(Some(PlaylistUndo { playlist_id: id, item_id: item.id.clone(), revision: updated.playlist.revision, name: updated.playlist.name.clone(), title }));
-                                                                }
-                                                                notice.set("Track added to your playlist.".into());
-                                                            }
-                                                            Err(message) => error.set(message)
-                                                        } }
-                                                        Err(message) => error.set(message)
-                                                    }
-                                                }); }, Icon { name: "queue" } } }
                                             }
                                         } } }
                                     }
@@ -2522,6 +2917,144 @@ fn App() -> Element {
                         input { id:"player-volume", r#type:"range", min:"0", max:"1", step:"0.01", value:"{volume_value}", "aria-label":"Volume", oninput: move |e| { if let Ok(value) = e.value().parse::<f64>() { if *muted.peek() { muted.set(false); } change_volume(value,volume); } } }
                         button { class:"icon-button player-expand","aria-label":"Expand player","aria-haspopup":"dialog",disabled:current.is_none(),onclick:move |_| {show_queue.set(false);now.show();}, ExpandIcon {} }
                     }
+                }
+                /* TR07: the add-to-playlist picker is a native modal dialog, so the
+                   browser owns the top layer, inertness and its backdrop while the
+                   root player's own dialog handling stays untouched. It lists only
+                   playlists the server says this account may edit, and the explicit
+                   Add action commits through the existing revision/mutation CAS. */
+                dialog { id: "playlist-picker", class: "playlist-picker", "data-vela-overlay": "playlist-picker", "aria-modal": "true", "aria-labelledby": "playlist-picker-title", "aria-describedby": "playlist-picker-hint",
+                        oncancel: { let surfaces = surfaces.clone(); move |event| { event.prevent_default(); surfaces.close_picker(); } },
+                        onkeydown: { let surfaces = surfaces.clone(); let lists = picker_lists.clone(); move |event| {
+                            let controls = picker_controls(&lists, has_editable_playlists);
+                            match event.key() {
+                                Key::Escape => { event.prevent_default(); event.stop_propagation(); surfaces.close_picker(); }
+                                Key::Tab => { event.prevent_default(); step_focus(&controls, if event.modifiers().shift() { -1 } else { 1 }); }
+                                Key::ArrowDown => {
+                                    // Arrow navigation walks the option ring only; the search field
+                                    // and the footer actions keep their native behavior.
+                                    let ring = controls.iter().skip(1).take(lists.len()).cloned().collect::<Vec<_>>();
+                                    if !ring.is_empty() { event.prevent_default(); step_focus(&ring, 1); }
+                                }
+                                Key::ArrowUp => {
+                                    let ring = controls.iter().skip(1).take(lists.len()).cloned().collect::<Vec<_>>();
+                                    if !ring.is_empty() { event.prevent_default(); step_focus(&ring, -1); }
+                                }
+                                _ => {}
+                            }
+                        } },
+                        if let Some(target) = picker_target.clone() {
+                            div { class: "playlist-picker-backdrop", "aria-hidden": "true", onclick: { let surfaces = surfaces.clone(); move |_| surfaces.close_picker() } }
+                            div { class: "playlist-picker-sheet",
+                                div { class: "playlist-picker-head",
+                                    div { span { class: "eyebrow", "ADD TO PLAYLIST" } h2 { id: "playlist-picker-title", "Add “{target.title}”" } }
+                                    button { class: "icon-button", r#type: "button", "aria-label": "Close add-to-playlist picker", onclick: { let surfaces = surfaces.clone(); move |_| surfaces.close_picker() }, Icon { name: "close" } }
+                                }
+                                p { class: "playlist-picker-hint", id: "playlist-picker-hint", "Choose a playlist you can edit, then confirm with Add." }
+                                label { class: "sr-only", r#for: "playlist-picker-search", "Find a playlist" }
+                                input { id: "playlist-picker-search", r#type: "search", autocomplete: "off", maxlength: "120", placeholder: "Find a playlist", value: "{picker_query}",
+                                    oninput: { let surfaces = surfaces.clone(); move |event| {
+                                        let value = event.value();
+                                        surfaces.set_query(value.clone());
+                                        // A selection that the new search no longer shows must not stay
+                                        // armed: Add may only target a destination the user can still see.
+                                        let needle = value.trim().to_lowercase();
+                                        if let Some(choice) = surfaces.picker_choice.peek().clone()
+                                            && !playlists.peek().iter().any(|list| list.id == choice && list.can_edit && (needle.is_empty() || list.name.to_lowercase().contains(&needle)))
+                                        {
+                                            surfaces.set_choice(None);
+                                        }
+                                    } },
+                                    onkeydown: { let surfaces = surfaces.clone(); let lists = picker_lists.clone(); move |event| {
+                                        if event.key() != Key::Enter { return; }
+                                        event.prevent_default();
+                                        if surfaces.picker_choice.peek().is_some() { return; }
+                                        if let Some(first) = lists.first() { surfaces.set_choice(Some(first.id.clone())); focus_by_id(&format!("playlist-choice-{}", first.id)); }
+                                    } },
+                                }
+                                div { class: "playlist-picker-list", role: "listbox", "aria-label": "Playlists you can edit",
+                                    for list in picker_lists.iter().cloned() {
+                                        { let choice = picker_choice.as_deref() == Some(list.id.as_str());
+                                        rsx! { button { key: "{list.id}", id: "playlist-choice-{list.id}", r#type: "button", role: "option", "data-playlist-choice": "{list.id}", "aria-selected": choice,
+                                            class: if choice { "playlist-choice selected" } else { "playlist-choice" },
+                                            onfocus: { let surfaces = surfaces.clone(); let id = list.id.clone(); move |_| surfaces.set_choice(Some(id.clone())) },
+                                            onclick: { let surfaces = surfaces.clone(); let id = list.id.clone(); move |_| surfaces.set_choice(Some(id.clone())) },
+                                            span { class: "playlist-choice-name", "{list.name}" }
+                                            small { if list.item_count == 1 { "1 track" } else { "{list.item_count} tracks" } }
+                                        } } }
+                                    }
+                                    if picker_lists.is_empty() {
+                                        if has_editable_playlists {
+                                            p { class: "playlist-picker-empty", "No playlist matches “{picker_query}”." }
+                                        } else {
+                                            p { class: "playlist-picker-empty", "You have no playlists you can edit yet." }
+                                            button { id: "playlist-picker-browse", class: "button secondary", r#type: "button", onclick: { let surfaces = surfaces.clone(); move |_| { surfaces.close_picker(); actions.navigate.call("playlists".into()); } }, "Go to Playlists" }
+                                        }
+                                    }
+                                }
+                                if !picker_error.is_empty() { div { class: "alert error", role: "alert", "{picker_error}" } }
+                                div { class: "playlist-picker-foot",
+                                    button { id: "playlist-picker-cancel", class: "button secondary", r#type: "button", onclick: { let surfaces = surfaces.clone(); move |_| surfaces.close_picker() }, "Cancel" }
+                                    button { id: "playlist-picker-add", class: "button primary", r#type: "button", disabled: picker_busy || picker_choice.is_none(), "aria-label": "{picker_destination}",
+                                        onclick: { let surfaces = surfaces.clone(); let target = target.clone(); move |_| {
+                                            let Some(destination_id) = surfaces.picker_selection() else { return; };
+                                            if *surfaces.picker_busy.peek() { return; }
+                                            // Resolve the destination from the authorized summaries at commit
+                                            // time. A playlist that vanished must fail honestly instead of
+                                            // silently landing in a different list.
+                                            let Some(destination) = playlists.peek().iter().find(|list| list.id == destination_id && list.can_edit).cloned() else {
+                                                surfaces.set_choice(None);
+                                                surfaces.fail_picker("That playlist is no longer available to edit.".to_string());
+                                                return;
+                                            };
+                                            surfaces.set_busy(true);
+                                            surfaces.fail_picker(String::new());
+                                            let track_id = target.track_id.clone();
+                                            let title = target.title.clone();
+                                            let mut undo = playlist_undo;
+                                            let surfaces_done = surfaces.clone();
+                                            let mut playlist_list = playlists;
+                                            spawn_authorized(auth, async move {
+                                                let path = format!("/api/playlists/{}/items", destination.id);
+                                                let detail = api::<PlaylistDetail>("GET", &format!("/api/playlists/{}", destination.id), None, "").await;
+                                                let outcome = match detail {
+                                                    Ok(detail) => api::<PlaylistDetail>("POST", &path, Some(json!({
+                                                        "revision": detail.playlist.revision,
+                                                        "mutation_id": uuid::Uuid::new_v4().to_string(),
+                                                        "track_id": track_id,
+                                                    })), &token(auth)).await,
+                                                    Err(message) => Err(message),
+                                                };
+                                                match outcome {
+                                                    Ok(updated) => {
+                                                        if let Some(item) = updated.items.iter().rev().find(|item| item.track.id == track_id) {
+                                                            undo.set(Some(PlaylistUndo {
+                                                                playlist_id: updated.playlist.id.clone(),
+                                                                item_id: item.id.clone(),
+                                                                revision: updated.playlist.revision,
+                                                                name: updated.playlist.name.clone(),
+                                                                title: title.clone(),
+                                                            }));
+                                                        }
+                                                        // The durable receipt (with Undo) is the one success
+                                                        // message for this mutation; a second toast for the same
+                                                        // write would only repeat it.
+                                                        surfaces_done.close_picker();
+                                                        // The sidebar/list counts come from the authoritative
+                                                        // summaries, not from an invented local increment.
+                                                        if let Ok(value) = api::<Vec<PlaylistSummary>>("GET", "/api/playlists", None, "").await {
+                                                            playlist_list.set(value);
+                                                        }
+                                                    }
+                                                    Err(message) => surfaces_done.fail_picker(message),
+                                                }
+                                            });
+                                        } },
+                                        if picker_busy { "Adding…" } else { "{picker_destination}" }
+                                    }
+                                }
+                            }
+                        }
                 }
                 shell::MobileNavigation {page:page(),administrator:auth.read().as_ref().is_some_and(|a|a.user.is_admin),onnav:actions.navigate}
                 if show_queue() { queue_drawer::QueueDrawer {

@@ -1465,7 +1465,9 @@ test('TR07b row More menu is a modal bottom action sheet on phones and an anchor
       };
     });
 
-    const actions = ['Play / Pause', 'Add to queue', 'Favorite / Unfavorite', 'Start track radio', 'Edit metadata'];
+    // TR07 registers the row command table once: the sheet, the anchored panel,
+    // right-click, Shift+F10 and the ContextMenu key all render this exact list.
+    const actions = ['Play / Pause', 'Add to queue', 'Favorite / Unfavorite', 'Add to playlist…', 'Start track radio', 'Edit metadata'];
 
     // --- Phone: right-click opens the sheet without starting playback.
     await row.click({ button: 'right', position: { x: 6, y: 6 } });
@@ -1599,5 +1601,308 @@ test('TR07b row More menu is a modal bottom action sheet on phones and an anchor
     await expect(trigger).toHaveAttribute('aria-expanded', 'false');
 
     await writeFile(`${output}/track-menu-evidence.json`, JSON.stringify({ actions, menuTitle, phone, desktop }, null, 2));
+  } finally { await runtime.close(); }
+});
+
+/**
+ * TR07c: the row menu has a real keyboard path and the add-to-playlist step is a
+ * real searchable picker, not a decorative select.
+ *
+ * Shift+F10 and the ContextMenu key open exactly the menu the visible More
+ * trigger, right-click and the touch sheet render (one registered action list),
+ * never start playback, trap Tab, and restore focus to the invoking trigger.
+ * The picker lists only playlists the server says this account may edit, filters
+ * them by real search text, navigates by keyboard, and commits one explicit Add
+ * through the existing revision/mutation CAS. Its receipt and the Undo inverse
+ * are checked against actual playlist state, not against local UI state.
+ */
+test('TR07c keyboard row menu and the real searchable add-to-playlist picker', async ({ page }) => {
+  test.setTimeout(240000);
+  const output = resolve(root, process.env.VELA_TRANSFER_EVIDENCE || 'target/checks/prototype-transfer-web');
+  await mkdir(output, { recursive: true });
+  const runtime = await signedInFixture(output);
+  try {
+    await setupWithTracks(page, runtime, 4);
+    const auth = await (await page.request.get(runtime.origin + '/api/me')).json();
+    const createPlaylist = async (name) => {
+      const response = await page.request.post(runtime.origin + '/api/playlists', {
+        headers: { 'X-CSRF-Token': auth.csrf_token, Origin: runtime.origin },
+        data: { name },
+      });
+      expect(response.ok()).toBeTruthy();
+      return response.json();
+    };
+    const destination = await createPlaylist('Night drive');
+    await createPlaylist('Deep focus');
+    const playlistItems = async (id) => (await (await page.request.get(`${runtime.origin}/api/playlists/${id}`)).json()).items;
+
+    await page.setViewportSize({ width: 1284, height: 856 });
+    await page.goto(runtime.origin);
+    await settle(page);
+    await navigate(page, 'Library');
+    await expect(page.locator('.track-row')).toHaveCount(4);
+
+    const rows = page.locator('.track-row');
+    const firstRow = rows.first();
+    const menuTitle = (await firstRow.locator('.track-title strong').innerText()).trim();
+    const playButton = firstRow.locator('.track-play');
+    const trigger = firstRow.getByRole('button', { name: `More actions for ${menuTitle}`, exact: true });
+    const panel = page.locator('.track-menu-panel');
+    const audio = page.locator('#vela-audio');
+    const noPlayback = async () => {
+      expect(await audio.evaluate(node => node.paused), 'menu interactions never start playback').toBe(true);
+      await expect(page.locator('.player-title')).toHaveCount(0);
+      await expect(page.locator('.now-playing')).toContainText('Ready when you are');
+    };
+
+    // --- Shift+F10 on a focused row control opens the anchored row menu.
+    await playButton.focus();
+    await page.keyboard.press('Shift+F10');
+    await expect(panel).toBeVisible();
+    await expect(panel).toHaveAttribute('role', 'menu');
+    await expect(panel).toHaveAttribute('aria-label', `Actions for ${menuTitle}`);
+    await expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    await expect.poll(() => page.evaluate(() => document.activeElement === document.querySelector('.track-menu-panel'))).toBe(true);
+    await noPlayback();
+
+    // Space and Arrow transport shortcuts must not reach the global player from
+    // behind the open menu.
+    await page.keyboard.press('Space');
+    await page.keyboard.press('ArrowRight');
+    await page.keyboard.press('ArrowRight');
+    expect(await audio.evaluate(node => node.paused)).toBe(true);
+    expect(await audio.evaluate(node => node.currentTime)).toBe(0);
+    await expect(panel).toBeVisible();
+    await noPlayback();
+
+    // --- Tab/Shift+Tab cycle inside the open menu.
+    const focusedId = () => page.evaluate(() => document.activeElement?.id || '');
+    await page.keyboard.press('Tab');
+    expect(await focusedId()).toBe('row-action-play');
+    for (const id of ['queue', 'favorite', 'playlist', 'radio', 'edit']) {
+      await page.keyboard.press('Tab');
+      expect(await focusedId()).toBe(`row-action-${id}`);
+    }
+    await page.keyboard.press('Tab');
+    expect(await focusedId(), 'Tab wraps to the first action').toBe('row-action-play');
+    await page.keyboard.press('Shift+Tab');
+    expect(await focusedId(), 'Shift+Tab wraps to the last action').toBe('row-action-edit');
+    await expect(panel).toBeVisible();
+
+    // --- Escape closes it and returns focus to the invoking control.
+    await page.keyboard.press('Escape');
+    await expect(panel).toHaveCount(0);
+    await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    await expect.poll(() => page.evaluate(() => document.activeElement?.className?.includes('track-play'))).toBe(true);
+    expect(await focusedId()).toBe('');
+
+    // --- The ContextMenu key opens the same menu for the focused row.
+    const secondRow = rows.nth(1);
+    const secondTitle = (await secondRow.locator('.track-title strong').innerText()).trim();
+    const secondPlay = secondRow.locator('.track-play');
+    await secondPlay.focus();
+    await page.keyboard.press('ContextMenu');
+    await expect(panel).toBeVisible();
+    await expect(panel).toHaveAttribute('aria-label', `Actions for ${secondTitle}`);
+    await expect.poll(() => page.evaluate(() => document.activeElement === document.querySelector('.track-menu-panel'))).toBe(true);
+    await noPlayback();
+    await page.keyboard.press('Escape');
+    await expect(panel).toHaveCount(0);
+
+    // --- Right-click still opens that row's menu and starts nothing.
+    await playButton.focus();
+    await rows.nth(2).click({ button: 'right', position: { x: 6, y: 6 } });
+    await expect(panel).toBeVisible();
+    await noPlayback();
+    await expect.poll(() => page.evaluate(() => document.activeElement?.id === 'track-menu-panel')).toBe(true);
+    await page.keyboard.press('Escape');
+    await expect(panel).toHaveCount(0);
+
+    // --- Every surface renders the one registered action list.
+    await trigger.click();
+    await expect(panel).toBeVisible();
+    await expect(panel.getByRole('menuitem')).toHaveText([
+      'Play / Pause', 'Add to queue', 'Favorite / Unfavorite', 'Add to playlist…', 'Start track radio', 'Edit metadata',
+    ]);
+
+    // --- The picker is a real dialog over the real editable playlists.
+    await panel.getByRole('menuitem', { name: 'Add to playlist…', exact: true }).click();
+    const picker = page.locator('#playlist-picker');
+    await expect(picker).toBeVisible();
+    await expect(picker).toHaveAttribute('aria-modal', 'true');
+    await expect(picker.getByRole('heading', { level: 2 })).toHaveText(`Add “${menuTitle}”`);
+    const options = picker.getByRole('option');
+    await expect(options).toHaveCount(2);
+    const optionNames = async () => (await options.allInnerTexts()).map(text => text.split('\n')[0].trim()).sort();
+    expect(await optionNames()).toEqual(['Deep focus', 'Night drive']);
+    const nightOption = picker.getByRole('option', { name: /Night drive/ });
+    const search = picker.locator('#playlist-picker-search');
+    await expect.poll(() => page.evaluate(() => document.activeElement?.id)).toBe('playlist-picker-search');
+    await expect(picker.locator('#playlist-picker-add')).toBeDisabled();
+
+    // Search narrows the real list; no destination is chosen for the user.
+    await search.fill('focus');
+    await expect(options).toHaveCount(1);
+    await expect(options.first()).toHaveText(/Deep focus/);
+    await search.fill('night');
+    await expect(options).toHaveCount(1);
+    await expect(options.first()).toHaveText(/Night drive/);
+    await search.fill('');
+    await expect(options).toHaveCount(2);
+
+    // Tab stays inside the modal picker (the browser's modal containment plus the
+    // explicit ring), and the search field regains focus after a full cycle.
+    const insidePicker = () => page.evaluate(() => !!document.activeElement?.closest?.('#playlist-picker'));
+    for (let at = 0; at < 8; at++) {
+      await page.keyboard.press('Tab');
+      expect(await insidePicker(), 'Tab stays inside the picker').toBe(true);
+    }
+    await page.keyboard.press('Shift+Tab');
+    expect(await insidePicker(), 'Shift+Tab stays inside the picker').toBe(true);
+    await page.keyboard.press('Shift+Tab');
+    expect(await insidePicker(), 'the ring wraps forwards and backwards').toBe(true);
+
+    // Keyboard navigation selects a real option and names the Add action after
+    // that exact destination, so no playlist is chosen behind the user's back.
+    await search.focus();
+    await page.keyboard.press('ArrowDown');
+    await expect(options.first()).toHaveAttribute('aria-selected', 'true');
+    await expect(options.nth(1)).toHaveAttribute('aria-selected', 'false');
+    await expect(picker.locator('#playlist-picker-add')).toBeEnabled();
+    await page.keyboard.press('ArrowDown');
+    await expect(options.nth(1)).toHaveAttribute('aria-selected', 'true');
+    await expect(options.first()).toHaveAttribute('aria-selected', 'false');
+    await nightOption.click();
+    await expect(nightOption).toHaveAttribute('aria-selected', 'true');
+    await expect(picker.locator('.playlist-choice.selected')).toHaveCount(1);
+    await expect(picker.getByRole('option', { name: /Deep focus/ })).toHaveAttribute('aria-selected', 'false');
+    const addButton = picker.getByRole('button', { name: 'Add to Night drive', exact: true });
+    await expect(addButton).toBeVisible();
+    await page.screenshot({ path: `${output}/playlist-picker-1284.png`, animations: 'disabled' });
+
+    // Nothing was written before the explicit Add.
+    expect((await playlistItems(destination.id)).length).toBe(0);
+    await addButton.click();
+    await expect(picker).toBeHidden();
+    const receipt = page.locator('.playlist-undo');
+    await expect(receipt).toBeVisible();
+    await expect(receipt).toContainText(`Added “${menuTitle}” to Night drive.`);
+    const committed = await playlistItems(destination.id);
+    expect(committed.length).toBe(1);
+    expect(committed[0].track.title).toBe(menuTitle);
+    // The committed action closes the layer and focus returns to the invoking
+    // trigger, not to a stale control from inside the closed picker.
+    await expect(trigger).toBeFocused();
+    await noPlayback();
+
+    // --- Undo is a real inverse of the acknowledged add.
+    await receipt.getByRole('button', { name: 'Undo', exact: true }).click();
+    await expect(receipt).toHaveCount(0);
+    await expect(page.getByRole('status').first()).toContainText('Removed the added track.');
+    await expect.poll(async () => (await playlistItems(destination.id)).length).toBe(0);
+
+    // --- Escape and the backdrop both close the picker and restore focus.
+    await trigger.click();
+    await panel.getByRole('menuitem', { name: 'Add to playlist…', exact: true }).click();
+    await expect(picker).toBeVisible();
+    await expect(picker).toHaveAttribute('open', '');
+    await page.keyboard.press('Escape');
+    await expect(picker).toBeHidden();
+    await expect(picker).not.toHaveAttribute('open', '');
+    await expect(trigger).toBeFocused();
+    await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+
+    await trigger.click();
+    await panel.getByRole('menuitem', { name: 'Add to playlist…', exact: true }).click();
+    await expect(picker).toBeVisible();
+    await page.mouse.click(6, 6);
+    await expect(picker).toBeHidden();
+
+    // --- Phone: the same two layers, with the sheet above the player band.
+    await page.setViewportSize({ width: 390, height: 844 });
+    await settle(page);
+    await navigate(page, 'Library');
+    await expect(page.locator('.track-row')).toHaveCount(4);
+    const phoneRow = page.locator('.track-row').first();
+    const phoneTitle = (await phoneRow.locator('.track-title strong').innerText()).trim();
+    const phonePlay = phoneRow.locator('.track-play');
+    await phonePlay.focus();
+    await page.keyboard.press('Shift+F10');
+    await expect(panel).toBeVisible();
+    await expect(panel).toHaveAttribute('aria-label', `Actions for ${phoneTitle}`);
+    await noPlayback();
+
+    const phoneMenu = await page.evaluate(() => {
+      const box = (selector) => {
+        const element = document.querySelector(selector);
+        const rect = element.getBoundingClientRect();
+        return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height };
+      };
+      return {
+        panel: box('.track-menu-panel'),
+        player: box('.player-bar'),
+        nav: box('.mobile-nav'),
+        overflow: document.documentElement.scrollWidth - innerWidth,
+        rows: [...document.querySelectorAll('.track-menu-panel > button')].map(button => button.getBoundingClientRect().height),
+      };
+    });
+    expect(Math.abs(phoneMenu.panel.width - 390)).toBeLessThanOrEqual(1);
+    expect(Math.abs(phoneMenu.panel.bottom - phoneMenu.player.top)).toBeLessThanOrEqual(1);
+    expect(phoneMenu.panel.bottom).toBeLessThanOrEqual(phoneMenu.nav.top + 1);
+    expect(phoneMenu.overflow).toBeLessThanOrEqual(1);
+    expect(phoneMenu.rows.every(height => height >= 44)).toBe(true);
+    await page.screenshot({ path: `${output}/track-menu-keyboard-sheet-390.png`, animations: 'disabled' });
+
+    await expect.poll(() => page.evaluate(() => document.activeElement?.id === 'track-menu-panel')).toBe(true);
+    await page.keyboard.press('Escape');
+    await expect(panel).toHaveCount(0);
+    await phonePlay.focus();
+    await page.keyboard.press('ContextMenu');
+    await expect(panel).toBeVisible();
+    await panel.getByRole('menuitem', { name: 'Add to playlist…', exact: true }).click();
+    await expect(picker).toBeVisible();
+    const phonePicker = await page.evaluate(() => {
+      const box = (selector) => {
+        const element = document.querySelector(selector);
+        const rect = element.getBoundingClientRect();
+        return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height };
+      };
+      return {
+        sheet: box('.playlist-picker-sheet'),
+        dialog: box('#playlist-picker'),
+        player: box('.player-bar'),
+        backdrop: getComputedStyle(document.querySelector('.playlist-picker-backdrop')).backgroundColor,
+        options: [...document.querySelectorAll('.playlist-choice')].map(option => option.getBoundingClientRect().height),
+        overflow: document.documentElement.scrollWidth - innerWidth,
+        opened: document.querySelector('#playlist-picker').open,
+      };
+    });
+    expect(phonePicker.opened, 'the picker is a genuinely open modal dialog').toBe(true);
+    expect(Math.abs(phonePicker.sheet.width - 390)).toBeLessThanOrEqual(1);
+    expect(Math.abs(phonePicker.sheet.bottom - phonePicker.player.top)).toBeLessThanOrEqual(1);
+    expect(phonePicker.sheet.top).toBeGreaterThanOrEqual(0);
+    expect(phonePicker.backdrop).not.toBe('rgba(0, 0, 0, 0)');
+    expect(phonePicker.options.every(height => height >= 44)).toBe(true);
+    expect(phonePicker.overflow).toBeLessThanOrEqual(1);
+    await page.screenshot({ path: `${output}/playlist-picker-390.png`, animations: 'disabled' });
+
+    // The phone sheet shares the same registered actions and the same picker.
+    await page.keyboard.press('Escape');
+    await expect(picker).toBeHidden();
+    await expect(phonePlay).toBeFocused();
+    await phonePlay.focus();
+    await page.keyboard.press('Shift+F10');
+    await expect(panel.getByRole('menuitem')).toHaveText([
+      'Play / Pause', 'Add to queue', 'Favorite / Unfavorite', 'Add to playlist…', 'Start track radio', 'Edit metadata',
+    ]);
+    await expect.poll(() => page.evaluate(() => document.activeElement?.id === 'track-menu-panel')).toBe(true);
+    await page.keyboard.press('Escape');
+    await expect(panel).toHaveCount(0);
+    expect(await page.evaluate(() => document.querySelectorAll('audio').length)).toBe(1);
+    await noPlayback();
+
+    await writeFile(`${output}/track-menu-keyboard-evidence.json`, JSON.stringify({
+      menuTitle, secondTitle, destination: destination.name, phoneMenu, phonePicker, actionRegistry: 'ROW_ACTIONS',
+    }, null, 2));
   } finally { await runtime.close(); }
 });
