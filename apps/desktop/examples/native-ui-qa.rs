@@ -141,6 +141,15 @@ fn Harness() -> Element {
                     captures.push(json!({"name":name,"passed":matches!(capture,Ok(Ok(_))),"error":error,"layout":message["layout"]}));
                     let _ = eval.send(json!({"continue":true}));
                 }
+                Ok(Ok(message)) if message["engineStreams"].as_bool() == Some(true) => {
+                    // TR10: count this window process's native output streams on the
+                    // QA-owned Pulse/PipeWire sink. The user's default sink is never
+                    // inspected or changed; the report carries bounded text only.
+                    let evidence = tokio::task::spawn_blocking(audio_stream_report)
+                        .await
+                        .unwrap_or_else(|_| json!({"error":"audio stream query failed"}));
+                    let _ = eval.send(json!({"continue":true,"engineStreams":evidence}));
+                }
                 Ok(Ok(message)) if message["handshake"].is_string() => {
                     let kind = message["handshake"].as_str().unwrap_or_default();
                     let (request, ack) = match kind {
@@ -196,6 +205,7 @@ fn known_capture(name: &str) -> bool {
     matches!(
         name,
         "library-dark"
+            | "typography-dark"
             | "library-wide-dark"
             | "library-ultrawide-dark"
             | "queue-light"
@@ -214,6 +224,106 @@ fn known_capture(name: &str) -> bool {
                 .and_then(|width| width.parse::<u32>().ok())
                 .is_some_and(|width| (320..=4096).contains(&width))
         })
+}
+
+/// Count the native output streams this QA window process owns, observed from the
+/// QA-owned Pulse/PipeWire sink named by `PULSE_SINK`. One streaming client is the
+/// observable evidence for the one `AudioEngine` output authority; the probe never
+/// inspects, selects or changes the user's default output and reports bounded text.
+fn audio_stream_report() -> Value {
+    #[derive(Default)]
+    struct Stream {
+        sink: Option<String>,
+        process: Option<String>,
+        name: Option<String>,
+    }
+    fn finish(current: &mut Stream) -> Option<Stream> {
+        let stream = std::mem::take(current);
+        stream.sink.is_some().then_some(stream)
+    }
+    let pid = u32::try_from(std::process::id()).unwrap_or_default();
+    let sink_name = std::env::var("PULSE_SINK").unwrap_or_default();
+    let sink_index = std::process::Command::new("pactl")
+        .args(["list", "short", "sinks"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .and_then(|text| {
+            text.lines().find_map(|line| {
+                let mut columns = line.split('\t');
+                let index = columns.next()?.trim().to_owned();
+                let name = columns.next()?.trim();
+                (!index.is_empty() && name == sink_name).then_some(index)
+            })
+        });
+    let output = match std::process::Command::new("pactl")
+        .args(["list", "sink-inputs"])
+        .output()
+    {
+        Ok(output) if output.status.success() => output,
+        _ => {
+            return json!({
+                "sink": sink_name,
+                "sinkIndex": sink_index,
+                "error": "pactl unavailable",
+            });
+        }
+    };
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut streams: Vec<Stream> = Vec::new();
+    let mut current = Stream::default();
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("Sink Input #") {
+            if let Some(stream) = finish(&mut current) {
+                streams.push(stream);
+            }
+            current = Stream::default();
+        } else if let Some(value) = trimmed.strip_prefix("Sink: ") {
+            current.sink = Some(value.trim().to_owned());
+        } else if let Some(value) = trimmed.strip_prefix("application.process.id = ") {
+            current.process = Some(value.trim().trim_matches('"').to_owned());
+        } else if let Some(value) = trimmed.strip_prefix("application.name = ") {
+            current.name = Some(value.trim().trim_matches('"').to_owned());
+        }
+    }
+    if let Some(stream) = finish(&mut current) {
+        streams.push(stream);
+    }
+    let pid_text = pid.to_string();
+    let ours: Vec<&Stream> = streams
+        .iter()
+        .filter(|stream| match sink_index.as_deref() {
+            Some(index) => stream.sink.as_deref() == Some(index),
+            None => stream.process.as_deref() == Some(pid_text.as_str()),
+        })
+        .collect();
+    let process_exposed = ours.iter().any(|stream| stream.process.is_some());
+    let process_streams = ours
+        .iter()
+        .filter(|stream| stream.process.as_deref() == Some(pid_text.as_str()))
+        .count();
+    let names: Vec<Value> = ours
+        .iter()
+        .take(4)
+        .map(|stream| {
+            json!({
+                "sink": stream.sink.clone(),
+                "process": stream.process.clone(),
+                "name": stream.name.clone(),
+            })
+        })
+        .collect();
+    json!({
+        "sink": sink_name,
+        "sinkIndex": sink_index,
+        "sinkInputs": ours.len(),
+        "totalSinkInputs": streams.len(),
+        "processStreams": if process_exposed { Some(process_streams) } else { None },
+        "pid": pid,
+        "streams": names,
+    })
 }
 
 /// Optional requested fixture viewport. Invalid or unbounded values keep the documented

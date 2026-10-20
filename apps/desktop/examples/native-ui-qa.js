@@ -20,6 +20,13 @@ const near = (actual, expected, tolerance = 1) => Number.isFinite(actual) && Mat
 const box = selector => el(selector)?.getBoundingClientRect();
 const cssToken = (node, name) => getComputedStyle(node).getPropertyValue(name).trim();
 const cssPx = (node, name) => parseFloat(getComputedStyle(node)[name]) || 0;
+const fontFamilyOf = node => getComputedStyle(node).fontFamily.replace(/["']/g, '').replace(/\s+/g, ' ').trim();
+const fontFaceList = () => {
+  const faces = [];
+  if (typeof document.fonts.forEach === 'function') document.fonts.forEach(face => faces.push(face));
+  else for (const face of document.fonts) faces.push(face);
+  return faces;
+};
 const compactDestinations = ['Library', 'Albums', 'Artists', 'Favorites', 'Playlists', 'Public', 'Queue', 'Settings'];
 const click = async name => { await wait(() => button(name) && !button(name).disabled, `button: ${name}`); button(name).click(); await sleep(100); };
 const pageText = selector => [...document.querySelectorAll(selector)].map(node => node.textContent.trim());
@@ -102,6 +109,83 @@ const imageMetrics = async image => {
     artwork: image.dataset.nativeArtwork, classes: image.className
   };
 };
+// TR10 typography evidence. This reads the real FontFaceSet, the packaged CSSOM and
+// the actual renderer. It never installs a font, overrides the family or trusts the
+// stylesheet's own claim: both subsets must be loaded faces and the Cyrillic sample
+// must lay out with Manrope instead of the fallback metrics.
+const fontEvidence = async () => {
+  const probe = document.createElement('div');
+  probe.style.cssText = 'position:fixed;left:-20000px;top:0;visibility:hidden;white-space:nowrap;font-size:16px;font-weight:600';
+  const sample = document.createElement('span');
+  sample.textContent = 'Привет, мир! Ёё № «Vela»';
+  const manrope = document.createElement('span');
+  manrope.style.fontFamily = 'Manrope,sans-serif';
+  manrope.textContent = sample.textContent;
+  const system = document.createElement('span');
+  system.style.fontFamily = 'sans-serif';
+  system.textContent = sample.textContent;
+  probe.append(sample, manrope, system);
+  el('.native-app').append(probe);
+  try {
+    const latin = await Promise.race([document.fonts.load('600 16px Manrope', 'Vela Continuity 0123456789'), sleep(5000)]);
+    const cyrillic = await Promise.race([document.fonts.load('600 16px Manrope', sample.textContent), sleep(5000)]);
+    const faces = fontFaceList().map(face => ({
+      family: String(face.family || '').replace(/["']/g, '').trim(),
+      weight: String(face.weight || ''), status: String(face.status || ''),
+    }));
+    const rules = [];
+    for (const sheet of document.styleSheets) {
+      let cssRules = null;
+      try { cssRules = sheet.cssRules; } catch { continue; }
+      if (!cssRules) continue;
+      for (const rule of cssRules) {
+        if (rule.type !== CSSRule.FONT_FACE_RULE) continue;
+        rules.push({
+          family: String(rule.style.getPropertyValue('font-family') || '').replace(/["']/g, '').trim(),
+          weight: String(rule.style.getPropertyValue('font-weight') || '').trim(),
+          display: String(rule.style.getPropertyValue('font-display') || '').trim(),
+          sources: String(rule.style.getPropertyValue('src') || '').trim(),
+          range: String(rule.style.getPropertyValue('unicode-range') || '').trim(),
+          text: String(rule.cssText || ''),
+        });
+      }
+    }
+    return {
+      rootFamily: fontFamilyOf(document.documentElement),
+      appFamily: fontFamilyOf(el('.native-app')),
+      sampleFamily: fontFamilyOf(sample),
+      sampleText: sample.textContent,
+      sampleWidth: sample.getBoundingClientRect().width,
+      manropeWidth: manrope.getBoundingClientRect().width,
+      systemWidth: system.getBoundingClientRect().width,
+      latinLoaded: Array.isArray(latin) ? latin.length : -1,
+      cyrillicLoaded: Array.isArray(cyrillic) ? cyrillic.length : -1,
+      latinCheck: document.fonts.check('600 16px Manrope', 'Vela Continuity 0123456789'),
+      cyrillicCheck: document.fonts.check('600 16px Manrope', sample.textContent),
+      fontStatus: document.fonts.status,
+      faces, rules,
+      networkFonts: performance.getEntriesByType('resource').map(entry => entry.name).filter(name => /\.woff2?($|[?#])/i.test(name)),
+    };
+  } finally { probe.remove(); }
+};
+// TR10 single-engine evidence: ask the Rust driver (same process as the real window)
+// to count the native output streams it owns on the QA's dedicated Pulse/PipeWire sink.
+// One streaming client means one AudioEngine output authority; no DOM guess is used.
+const engineStreams = async () => {
+  dioxus.send({engineStreams:true});
+  const reply = await dioxus.recv();
+  return reply?.engineStreams || null;
+};
+const waitForEngineStreams = async () => {
+  const end = performance.now() + 12000;
+  let evidence = null;
+  while (performance.now() < end) {
+    evidence = await engineStreams();
+    if (evidence && Number(evidence.sinkInputs) >= 1) return evidence;
+    await sleep(150);
+  }
+  throw new Error(`The native AudioEngine opened no output stream (last ${JSON.stringify(evidence)})`);
+};
 if (config.windowOnly) {
   try {
     await wait(() => button('Sign in') && !button('Sign in').disabled, 'Native output initialization');
@@ -161,10 +245,68 @@ try {
   const requestedHeight = Number(config.windowHeight) || 840;
   const resizeTrace = await resizeExact(requestedWidth, requestedHeight);
   assert(Math.abs(innerWidth - requestedWidth) <= 2 && Math.abs(innerHeight - requestedHeight) <= 2, `Native QA window runs at the requested ${requestedWidth}x${requestedHeight} viewport (actual ${innerWidth}x${innerHeight}, dpr ${dpr()}, trace ${JSON.stringify(resizeTrace)})`);
+  // TR10 typography: the approved Manrope subsets are compiled into the packaged
+  // stylesheet as self-contained data URIs. This runs in the real WebKitGTK window:
+  // no font is installed or fetched here, and the Cyrillic sample must actually lay
+  // out with Manrope's metrics instead of the system fallback.
+  await Promise.race([document.fonts.ready, sleep(5000)]);
+  const fonts = await fontEvidence();
+  assert(fonts.fontStatus === 'loaded', `Document fonts settle on loaded (actual ${fonts.fontStatus})`);
+  assert(fonts.rootFamily.startsWith('Manrope') && /Inter/.test(fonts.rootFamily) && /ui-sans-serif/.test(fonts.rootFamily) && /sans-serif/.test(fonts.rootFamily),
+    `Root UI font stack starts with Manrope and keeps the existing system fallbacks (actual "${fonts.rootFamily}")`);
+  assert(fonts.appFamily === fonts.rootFamily, `The native app wrapper inherits the same Manrope stack (actual "${fonts.appFamily}")`);
+  assert(fonts.faces.length === 2 && fonts.faces.every(face => face.family === 'Manrope' && face.status === 'loaded'),
+    `Both Manrope subsets are real loaded FontFace entries (faces ${JSON.stringify(fonts.faces)})`);
+  assert(fonts.latinLoaded >= 1 && fonts.cyrillicLoaded >= 1 && fonts.latinCheck && fonts.cyrillicCheck,
+    `document.fonts.load/check report both the Latin and the Cyrillic subset loaded (latin ${fonts.latinLoaded}/${fonts.latinCheck}, cyrillic ${fonts.cyrillicLoaded}/${fonts.cyrillicCheck})`);
+  assert(fonts.rules.length === 2 && fonts.rules.every(rule => rule.family === 'Manrope' && rule.weight === '200 800' && rule.display === 'swap'),
+    `Exactly two embedded Manrope @font-face rules carry weight 200 800 and font-display swap (rules ${JSON.stringify(fonts.rules.map(rule => [rule.family, rule.weight, rule.display]))})`);
+  assert(fonts.rules.every(rule => /^url\("data:font\/woff2;base64,[A-Za-z0-9+/=]+"\) format\("woff2"\)$/.test(rule.sources)),
+    `Every Manrope source is one self-contained woff2 data URI, with no second font source (sources ${fonts.rules.map(rule => rule.sources.slice(0, 34)).join(' | ')})`);
+  const latinFaces = fonts.rules.filter(rule => /U\+0-FF/i.test(rule.range));
+  const cyrillicFaces = fonts.rules.filter(rule => /U\+400-45F/i.test(rule.range));
+  assert(latinFaces.length === 1 && cyrillicFaces.length === 1 && latinFaces[0] !== cyrillicFaces[0],
+    `The embedded faces keep distinct Latin and Cyrillic unicode ranges (${fonts.rules.map(rule => rule.range.slice(0, 42)).join(' | ')})`);
+  assert(fonts.networkFonts.length === 0, `No font was requested over the network (requests ${JSON.stringify(fonts.networkFonts)})`);
+  assert(fonts.sampleFamily.startsWith('Manrope') && fonts.sampleWidth > 0 && fonts.sampleWidth === fonts.manropeWidth,
+    `The Cyrillic sample renders inside the inherited Manrope stack (family "${fonts.sampleFamily}", width ${fonts.sampleWidth.toFixed(2)})`);
+  assert(Math.abs(fonts.manropeWidth - fonts.systemWidth) > 0.5,
+    `The Cyrillic sample really uses Manrope metrics rather than the system fallback (Manrope ${fonts.manropeWidth.toFixed(2)}px vs sans-serif ${fonts.systemWidth.toFixed(2)}px)`);
+  checks.push(`TR10 typography: root "${fonts.rootFamily}"; 2 loaded data-URI faces (weight 200 800, swap); Latin+Cyrillic fonts.check true; Cyrillic sample ${fonts.sampleText.length} chars "${fonts.sampleText}" in family "${fonts.sampleFamily}" at ${fonts.sampleWidth.toFixed(2)}px vs fallback ${fonts.systemWidth.toFixed(2)}px; network font requests ${fonts.networkFonts.length}`);
   await wait(() => button('Sign in') && !button('Sign in').disabled, 'Native output initialization');
   fill('#native-origin', config.origin); fill('#native-username', config.username); fill('#native-password', config.password);
   el('.signin-form form').requestSubmit();
   await wait(() => document.querySelectorAll('[data-native-track-id]').length === 3, 'Three real private uploaded tracks');
+  // TR10 window chrome: Linux renders no GTK titlebar, so the window actions and the
+  // drag region are real in-app controls; there must be exactly one accessible group.
+  const chrome = el('.native-window-controls');
+  const chromeButtons = chrome ? [...chrome.querySelectorAll('button')] : [];
+  const dragRegion = el('.native-window-drag');
+  assert(document.querySelectorAll('.native-window-controls').length === 1 && chrome?.getAttribute('role') === 'group'
+    && chrome?.getAttribute('aria-label') === 'Window controls' && chromeButtons.length === 3,
+    `The frameless window keeps exactly one accessible window-control group (groups ${document.querySelectorAll('.native-window-controls').length}, buttons ${chromeButtons.length})`);
+  assert(JSON.stringify(chromeButtons.map(node => node.getAttribute('aria-label'))) === JSON.stringify(['Minimize window', 'Maximize or restore window', 'Close window']),
+    `Window controls expose the real minimize/maximize/close actions (${chromeButtons.map(node => node.getAttribute('aria-label')).join('/')})`);
+  assert(chromeButtons.every(node => { const rect = node.getBoundingClientRect(); return rect.width >= 44 && rect.height >= 44 && rect.left >= 0 && rect.right <= innerWidth + 1; }),
+    `Window controls keep 44px hit boxes inside the ${innerWidth}px window (${chromeButtons.map(node => `${Math.round(node.getBoundingClientRect().width)}x${Math.round(node.getBoundingClientRect().height)}`).join(',')})`);
+  assert(dragRegion && dragRegion.getBoundingClientRect().width > 0 && getComputedStyle(dragRegion).cursor === 'grab',
+    'The frameless topbar keeps one real drag region');
+  checks.push(`TR10 window chrome: one frameless window-control group ${chromeButtons.map(node => node.getAttribute('aria-label')).join('/')}, drag region ${Math.round(dragRegion?.getBoundingClientRect().width || 0)}px, viewport ${innerWidth}x${innerHeight}, decorations=false`);
+  // TR10 single AudioEngine: the window must own exactly one native output authority.
+  // The DOM exposes one player/engine surface and no HTML media substitute, and the
+  // QA-owned Pulse/PipeWire sink (the only sink this isolated session routes to) must
+  // carry exactly one output stream, produced by this real window process.
+  const engine = await waitForEngineStreams();
+  assert(document.querySelectorAll('.native-player').length === 1
+    && document.querySelectorAll('[data-audio-generation]').length === 1
+    && document.querySelectorAll('[data-audio-phase]').length === 1,
+    `Exactly one native player/engine surface exists (players ${document.querySelectorAll('.native-player').length}, generation surfaces ${document.querySelectorAll('[data-audio-generation]').length})`);
+  assert(document.querySelectorAll('audio,video,iframe').length === 0, 'The native window renders no HTML media/iframe audio substitute');
+  assert(Number(engine.sinkInputs) === 1,
+    `Exactly one native output stream exists on the QA-owned sink (sink "${engine.sink}", streams ${engine.sinkInputs}, process id ${engine.pid})`);
+  assert(engine.processStreams === null || Number(engine.processStreams) === 1,
+    `Every stream on the QA-owned sink belongs to this window process (process-matched ${engine.processStreams}, sink total ${engine.sinkInputs})`);
+  checks.push(`TR10 single AudioEngine: one player band, one audio-generation surface, zero HTML media elements; ${engine.sinkInputs} output stream on the QA-owned sink "${engine.sink}" (process id ${engine.pid}, process-matched ${engine.processStreams === null ? 'not exposed by the server' : engine.processStreams})`);
   // ART01/ART11: the uploaded FLAC carries a real embedded cover. The renderer may only
   // receive the validated data URL the native client authorized; a missing cover is the
   // neutral Vela glyph, never a broken image.
@@ -330,6 +472,9 @@ try {
     'Charcoal canvas, forest sidebar/player, warm-white text and pistachio mark render from those roles');
   checks.push(`TR01/TR02 desktop shell: ${Math.round(sidebarRect.width)}px sidebar, ${Math.round(topbarRect.height)}px topbar, ${Math.round(playerRect.height)}px player at ${innerWidth}x${innerHeight}, main left ${Math.round(mainRect.left)} = sidebar right ${Math.round(sidebarRect.right)}, content gutter ${cssPx(inner, 'paddingLeft')}px, scroll bottom ${Math.round(scrollRect.bottom)} = player top ${Math.round(playerRect.top)}`);
   await capture('library-dark');
+  // TR10 typography screenshot: the same real library at the requested viewport, now
+  // rendered from the embedded Manrope faces captured above.
+  await capture('typography-dark');
   for (const [width, name] of [[1440, 'library-wide-dark'], [1728, 'library-ultrawide-dark']]) {
     await resize(width, 900);
     for (let attempt = 0; attempt < 4 && Math.abs(innerWidth - width) > 2; attempt++) {
@@ -510,14 +655,60 @@ try {
   await click('Settings');
   await wait(() => el('[data-testid="native-app-scale-value"]'), 'Settings opens for the app-scale continuity check');
   assert(generation() === scaleSource && phase() === 'Paused', 'Navigation to Settings preserves the native source');
+  const scaleSlider = el('#native-app-scale');
+  const scaleValue = () => (el('[data-testid="native-app-scale-value"]')?.textContent || '').trim();
+  const appScale = () => Number(el('.native-app').dataset.appScale);
+  const stepScale = async (label, expected) => {
+    await click(label);
+    await wait(() => scaleValue() === `${expected}%`, `App size ${expected}%`);
+    assert(appScale() === expected, `App size ${expected}% is applied on the single native-app wrapper`);
+  };
+  assert(scaleSlider && scaleSlider.type === 'range' && scaleSlider.min === '80' && scaleSlider.max === '150' && scaleSlider.step === '5'
+    && scaleSlider.getAttribute('aria-valuemin') === '80' && scaleSlider.getAttribute('aria-valuemax') === '150'
+    && scaleValue() === '100%' && appScale() === 100,
+    `App size exposes the validated 80-150 range (min ${scaleSlider?.min}, max ${scaleSlider?.max}, step ${scaleSlider?.step}, value ${scaleValue()}, wrapper ${appScale()})`);
+  assert((el('.app-scale-legend')?.textContent || '').replace(/\s+/g, '') === '80%100%150%', 'App size legend states the real 80/100/150 endpoints');
   await click('Increase app size');
-  await wait(() => el('[data-testid="native-app-scale-value"]')?.textContent === '105%', 'App size stepper applies 105%');
+  await wait(() => scaleValue() === '105%', 'App size stepper applies 105%');
   assert(generation() === scaleSource && phase() === 'Paused' && Math.abs(position() - scalePosition) < 150,
     'App scale preserves the source, selection and paused position');
-  assert(Number(el('.native-app').dataset.appScale) === 105, 'App scale is applied once on the native-app wrapper');
+  assert(appScale() === 105 && cssToken(app, '--app-zoom') === '1.05' && near(parseFloat(getComputedStyle(app).zoom) * 100, 105, 0.5),
+    'App scale is applied once on the native-app wrapper');
   await click('Reset to 100%');
-  await wait(() => el('[data-testid="native-app-scale-value"]')?.textContent === '100%', 'App size reset to 100%');
+  await wait(() => scaleValue() === '100%', 'App size reset to 100%');
   assert(generation() === scaleSource && phase() === 'Paused', 'Scale reset keeps the same native source and paused state');
+  // TR10: the documented device range is 80-150 on 5-point steps. Drive the real
+  // stepper across both ends, verify the bounded controls stop there and that the
+  // single native engine/source/position survives every step.
+  for (let step = 0; step < 4; step++) await stepScale('Decrease app size', 100 - (step + 1) * 5);
+  assert(scaleValue() === '80%' && appScale() === 80, 'App size reaches its documented 80% floor');
+  assert(button('Decrease app size')?.disabled === true, 'The 80% floor disables the decrease control');
+  button('Decrease app size').click(); await sleep(250);
+  assert(scaleValue() === '80%' && appScale() === 80, 'The 80% floor cannot be undercut');
+  assert(cssToken(app, '--app-zoom') === '0.80' && near(parseFloat(getComputedStyle(app).zoom) * 100, 80, 0.5)
+    && getComputedStyle(app).transform === 'none',
+    `The 80% size is one zoom value, never a stacked transform (zoom ${getComputedStyle(app).zoom}, --app-zoom ${cssToken(app, '--app-zoom')}, transform ${getComputedStyle(app).transform})`);
+  assert(document.documentElement.scrollWidth <= innerWidth + 1, `App size 80% does not overflow the ${innerWidth}px viewport`);
+  for (let step = 0; step < 14; step++) await stepScale('Increase app size', 80 + (step + 1) * 5);
+  assert(scaleValue() === '150%' && appScale() === 150, 'App size reaches its documented 150% ceiling');
+  assert(button('Increase app size')?.disabled === true, 'The 150% ceiling disables the increase control');
+  button('Increase app size').click(); await sleep(250);
+  assert(scaleValue() === '150%' && appScale() === 150, 'The 150% ceiling cannot be exceeded');
+  assert(cssToken(app, '--app-zoom') === '1.50' && near(parseFloat(getComputedStyle(app).zoom) * 100, 150, 0.5)
+    && getComputedStyle(app).transform === 'none',
+    `The 150% size is one zoom value, never a stacked transform (zoom ${getComputedStyle(app).zoom}, --app-zoom ${cssToken(app, '--app-zoom')}, transform ${getComputedStyle(app).transform})`);
+  assert(document.documentElement.scrollWidth <= innerWidth + 1, `App size 150% does not overflow the ${innerWidth}px viewport`);
+  assert(generation() === scaleSource && phase() === 'Paused' && Math.abs(position() - scalePosition) < 150,
+    'The complete 80-150 app-scale sweep preserves the native source, selection and paused position');
+  const engineAtScale = await engineStreams();
+  assert(engineAtScale && Number(engineAtScale.sinkInputs) === 1,
+    `The complete app-scale sweep keeps exactly one native output stream (${JSON.stringify(engineAtScale)})`);
+  const peakScale = appScale();
+  await click('Reset to 100%');
+  await wait(() => scaleValue() === '100%', 'App size reset after the 80-150 sweep');
+  assert(generation() === scaleSource && phase() === 'Paused' && appScale() === 100,
+    'Reset returns to 100% with the same native source and paused state');
+  checks.push(`TR10 app scale: 100%→105%→100%→80%→150% (peak ${peakScale}%)→100% on source ${scaleSource}, one output stream on "${engineAtScale?.sink}"`);
   await click('Queue');
   await wait(() => document.querySelectorAll('[data-native-queue-index]').length > 0, 'Queue view after theme and app-scale changes');
   assert(document.querySelectorAll('[data-native-queue-index]').length === appearanceQueue.count
