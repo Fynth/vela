@@ -103,7 +103,11 @@ def main() -> int:
         name = artifact["file"]
         path = Path(name)
         if not path.is_absolute():
-            path = REPO_ROOT / name
+            # The report names the artifact relative to the repository; the
+            # artifact directory is where it actually lives.
+            path = REPO_ROOT / path
+        if not path.is_file():
+            path = arguments.artifacts / Path(name).name
         if not path.is_file():
             raise SystemExit(f"{name} is missing from the artifact directory")
         digest = check_checksum(path)
