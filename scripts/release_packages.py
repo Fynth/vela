@@ -213,16 +213,20 @@ def build_aur(stage: Path, version: str, commit: str, output: Path) -> Path:
     """An AUR source recipe plus the source tarball it points at."""
     aur_dir = output / "aur"
     aur_dir.mkdir(parents=True, exist_ok=True)
-    source_name = f"vela-desktop-{version}.tar.gz"
+    source_name = f"vela-{version}.tar.gz"
     sources = output / "aur-sources"
     sources.mkdir(parents=True, exist_ok=True)
+    licence_dir = stage / "usr" / "share" / "licenses" / "vela"
+    licence_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(REPO_ROOT / "LICENSE", licence_dir / "LICENSE")
     with tarfile.open(sources / source_name, "w:gz") as bundle:
         for relative in (
             "usr/lib/vela/vela-desktop",
             "usr/share/applications/vela-desktop.desktop",
+            "usr/share/licenses/vela/LICENSE",
             "BUILD.txt",
         ):
-            bundle.add(stage / relative, arcname=f"vela-desktop-{version}/{relative}")
+            bundle.add(stage / relative, arcname=f"vela-{version}/{relative}")
     # A published PKGBUILD must point at a real, checksummed source. When no
     # release base URL is configured the recipe stays local and says so, rather
     # than shipping a placeholder URL and a skipped checksum to the AUR.
@@ -237,7 +241,7 @@ def build_aur(stage: Path, version: str, commit: str, output: Path) -> Path:
         checksum_line = "  sha256sums=('SKIP')  # local build: set VELA_RELEASE_BASE_URL for a published recipe\n"
     (aur_dir / "PKGBUILD").write_text(
         "# Maintainer: Vela Music <vela@example.invalid>\n"
-        f"_pkgname=vela-desktop\n_pkgver={version}\n"
+        f"_pkgname=vela\n_pkgver={version}\n"
         "_pkgrel=1\n"
         "_arch=('x86_64')\n"
         "pkgname(){\n"
@@ -256,6 +260,7 @@ def build_aur(stage: Path, version: str, commit: str, output: Path) -> Path:
         "package(){\n"
         "  cd \"$srcdir/$_pkgname-$_pkgver\"\n"
         "  install -Dm0644 BUILD.txt \"$pkgdir/usr/share/doc/$_pkgname/BUILD.txt\"\n"
+        "  install -Dm0644 usr/share/licenses/vela/LICENSE \"$pkgdir/usr/share/licenses/$_pkgname/LICENSE\"\n"
         "}\n",
         encoding="utf-8",
     )
