@@ -881,7 +881,9 @@ The native Library now offers an explicit per-track Save offline action. It down
 through the existing validated authorized-original path (exact size/BLAKE3 ETag,
 250MiB cap), then copies the completed unnamed original into an account-scoped private
 cache: `$XDG_DATA_HOME/vela/offline/<account>/` with versioned JSON manifests,0700
-directories,0600 files, private temp+rename, and100-track/2GiB bounds. Malformed,
+directories,0600 files, private temp+rename, and100-track/2GiB bounds. (Superseded
+by the origin-scoped namespace of `a913574`; this entry is the historical0.12.2
+record.) Malformed,
 size-mismatched and orphaned entries are ignored; no credentials, URLs or history are
 stored.
 
