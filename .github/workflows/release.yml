@@ -41,6 +41,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Install the release tooling dependencies
+        run: python3 -m pip install --upgrade pyyaml
       - name: Validate the target manifest
         run: python3 scripts/release_manifest.py
       - id: version
@@ -170,6 +172,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Install the release tooling dependencies
+        run: python3 -m pip install --upgrade pyyaml
       - name: Build the Windows client
         run: cargo build --locked --release -p vela-desktop
       - name: Package the Windows client
@@ -202,6 +206,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Install the release tooling dependencies
+        run: python3 -m pip install --upgrade pyyaml
       - name: Build the macOS client
         run: cargo build --locked --release -p vela-desktop
       - name: Package the macOS client
@@ -229,7 +235,7 @@ jobs:
           targets: aarch64-linux-android
       - uses: Swatinem/rust-cache@v2
       - name: Install the Android NDK
-        uses: nttld/setup-ndk@v3
+        uses: nttld/setup-ndk@v1
         with:
           ndk-version: r26d
       - name: Build the Android client
