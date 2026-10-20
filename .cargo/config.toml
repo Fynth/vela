@@ -1,0 +1,32 @@
+# Android build configuration.
+#
+# The Android client is the same Rust application as the desktop client; only
+# the shell differs. It is built with the Android NDK, because the TLS stack
+# (ring) and the platform webview bridge cannot be cross compiled from Linux.
+#
+# The linker is the NDK's own clang for the target API level, and the NDK's
+# llvm-ar replaces the host archiver. AAudio, the Android audio backend the
+# client uses, needs API 26 or newer, so the API level is not lower.
+#
+# Point ANDROID_NDK_HOME at an unpacked NDK (r26 or newer) before building:
+#
+#   ANDROID_NDK_HOME=~/Android/android-ndk-r26d \
+#   cargo build -p vela-desktop --bin vela-mobile --features mobile \
+#     --target aarch64-linux-android
+#
+# On CI the same settings come from the workflow environment.
+
+[target.aarch64-linux-android]
+linker = "aarch64-linux-android26-clang"
+ar = "llvm-ar"
+rustflags = ["-C", "link-arg=-fuse-ld=lld"]
+
+[target.armv7-linux-androideabi]
+linker = "armv7a-linux-androideabi26-clang"
+ar = "llvm-ar"
+rustflags = ["-C", "link-arg=-fuse-ld=lld"]
+
+[target.x86_64-linux-android]
+linker = "x86_64-linux-android26-clang"
+ar = "llvm-ar"
+rustflags = ["-C", "link-arg=-fuse-ld=lld"]

@@ -112,9 +112,38 @@ jobs:
             target/release/vela-desktop
             target/release-artifacts/*
 
+  android:
+    name: android client (arm64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.0
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+      - name: Install the Android NDK
+        uses: nttld/setup-ndk@v3
+        with:
+          ndk-version: r26d
+      - name: Build the Android client
+        run: |
+          echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME" >> "$GITHUB_ENV"
+          echo "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin" >> "$GITHUB_PATH"
+          cargo build --locked --release -p vela-desktop --bin vela-mobile --features mobile --target aarch64-linux-android
+      - name: Check the Android binary
+        run: |
+          file target/aarch64-linux-android/release/vela-mobile
+          # The client uses the platform audio stack, so the binary must ask for it.
+          readelf -d target/aarch64-linux-android/release/vela-mobile | grep -q libaaudio.so
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-android
+          path: target/aarch64-linux-android/release/vela-mobile
+
   report:
     name: platform readiness
-    needs: [linux, windows, macos]
+    needs: [linux, windows, macos, android]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

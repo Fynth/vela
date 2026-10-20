@@ -7,10 +7,18 @@ license.workspace = true
 
 [features]
 native-qa = []
+# The mobile renderer is a different shell around the same application, so it is
+# opt-in: the desktop build does not need the platform webview bridge.
+mobile = ["dioxus/mobile"]
 
 [[example]]
 name = "native-ui-qa"
 required-features = ["native-qa"]
+
+[[bin]]
+name = "vela-mobile"
+path = "src/bin/vela_mobile.rs"
+required-features = ["mobile"]
 
 [dependencies]
 vela-domain.workspace = true

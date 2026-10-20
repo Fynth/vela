@@ -87,9 +87,12 @@ def validate(document: dict) -> list[dict]:
             raise ManifestError(
                 f"target {identifier} has an unknown publish rule {entry['publish']!r}"
             )
-        if entry["publish"] == "none" and entry["credentials"] and entry["status"] != "blocked":
+        # Credentials may be reserved for a channel that is not switched on yet:
+        # a buildable target that waits for an application project keeps the
+        # names it will need. A ready target, on the other hand, must use them.
+        if entry["publish"] == "none" and entry["credentials"] and entry["status"] == "ready":
             raise ManifestError(
-                f"target {identifier} lists credentials but never publishes with them"
+                f"target {identifier} is ready but holds credentials it never uses"
             )
         if entry["publish"] == "upload" and not entry["credentials"]:
             raise ManifestError(
@@ -98,10 +101,6 @@ def validate(document: dict) -> list[dict]:
         if entry["publish"] == "upload" and entry["status"] == "blocked":
             raise ManifestError(
                 f"target {identifier} claims to publish while its status is blocked"
-            )
-        if entry["status"] == "ready" and entry["publish"] == "none" and entry["credentials"]:
-            raise ManifestError(
-                f"target {identifier} is ready but holds credentials it never uses"
             )
         if entry["status"] == "ready" and entry["publish"] == "none":
             # A ready target may still be a local-review artifact, but it must be

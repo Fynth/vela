@@ -146,6 +146,48 @@ targets:
         with self.assertRaises(MANIFEST.ManifestError):
             MANIFEST.validate(MANIFEST.load(path))
 
+    def test_a_buildable_target_may_reserve_credentials_it_does_not_use_yet(self) -> None:
+        # A target that waits for an application project keeps the credential
+        # names it will need, without claiming to publish today.
+        path = write_manifest(
+            self.directory,
+            """
+version: 1
+targets:
+  - id: reserves-secret
+    kind: desktop
+    platform: android
+    arch: aarch64
+    channel: google-play
+    publish: none
+    requires: []
+    credentials: [KEYSTORE]
+    status: buildable
+""",
+        )
+        targets = MANIFEST.validate(MANIFEST.load(path))
+        self.assertEqual(len(targets), 1)
+
+    def test_a_ready_target_may_not_hold_unused_credentials(self) -> None:
+        path = write_manifest(
+            self.directory,
+            """
+version: 1
+targets:
+  - id: ready-with-secret
+    kind: desktop
+    platform: android
+    arch: aarch64
+    channel: google-play
+    publish: none
+    requires: []
+    credentials: [KEYSTORE]
+    status: ready
+""",
+        )
+        with self.assertRaises(MANIFEST.ManifestError):
+            MANIFEST.validate(MANIFEST.load(path))
+
     def test_a_blocked_target_may_not_claim_to_publish(self) -> None:
         path = write_manifest(
             self.directory,
