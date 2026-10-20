@@ -41,17 +41,22 @@ pub enum Transition {
 pub struct Projection {
     /// The occurrence that is playing now.
     pub current: Option<usize>,
+    /// The next manual-Next occurrence when it is already determined. A
+    /// shuffle candidate is never a promise: an undrawn deck returns None.
+    /// Natural EOF can instead repeat the current item under Repeat::One.
+    pub scheduled_next: Option<usize>,
     /// Explicit "Play next" requests, most recent first. These are the real
     /// next occurrences regardless of the saved order or the shuffle deck.
     pub explicit_next: Vec<usize>,
-    /// The remaining occurrences in the deck's own order. Under shuffle the
-    /// deck is drawn at play time, so this is the pending set rather than a
-    /// fixed running order.
+    /// The unconsumed candidate set, excluding explicit requests. This is not
+    /// a schedule: linear playback follows saved indices and shuffle may first
+    /// replay forward traversal history after Previous.
     pub pending: Vec<usize>,
 }
 
 impl Projection {
-    /// The occurrences that play next, explicit requests first.
+    /// Candidate occurrences, explicit requests first. Use `scheduled_next`
+    /// for a Next label rather than promising the first undrawn candidate.
     pub fn next(&self) -> Vec<usize> {
         let mut next = self.explicit_next.clone();
         next.extend(self.pending.iter().copied());
@@ -91,6 +96,21 @@ impl PlaybackOrder {
             .collect();
         Projection {
             current: self.current,
+            scheduled_next: self.next_up.first().copied().or_else(|| {
+                let current = self.current?;
+                if !self.shuffle {
+                    if current + 1 < self.len {
+                        Some(current + 1)
+                    } else {
+                        (self.repeat == Repeat::All).then_some(0)
+                    }
+                } else {
+                    self.history
+                        .get(self.cursor + 1)
+                        .copied()
+                        .or_else(|| (self.remaining.len() == 1).then(|| self.remaining[0]))
+                }
+            }),
             explicit_next: self.next_up.clone(),
             pending,
         }
@@ -486,6 +506,7 @@ mod tests {
         let view = model.projection();
         assert_eq!(view.current, Some(0));
         assert_eq!(view.explicit_next, vec![3, 5]);
+        assert_eq!(view.scheduled_next, Some(3));
         // The pending deck holds the rest, and never repeats an explicit
         // request: an occurrence appears exactly once across both lists.
         assert_eq!(view.pending, vec![1, 2, 4]);
@@ -531,5 +552,66 @@ mod tests {
         assert_eq!(view.pending.len(), 3);
         assert_eq!(view.explicit_next, Vec::<usize>::new());
         invariants(&model);
+    }
+
+    #[test]
+    fn next_label_matches_linear_transitions_from_the_middle_and_after_reorder() {
+        let mut model = order(5, 2, false, Repeat::Off);
+        assert_eq!(model.projection().scheduled_next, Some(3));
+        assert_eq!(model.transition(Command::Next, 0.0, 0), Transition::Play(3));
+        assert!(model.swap(3, 1));
+        assert_eq!(model.projection().scheduled_next, Some(2));
+        assert_eq!(model.transition(Command::Next, 0.0, 0), Transition::Play(2));
+    }
+
+    #[test]
+    fn undrawn_shuffle_candidates_are_not_advertised_as_scheduled() {
+        let model = order(5, 2, true, Repeat::Off);
+        assert!(!model.projection().pending.is_empty());
+        assert_eq!(model.projection().scheduled_next, None);
+    }
+
+    #[test]
+    fn shuffle_forward_history_is_scheduled_before_remaining_candidates() {
+        let mut model = order(5, 2, true, Repeat::Off);
+        let Transition::Play(played) = model.transition(Command::Next, 0.0, 3) else {
+            panic!("a real occurrence must advance");
+        };
+        assert_eq!(
+            model.transition(Command::Previous, 0.0, 0),
+            Transition::Play(2)
+        );
+        assert!(!model.projection().pending.contains(&played));
+        assert_eq!(model.projection().scheduled_next, Some(played));
+        assert_eq!(
+            model.transition(Command::Next, 0.0, 1),
+            Transition::Play(played)
+        );
+    }
+
+    #[test]
+    fn manual_next_label_respects_stop_and_repeat_without_repeating_on_one() {
+        for (repeat, expected) in [
+            (Repeat::Off, None),
+            (Repeat::One, None),
+            (Repeat::All, Some(0)),
+        ] {
+            let mut model = order(3, 2, false, repeat);
+            assert_eq!(model.projection().scheduled_next, expected);
+            assert_eq!(
+                model.transition(Command::Next, 0.0, 0),
+                expected.map(Transition::Play).unwrap_or(Transition::Stop)
+            );
+        }
+    }
+
+    #[test]
+    fn the_only_remaining_shuffle_candidate_is_certain() {
+        let mut model = order(2, 1, true, Repeat::Off);
+        assert_eq!(model.projection().scheduled_next, Some(0));
+        assert_eq!(
+            model.transition(Command::Next, 0.0, u32::MAX),
+            Transition::Play(0)
+        );
     }
 }

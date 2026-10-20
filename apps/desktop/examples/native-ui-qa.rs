@@ -21,6 +21,7 @@ fn Harness() -> Element {
             "cachedOrigin": std::env::var("VELA_NATIVE_QA_CACHED_ORIGIN").unwrap_or_default(),
             "sessionPhase": std::env::var("VELA_NATIVE_QA_SESSION_PHASE").unwrap_or_default(),
             "testSession": std::env::var("VELA_NATIVE_QA_TEST_SESSION").as_deref() == Ok("1"),
+            "testPreparation": std::env::var("VELA_NATIVE_QA_PREPARATION_ORIGIN").is_ok(),
             "windowWidth": qa_dimension("VELA_NATIVE_QA_WIDTH", 1280.0),
             "windowHeight": qa_dimension("VELA_NATIVE_QA_HEIGHT", 840.0),
         }))
@@ -150,6 +151,37 @@ fn Harness() -> Element {
                         .unwrap_or_else(|_| json!({"error":"audio stream query failed"}));
                     let _ = eval.send(json!({"continue":true,"engineStreams":evidence}));
                 }
+                Ok(Ok(message)) if message["preparation"].is_string() => {
+                    let command = message["preparation"].as_str().unwrap_or_default();
+                    if !matches!(command, "arm" | "release" | "state") {
+                        break json!({"ok":false,"failure":"Unknown preparation fixture command"});
+                    }
+                    let Ok(origin) = std::env::var("VELA_NATIVE_QA_PREPARATION_ORIGIN") else {
+                        break json!({"ok":false,"failure":"Preparation fixture is not configured"});
+                    };
+                    let state = async {
+                        reqwest::Client::builder()
+                            .no_proxy()
+                            .redirect(reqwest::redirect::Policy::none())
+                            .timeout(std::time::Duration::from_secs(5))
+                            .build()
+                            .map_err(|_| ())?
+                            .post(format!("{origin}/__native_qa/preparation/{command}"))
+                            .send()
+                            .await
+                            .map_err(|_| ())?
+                            .error_for_status()
+                            .map_err(|_| ())?
+                            .json::<Value>()
+                            .await
+                            .map_err(|_| ())
+                    }
+                    .await;
+                    let Ok(state) = state else {
+                        break json!({"ok":false,"failure":"Preparation fixture command failed"});
+                    };
+                    let _ = eval.send(json!({"preparation":state}));
+                }
                 Ok(Ok(message)) if message["handshake"].is_string() => {
                     let kind = message["handshake"].as_str().unwrap_or_default();
                     let (request, ack) = match kind {
@@ -218,6 +250,9 @@ fn known_capture(name: &str) -> bool {
             | "player-band-dark"
             | "player-band-narrow-light"
             | "offline-dark"
+            | "preparation-dark"
+            | "preparation-compact-dark"
+            | "preparation-canceled-dark"
     ) || ["library-artwork-", "player-artwork-"]
         .iter()
         .any(|prefix| {

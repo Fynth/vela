@@ -455,7 +455,12 @@ impl BrowserPlayer {
     }
     pub fn playing(&self, value: bool) {
         let generation = self.0.borrow().generation;
-        if self.valid(generation).is_some() {
+        if let Some(element) = self.valid(generation) {
+            // A queued event from a replaced source cannot turn pending intent
+            // into Playing before the current element has future media data.
+            if value && (element.paused() || element.ready_state() < 3) {
+                return;
+            }
             self.0.borrow_mut().view.playing.set(value);
             if !value {
                 self.time(true);

@@ -135,20 +135,28 @@
 .home-feature-indicators {
   position: absolute;
   z-index: 2;
-  top: 24px;
-  right: 29px;
+  top: 4px;
+  right: 9px;
   display: flex;
   align-items: center;
   gap: 6px;
 }
 .home-indicator {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  background: transparent;
+}
+.home-indicator::before {
+  content: "";
   width: 4px;
   height: 4px;
-  padding: 0;
   border-radius: 50%;
   background: #ffffff59;
 }
-.home-indicator.active {
+.home-indicator.active::before {
   width: 14px;
   height: 4px;
   border-radius: 2px;
@@ -358,9 +366,24 @@
     display: none;
   }
   .home-wave-play {
-    width: 39px;
-    height: 39px;
-    min-width: 39px;
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+  }
+}
+@media (max-width: 760px), (pointer: coarse) {
+  .home-feature-listen,
+  .home-feature-open {
+    min-height: 44px;
+    height: 44px;
+  }
+  .home-feature-arrow,
+  .home-wave-open,
+  .home-wave-play {
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    min-height: 44px;
   }
 }
 @media (min-width: 1500px) {

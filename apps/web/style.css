@@ -536,6 +536,13 @@
 .home-playlist-card:hover { background:var(--surface-hover); }
 .home-playlist-card > .vela-icon { width:34px; height:34px; color:var(--accent); }
 .home-playlist-card > div { min-width:0; }
+.home-playlist-card > .catalog-cover {
+  width:56px;
+  height:56px;
+  flex:0 0 56px;
+  margin:0;
+  border-radius:6px;
+}
 .home-playlist-card strong { display:block; font-size:13px; overflow-wrap:anywhere; }
 .home-playlist-card small { font-size:11px; margin-top:4px; }
 .global-search-form { display:flex; align-items:center; gap:12px; border:1px solid var(--line); background:var(--surface); border-radius:14px; padding:9px 10px 9px 18px; }
@@ -1395,7 +1402,7 @@ input[type="range"]:focus { outline:2px solid var(--accent); outline-offset:3px;
 .playlist-undo span { flex:1; min-width:180px; }
 
 .track-menu { position:relative; }
-.track-menu-panel { position:absolute; right:0; top:calc(100% + 4px); z-index:30; min-width:190px; display:grid; padding:5px; border:1px solid var(--control-line); border-radius:8px; background:var(--surface-raised); box-shadow:0 16px 40px #0006; }
+.track-menu-panel { position:absolute; right:0; top:calc(100% + 4px); z-index:80; min-width:190px; display:grid; padding:5px; border:1px solid var(--control-line); border-radius:8px; background:var(--surface-raised); box-shadow:0 16px 40px #0006; }
 .track-menu-panel button { min-height:36px; padding:8px 10px; border-radius:6px; background:none; color:var(--text); text-align:left; font-size:11px; }
 .track-menu-panel button:hover, .track-menu-panel button:focus-visible { background:var(--surface-hover); }
 
@@ -1570,4 +1577,33 @@ input[type="range"]:focus { outline:2px solid var(--accent); outline-offset:3px;
   .content-footer { margin:28px 0 14px; padding-top:16px; }
   .empty-state, .empty-state.compact { min-height:180px; }
   .home-header { margin-bottom:12px; }
+}
+
+/* Real touch rectangles, with no overlapping pseudo-element hit halos. */
+@media (max-width:760px), (pointer:coarse) {
+  .alert button[aria-label^="Dismiss"] {
+    min-width:44px;
+    width:44px;
+    min-height:44px;
+    height:44px;
+    flex-shrink:0;
+  }
+}
+@media (pointer:coarse) {
+  .sidebar .nav-item,
+  .sidebar-playlist,
+  .home-filter-group [role="tab"],
+  .text-button,
+  .home-track-actions button,
+  .track-info summary {
+    min-height:44px;
+  }
+  .personal-mix-actions .icon-button,
+  .personal-mix-actions .text-button,
+  .home-track-actions .icon-button {
+    min-width:44px;
+    width:44px;
+    min-height:44px;
+    height:44px;
+  }
 }

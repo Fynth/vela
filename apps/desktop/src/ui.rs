@@ -285,6 +285,7 @@ struct Ui {
     /// output authority; this is only the value to restore.
     volume_restore: Signal<f32>,
     preparing: Signal<bool>,
+    source_canceled: Signal<bool>,
     /// Requested transport state; independent of delayed decoder snapshots.
     wants_play: Signal<bool>,
     progress: Signal<DownloadProgress>,
@@ -386,6 +387,7 @@ impl Ui {
         self.selection.set(selection);
         self.ended.set(None);
         self.preparing.set(false);
+        self.source_canceled.set(false);
         self.wants_play.set(false);
         self.progress.set(DownloadProgress::default());
         self.source_error.set(String::new());
@@ -2528,6 +2530,31 @@ fn reconnect_audio(mut ui: Ui) {
 fn toggle(ui: Ui) {
     let desired = !*ui.wants_play.peek();
     set_playing(ui, desired);
+}
+
+/// Cancel the actual source operation, then invalidate every deferred completion.
+/// Keep the selected occurrence so Play retries it through the same authorized path.
+fn cancel_source_preparation(mut ui: Ui) {
+    if !ui.signed_in() || !*ui.preparing.peek() {
+        return;
+    }
+    ui.new_selection();
+    ui.prepared.set(None);
+    ui.source_canceled.set(true);
+}
+
+fn source_preparation_message(progress: DownloadProgress, public: bool) -> String {
+    if public || progress.total_bytes == 0 {
+        "Preparing audio…".into()
+    } else if progress.received_bytes >= progress.total_bytes {
+        "Checking audio…".into()
+    } else {
+        format!(
+            "Preparing audio · {} of {} KiB",
+            progress.received_bytes / 1024,
+            progress.total_bytes.div_ceil(1024)
+        )
+    }
 }
 
 fn set_playing(mut ui: Ui, desired: bool) {
@@ -4825,12 +4852,17 @@ fn queue_view(ui: Ui) -> Element {
     let current = ui.order.read().current();
     let projection = ui.order.read().projection();
     let explicit_next = projection.explicit_next.first().copied();
-    let next_at = explicit_next.or_else(|| projection.pending.first().copied());
+    let next_at = projection.scheduled_next;
     let next_track = next_at.and_then(|at| queue.get(at).cloned());
-    let next_label = if explicit_next.is_some() {
-        "Explicit Play next"
+    let shuffled = *ui.shuffle.read() && !*ui.offline_active.read();
+    let next_label = if next_at.is_some() && next_at == explicit_next {
+        "Play next request"
+    } else if shuffled && next_at.is_some_and(|at| !projection.pending.contains(&at)) {
+        "Forward shuffle history"
+    } else if shuffled {
+        "Remaining shuffle track"
     } else {
-        "From the active shuffle order"
+        "Saved queue order"
     };
     let clear = ui.clone();
     let clear_upcoming = ui.clone();
@@ -4839,7 +4871,8 @@ fn queue_view(ui: Ui) -> Element {
         div {class:"library-intro",div {span {class:"eyebrow","ROOM FOR YOUR NEXT LISTEN"} h1 {"Your listening queue"} p {"{queue_len} of 1,000 places · Duplicate tracks keep their own place."}}
             div {class:"inline-form",button {class:"button secondary",disabled:!has_upcoming,title:if has_upcoming {"Remove only the queued occurrences after the current one."} else {"Nothing is queued after the current occurrence."},onclick:move |_|queue_clear_upcoming(clear_upcoming.clone()),"Clear upcoming"} button {class:"button secondary",disabled:queue_empty,onclick:move |_|clear_queue(clear.clone()),"Clear queue"}}
         }
-        if let Some(track) = next_track {div {class:"native-next-up","data-testid":"native-next-up",div {small {"NEXT UP · {next_label}"} strong {"{track.title}"} small {"{track.artist}"}} p {"Read-only projection: the queue is not reordered or consumed."}}}
+        if let Some(track) = next_track {div {class:"native-next-up","data-testid":"native-next-up",div {small {"MANUAL NEXT · {next_label}"} strong {"{track.title}"} small {"{track.artist}"}} p {"Repeat one can replay the current track at its end."}}}
+        else if shuffled && current.is_some() && !projection.pending.is_empty() {p {class:"queue-explanation","data-testid":"native-next-unknown","Shuffle chooses on advance."}}
         if queue_empty {
             div {class:"native-empty",Icon {name:"queue"} h2 {"A little room for what comes next"} p {"Play a library result, use Play next, or add tracks to your queue."}}
         } else {
@@ -5063,6 +5096,9 @@ fn player(ui: Ui) -> Element {
     let offline_len = ui.queue.read().len();
     let snapshot = ui.snapshot.read().clone();
     let preparing = *ui.preparing.read();
+    let source_canceled = *ui.source_canceled.read();
+    let progress = *ui.progress.read();
+    let preparation_message = source_preparation_message(progress, remote.is_some());
     let checking = ui.offline_checking.read().clone();
     let error = ui.source_error.read().clone();
     let (shuffle, repeat) = playback_modes(
@@ -5141,7 +5177,7 @@ fn player(ui: Ui) -> Element {
     // An untagged recording has no artist or album: the band then shows its title
     // only instead of inventing a performer or a release.
     let has_sub = !artist.is_empty() || album.is_some() || remote.is_some();
-    let announcement = match (&remote, &track) {
+    let mut announcement = match (&remote, &track) {
         (Some(remote), _) if remote.artist.is_empty() => {
             format!("{}, public source", remote.title)
         }
@@ -5150,6 +5186,12 @@ fn player(ui: Ui) -> Element {
         (None, Some(track)) => format!("{} by {}", track.title, track.artist),
         (None, None) => String::new(),
     };
+    // Byte updates stay visual; announce the state once rather than every chunk.
+    if preparing {
+        announcement.push_str(". Preparing audio. Cancel is available.");
+    } else if source_canceled {
+        announcement.push_str(". Preparation canceled. Press Play to try again.");
+    }
     // Mute is the engine's own zero level, so the button can never disagree with
     // what is actually coming out. The remembered audible level is restored on
     // Unmute rather than a hard-coded default.
@@ -5170,11 +5212,16 @@ fn player(ui: Ui) -> Element {
     );
     let mut open_queue = ui.clone();
     let mute_ui = ui.clone();
-    rsx! {footer {class:"native-player","aria-label":"Native music player","data-audio-phase":"{snapshot.phase:?}","data-audio-generation":"{snapshot.generation}",
+    let cancel_preparation = ui.clone();
+    rsx! {footer {class:"native-player","aria-label":"Native music player","data-audio-phase":"{snapshot.phase:?}","data-audio-generation":"{snapshot.generation}","data-preparing":"{preparing}",
         div {class:"player-track","data-testid":"native-player-track",
             ArtworkCover {ui:ui.clone(),artwork_id:track.as_ref().and_then(|track|track.artwork_id.clone()),class:"neutral-cover player-cover",icon:"music"}
             div {class:"player-meta",strong {"{title}"}
-                if has_sub {
+                if preparing {
+                    p {class:"native-source-preparation","data-testid":"native-source-preparation","data-received-bytes":"{progress.received_bytes}","data-total-bytes":"{progress.total_bytes}",title:"The complete original is downloaded and checked before playback.","{preparation_message}"}
+                } else if source_canceled {
+                    p {class:"native-source-preparation","data-testid":"native-source-canceled",title:"Preparation canceled. Press Play to try again.","Preparation canceled. Press Play to try again."}
+                } else if has_sub {
                     p {class:"player-sub",
                         if !artist.is_empty(){span {class:"player-artist","{artist}"}}
                         if let Some(album)=album.clone(){span {class:"player-album",title:"{album}","{album}"}}
@@ -5214,7 +5261,8 @@ fn player(ui: Ui) -> Element {
                 }
             }
             div {class:"player-actions",
-                if !local_only { button {class:"icon-button player-queue","data-testid":"native-player-queue","aria-label":"Open queue",title:"Queue",onclick:move |_|open_queue.view.set("queue"),Icon {name:"queue"}} }
+                if preparing { button {class:"button secondary small native-cancel-preparation","data-testid":"native-cancel-preparation","aria-label":"Cancel audio preparation",onclick:move |_|cancel_source_preparation(cancel_preparation.clone()),"Cancel"} }
+                if !local_only && !preparing { button {class:"icon-button player-queue","data-testid":"native-player-queue","aria-label":"Open queue",title:"Queue",onclick:move |_|open_queue.view.set("queue"),Icon {name:"queue"}} }
                 button {class:if muted{"icon-button player-mute selected"}else{"icon-button player-mute"},"data-testid":"native-player-mute","aria-label":if muted{"Unmute"}else{"Mute"},"aria-pressed":muted,title:if muted{"Restore the last audible level"}else{"Mute the native output"},disabled:!ui.audio_ready(),onclick:move |_|toggle_mute(mute_ui.clone()),Icon {name:"volume"}}
                 div {class:"player-volume",
                     label {class:"sr-only",r#for:"native-volume","Volume"}
@@ -5350,6 +5398,7 @@ pub fn App() -> Element {
         snapshot: use_signal(AudioSnapshot::default),
         volume_restore: use_signal(|| 0.7),
         preparing: use_signal(|| false),
+        source_canceled: use_signal(|| false),
         wants_play: use_signal(|| false),
         progress: use_signal(DownloadProgress::default),
         prepared: use_signal(|| None),

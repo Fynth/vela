@@ -59,6 +59,41 @@ pub(crate) async fn api_abortable<T: DeserializeOwned>(
     csrf: &str,
     signal: Option<&AbortSignal>,
 ) -> Result<T, String> {
+    api_classified(method, path, body, csrf, signal)
+        .await
+        .map_err(|failure| failure.message)
+}
+
+/// Transport uncertainty differs from a rejected mutation: a lost response may
+/// follow a committed write. Keep the HTTP status without parsing user copy.
+pub(crate) struct ApiFailure {
+    pub status: Option<u16>,
+    pub message: String,
+}
+
+impl ApiFailure {
+    fn transport(message: &str) -> Self {
+        Self {
+            status: None,
+            message: message.into(),
+        }
+    }
+
+    pub fn revision_conflict(&self) -> bool {
+        // This add endpoint reports revision conflicts before its transaction
+        // commits. Other errors can originate in its post-commit detail read;
+        // never infer rollback from a generic HTTP failure.
+        self.status == Some(409)
+    }
+}
+
+pub(crate) async fn api_classified<T: DeserializeOwned>(
+    method: &str,
+    path: &str,
+    body: Option<Value>,
+    csrf: &str,
+    signal: Option<&AbortSignal>,
+) -> Result<T, ApiFailure> {
     let request = match method {
         "POST" => Request::post(path),
         "PUT" => Request::put(path),
@@ -75,29 +110,41 @@ pub(crate) async fn api_abortable<T: DeserializeOwned>(
     let response = if let Some(body) = body {
         request
             .json(&body)
-            .map_err(|_| "Could not prepare the request.".to_string())?
+            .map_err(|_| ApiFailure::transport("Could not prepare the request."))?
             .send()
             .await
     } else {
         request.send().await
     }
-    .map_err(|_| "Connection interrupted. Check that your server is available.".to_string())?;
-    decode(response).await
+    .map_err(|_| {
+        ApiFailure::transport("Connection interrupted. Check that your server is available.")
+    })?;
+    decode_classified(response).await
 }
 
 pub(crate) async fn decode<T: DeserializeOwned>(response: Response) -> Result<T, String> {
+    decode_classified(response)
+        .await
+        .map_err(|failure| failure.message)
+}
+
+async fn decode_classified<T: DeserializeOwned>(response: Response) -> Result<T, ApiFailure> {
     if !response.ok() {
         let status = response.status();
-        return Err(response
+        let message = response
             .json::<ApiError>()
             .await
             .map(|e| e.error)
-            .unwrap_or_else(|_| format!("The server could not complete the request ({status}).")));
+            .unwrap_or_else(|_| format!("The server could not complete the request ({status})."));
+        return Err(ApiFailure {
+            status: Some(status),
+            message,
+        });
     }
     response
         .json()
         .await
-        .map_err(|_| "The server returned an unreadable response.".to_string())
+        .map_err(|_| ApiFailure::transport("The server returned an unreadable response."))
 }
 
 pub(crate) async fn mutate(

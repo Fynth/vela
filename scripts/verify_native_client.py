@@ -6,6 +6,8 @@ The user's default output, existing audio streams and persistent Vela data are u
 """
 import argparse
 import http.cookiejar
+import http.client
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import io
 import json
 import math
@@ -29,6 +31,112 @@ ROOT = Path(__file__).resolve().parent.parent
 SINK = 'vela_native_test_null'
 
 
+class PreparationProxy(ThreadingHTTPServer):
+    """Private fixture relay: throttle real Rust bytes, never synthesize media/auth."""
+    daemon_threads = True
+
+    def __init__(self, upstream_port):
+        self.upstream_port = upstream_port
+        self.hold = False
+        self.cancelled = 0
+        self.held_bytes = 0
+        self.lock = threading.Lock()
+        self.release = threading.Event()
+        self.release.set()
+        super().__init__(('127.0.0.1', 0), PreparationProxyHandler)
+
+    def state(self):
+        with self.lock:
+            return {'cancelled': self.cancelled, 'heldBytes': self.held_bytes}
+
+
+class PreparationProxyHandler(BaseHTTPRequestHandler):
+    protocol_version = 'HTTP/1.1'
+
+    def log_message(self, *_):
+        pass  # No credentials or request details enter fixture logs.
+
+    def do_GET(self):
+        self.relay()
+
+    do_HEAD = do_POST = do_PUT = do_PATCH = do_DELETE = do_GET
+
+    def relay(self):
+        if self.path.startswith('/__native_qa/preparation/'):
+            command = self.path.rsplit('/', 1)[-1]
+            if command == 'arm':
+                with self.server.lock:
+                    self.server.hold = True
+                    self.server.held_bytes = 0
+                    self.server.release.clear()
+            elif command == 'release':
+                self.server.release.set()
+            elif command != 'state':
+                self.send_error(404)
+                return
+            body = json.dumps(self.server.state()).encode()
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(body)))
+            self.send_header('Connection', 'close')
+            self.end_headers()
+            self.wfile.write(body)
+            self.close_connection = True
+            return
+        upstream = http.client.HTTPConnection('127.0.0.1', self.server.upstream_port, timeout=15)
+        hold = False
+        try:
+            size = int(self.headers.get('Content-Length', '0'))
+            if not 0 <= size <= 1024 * 1024:
+                self.send_error(413)
+                return
+            body = self.rfile.read(size) if size else None
+            headers = {key: value for key, value in self.headers.items() if key.lower() not in ('connection', 'transfer-encoding')}
+            headers['Connection'] = 'close'
+            upstream.request(self.command, self.path, body, headers)
+            response = upstream.getresponse()
+            self.send_response(response.status)
+            for key, value in response.getheaders():
+                if key.lower() not in ('connection', 'transfer-encoding'):
+                    self.send_header(key, value)
+            self.send_header('Connection', 'close')
+            self.end_headers()
+            with self.server.lock:
+                hold = self.server.hold and self.command == 'GET' and self.path.startswith('/api/tracks/') and self.path.endswith('/stream')
+                if hold:
+                    self.server.hold = False
+            sent = 0
+            while self.command != 'HEAD':
+                chunk = response.read(65536)
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
+                self.wfile.flush()
+                sent += len(chunk)
+                if hold:
+                    with self.server.lock:
+                        self.server.held_bytes = sent
+                    deadline = time.monotonic() + 15
+                    while not self.server.release.wait(.025):
+                        ready, _, _ = select.select([self.connection], [], [], 0)
+                        if ready and not self.connection.recv(1, socket.MSG_PEEK):
+                            with self.server.lock:
+                                self.server.cancelled += 1
+                            return
+                        if time.monotonic() > deadline:
+                            raise TimeoutError('Preparation fixture was not released')
+                    hold = False
+        except (BrokenPipeError, ConnectionResetError):
+            if hold:
+                with self.server.lock:
+                    self.server.cancelled += 1
+        except (OSError, http.client.HTTPException):
+            self.send_error(502, 'Fixture upstream unavailable')
+        finally:
+            upstream.close()
+            self.close_connection = True
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--server', type=Path, default=ROOT / 'target/debug/vela-server', help='Current source server; build with cargo build -p vela-server')
@@ -39,12 +147,17 @@ def main():
     parser.add_argument('--test-peer', action='store_true', help='Start a second isolated Vela server and exercise its explicit public catalog')
     parser.add_argument('--test-session', action='store_true', help='Also verify opt-in Secret Service session save/resume/delete across two native processes')
     parser.add_argument('--test-offline-launch', action='store_true', help='After the saved-copy scenario stops the fixture server, cold-launch a second real window and verify the offline library, native playback and a clean close (AUD-05)')
+    parser.add_argument('--test-preparation', action='store_true', help='Relay real Rust media through an isolated throttled socket and verify visible progress, physical cancellation, no late load and Play retry')
     parser.add_argument('--backend', choices=['x11', 'wayland'], default='x11', help='Actual GTK backend for the isolated window')
     parser.add_argument('--window-only', action='store_true', help='Verify normal tiled geometry and transport without resizing or offline/peer scenarios')
     args = parser.parse_args()
+    # Preparation extends the complete native journey, whose public-catalog
+    # section needs an actual second isolated server, never a dummy origin.
+    if args.test_preparation:
+        args.test_peer = True
     if args.backend == 'wayland' and not args.window_only:
         parser.error('Wayland currently requires --window-only; full resize/peer/offline QA uses --backend x11')
-    if args.window_only and (args.backend != 'wayland' or args.test_peer or args.test_session or args.close_while_playing or args.test_offline_launch):
+    if args.window_only and (args.backend != 'wayland' or args.test_peer or args.test_session or args.close_while_playing or args.test_offline_launch or args.test_preparation):
         parser.error('--window-only requires --backend wayland and cannot be combined with peer/session/close/offline-launch scenarios')
     evidence = args.evidence.resolve()
     if evidence.exists() and any(evidence.iterdir()):
@@ -59,6 +172,7 @@ def main():
         raise RuntimeError('Invalid owned Pulse module identity')
     server = driver = peer_process = peer2_process = None
     session_service = None
+    preparation_proxy = None
     try:
         with tempfile.TemporaryDirectory(prefix='vela-native-fixture-') as folder:
             private = Path(folder)
@@ -306,6 +420,11 @@ def main():
                         'VELA_NATIVE_QA_CACHED_ORIGIN': cached_origin,
                     })
                 # Per-process ALSA and Pulse routing, never a global default change.
+                if args.test_preparation:
+                    preparation_proxy = PreparationProxy(port)
+                    threading.Thread(target=preparation_proxy.serve_forever, daemon=True).start()
+                    origin = f'http://127.0.0.1:{preparation_proxy.server_port}'
+                    environment['VELA_NATIVE_QA_PREPARATION_ORIGIN'] = origin
                 environment.update({'TMPDIR': str(private / 'temporary'), 'ALSA_CONFIG_PATH': str(alsa), 'PULSE_SINK': SINK, 'GDK_BACKEND': args.backend, 'VELA_NATIVE_QA_BACKEND': args.backend, 'VELA_NATIVE_QA_WINDOW_ONLY': '1' if args.window_only else '0', 'VELA_NATIVE_TEST_SINK': SINK, 'VELA_DESKTOP_SERVER_URL': origin, 'VELA_NATIVE_QA_USERNAME': 'nativefixture', 'VELA_NATIVE_QA_PASSWORD': password, 'VELA_NATIVE_QA_REPORT': str(report), 'XDG_DATA_HOME': str(private / 'home'), 'XDG_CONFIG_HOME': str(private / 'home'), 'XDG_CACHE_HOME': str(private / 'home/cache'), 'CARGO_BUILD_JOBS': '2'})
                 if args.test_session:
                     session_service = 'org.vela.music.desktop.qa.' + secrets.token_hex(8)
@@ -485,6 +604,10 @@ def main():
                     report.write_text(json.dumps(result, indent=2) + '\n')
                 print(json.dumps(result, indent=2))
     finally:
+        if preparation_proxy is not None:
+            preparation_proxy.release.set()
+            preparation_proxy.shutdown()
+            preparation_proxy.server_close()
         for process in (driver, server, peer_process, peer2_process):
             if process is not None and process.poll() is None:
                 process.send_signal(signal.SIGTERM)

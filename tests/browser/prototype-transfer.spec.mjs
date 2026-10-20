@@ -1364,6 +1364,11 @@ test('TR04a Home composes bounded filter views from real DTOs and keeps one root
     await expect(feature).toBeVisible();
     await expect(page.locator('.home-feature-empty')).toHaveCount(0);
     await expect(feature.locator('.home-feature-title')).toHaveText('Evening shelf');
+    // CatalogCover defaults to a full-width album square. Inside the compact
+    // playlist row it must be a thumbnail, including in a sparse one-card grid.
+    const playlistThumb = await page.locator('.home-playlist-card > .catalog-cover').first().boundingBox();
+    expect(playlistThumb.width).toBeCloseTo(56, 0);
+    expect(playlistThumb.height).toBeCloseTo(56, 0);
     const brandImages = await page.evaluate(() => {
       const read = element => {
         const style = getComputedStyle(element);
@@ -2087,6 +2092,414 @@ const TR09_GEOMETRY = () => {
   };
 };
 
+test('REVIEW01 playlist commands are single-flight, survive a dismissed picker and retry uncertain writes idempotently', async ({ page }) => {
+  test.setTimeout(120000);
+  const output = resolve(root, process.env.VELA_TRANSFER_EVIDENCE || 'target/checks/prototype-transfer-web');
+  await mkdir(output, { recursive: true });
+  const runtime = await signedInFixture(output);
+  const pendingReleases = new Set();
+  try {
+    await setupWithTracks(page, runtime, 3);
+    const auth = await (await page.request.get(runtime.origin + '/api/me')).json();
+    const created = await page.request.post(runtime.origin + '/api/playlists', {
+      headers: { 'X-CSRF-Token': auth.csrf_token, Origin: runtime.origin },
+      data: { name: 'Review destination' },
+    });
+    expect(created.ok()).toBeTruthy();
+    const destination = await created.json();
+    const detail = async () => (await (await page.request.get(`${runtime.origin}/api/playlists/${destination.id}`)).json());
+    const endpoint = `**/api/playlists/${destination.id}/items`;
+    await page.setViewportSize({ width: 1284, height: 856 });
+    await page.goto(runtime.origin);
+    await settle(page);
+    await navigate(page, 'Library');
+    const rows = page.locator('.track-row');
+    await expect(rows).toHaveCount(3);
+    const picker = page.locator('#playlist-picker');
+    const openPicker = async (at) => {
+      const row = rows.nth(at);
+      const title = (await row.locator('.track-title strong').innerText()).trim();
+      await row.getByRole('button', { name: `More actions for ${title}`, exact: true }).click();
+      await page.locator('.track-menu-panel').getByRole('menuitem', { name: 'Add to playlist…', exact: true }).click();
+      await expect(picker).toBeVisible();
+      await expect(picker.getByRole('heading')).toHaveText(`Add “${title}”`);
+      await picker.getByRole('option', { name: /Review destination/ }).click();
+      return title;
+    };
+    const holdNextPost = async () => {
+      let received;
+      const arrived = new Promise(resolve => { received = resolve; });
+      let release;
+      const held = new Promise(resolve => { release = resolve; });
+      pendingReleases.add(release);
+      let count = 0;
+      const handler = async route => {
+        if (route.request().method() !== 'POST') { await route.continue(); return; }
+        count++;
+        const response = await route.fetch(); // The real authorized mutation commits.
+        received();
+        await held;
+        await route.fulfill({ response });
+      };
+      await page.route(endpoint, handler);
+      return {
+        arrived, count: () => count,
+        release: async () => { release(); pendingReleases.delete(release); },
+        remove: async () => page.unroute(endpoint, handler),
+      };
+    };
+
+    const firstTitle = await openPicker(0);
+    const held = await holdNextPost();
+    await picker.locator('#playlist-picker-add').click();
+    await held.arrived;
+    // Busy must survive clearing a previous error. Before the repair this
+    // immediately becomes enabled and accepts another independently identified write.
+    await expect(picker.locator('#playlist-picker-add')).toBeDisabled();
+    await picker.locator('#playlist-picker-add').dispatchEvent('click');
+    await page.waitForTimeout(150);
+    expect(held.count()).toBe(1);
+    expect((await detail()).items).toHaveLength(1);
+    await held.release();
+    await expect(picker).toBeHidden();
+    await expect(page.locator('.playlist-undo')).toContainText(firstTitle);
+    await held.remove();
+
+    // Closing does not undo an already committed server write. Its late receipt
+    // must not close/reset/focus a different newly opened picker.
+    const oldTitle = await openPicker(1);
+    const old = await holdNextPost();
+    await picker.locator('#playlist-picker-add').click();
+    await old.arrived;
+    await picker.getByRole('button', { name: 'Close add-to-playlist picker', exact: true }).click();
+    await expect(picker).toBeHidden();
+    const newTitle = await openPicker(2);
+    await old.release();
+    await expect(page.locator('.playlist-undo')).toContainText(oldTitle);
+    await expect(picker).toBeVisible();
+    await expect(picker.getByRole('heading')).toHaveText(`Add “${newTitle}”`);
+    await expect(picker.locator('#playlist-picker-add')).toBeEnabled();
+    await expect(picker.getByRole('alert')).toHaveCount(0);
+    await old.remove();
+
+    // A committed POST whose response is lost must retain the same revision and
+    // mutation_id for Retry; no fake successful response is substituted.
+    const attempts = [];
+    let loseResponse = true;
+    const lostResponse = async route => {
+      if (route.request().method() !== 'POST') { await route.continue(); return; }
+      attempts.push(route.request().postDataJSON());
+      const response = await route.fetch();
+      expect(response.status()).toBe(200);
+      if (loseResponse) { loseResponse = false; await route.abort('failed'); }
+      else { await route.fulfill({ response }); }
+    };
+    await page.route(endpoint, lostResponse);
+    await picker.locator('#playlist-picker-add').click();
+    await expect(picker.getByRole('alert')).toBeVisible();
+    expect((await detail()).items).toHaveLength(3);
+    await expect(picker.locator('#playlist-picker-add')).toBeEnabled();
+    await picker.locator('#playlist-picker-add').click();
+    await expect(picker).toBeHidden();
+    expect(attempts).toHaveLength(2);
+    expect(attempts[1]).toEqual(attempts[0]);
+    expect((await detail()).items).toHaveLength(3);
+    await page.unroute(endpoint, lostResponse);
+
+    // A retry may legitimately return a newer list after another actor's edit.
+    // In that case the client cannot offer an inverse for an arbitrary last
+    // same-track entry: the real idempotent result must remain unambiguous.
+    await openPicker(0);
+    attempts.length = 0;
+    loseResponse = true;
+    await page.route(endpoint, lostResponse);
+    await picker.locator('#playlist-picker-add').click();
+    await expect(picker.getByRole('alert')).toBeVisible();
+    const afterLost = await detail();
+    const extra = await page.request.post(`${runtime.origin}/api/playlists/${destination.id}/items`, {
+      headers: { 'X-CSRF-Token': auth.csrf_token, Origin: runtime.origin },
+      data: { revision: afterLost.playlist.revision, mutation_id: crypto.randomUUID(), track_id: attempts[0].track_id },
+    });
+    expect(extra.ok()).toBeTruthy();
+    await picker.locator('#playlist-picker-add').click();
+    await expect(picker).toBeHidden();
+    expect(attempts[1]).toEqual(attempts[0]);
+    expect((await detail()).items).toHaveLength(5);
+    await expect(page.locator('.playlist-undo')).toHaveCount(0);
+    await expect(page.getByRole('status').filter({ hasText: 'Undo is unavailable' })).toBeVisible();
+    await page.unroute(endpoint, lostResponse);
+    expect(await page.locator('audio').count()).toBe(1);
+    await page.screenshot({ path: `${output}/review-playlist-command-receipt.png`, animations: 'disabled' });
+    // Supply the current Better Design capture script explicitly; the regular
+    // deterministic browser suite has no remote MCP dependency. Only generated,
+    // isolated fixture content is captured, never the user's running account.
+    if (process.env.VELA_BD_CAPTURE_SCRIPT) {
+      const capture = await readFile(resolve(root, process.env.VELA_BD_CAPTURE_SCRIPT), 'utf8');
+      const states = [];
+      const copy = [];
+      await navigate(page, 'Home');
+      for (const width of [390, 1440, 1728]) {
+        await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 });
+        await settle(page);
+        const state = await page.evaluate(capture);
+        state.name = `home-${width}`;
+        states.push(state);
+        copy.push({ name: state.name, text: await page.locator('body').innerText() });
+        await page.screenshot({ path: `${output}/${state.name}.png`, animations: 'disabled' });
+      }
+      await navigate(page, 'Library');
+      await openPicker(0);
+      for (const width of [390, 1440, 1728]) {
+        await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 });
+        await settle(page);
+        const state = await page.evaluate(capture);
+        state.name = `picker-${width}`;
+        states.push(state);
+        copy.push({ name: state.name, text: await picker.innerText() });
+        await page.screenshot({ path: `${output}/${state.name}.png`, animations: 'disabled' });
+      }
+      await writeFile(`${output}/better-design-states.json`, JSON.stringify(states, null, 2));
+      await writeFile(`${output}/better-design-copy.json`, JSON.stringify(copy, null, 2));
+    }
+  } finally {
+    for (const release of pendingReleases) release();
+    await runtime.close();
+  }
+});
+
+test('REVIEW02 Undo is single-flight, retries the same inverse and cannot erase a newer Add receipt', async ({ page }) => {
+  test.setTimeout(120000);
+  const output = resolve(root, process.env.VELA_TRANSFER_EVIDENCE || 'target/checks/prototype-transfer-web');
+  await mkdir(output, { recursive: true });
+  const runtime = await signedInFixture(output);
+  let release;
+  try {
+    await setupWithTracks(page, runtime, 3);
+    const auth = await (await page.request.get(runtime.origin + '/api/me')).json();
+    const created = await page.request.post(runtime.origin + '/api/playlists', {
+      headers: { 'X-CSRF-Token': auth.csrf_token, Origin: runtime.origin }, data: { name: 'Undo review' },
+    });
+    expect(created.ok()).toBeTruthy();
+    const list = await created.json();
+    const detail = async () => (await (await page.request.get(`${runtime.origin}/api/playlists/${list.id}`)).json());
+    await page.goto(runtime.origin);
+    await settle(page);
+    await navigate(page, 'Library');
+    const add = async (at) => {
+      const row = page.locator('.track-row').nth(at);
+      const title = (await row.locator('.track-title strong').innerText()).trim();
+      await row.getByRole('button', { name: `More actions for ${title}`, exact: true }).click();
+      await page.getByRole('menuitem', { name: 'Add to playlist…', exact: true }).click();
+      const picker = page.locator('#playlist-picker');
+      await picker.getByRole('option', { name: /Undo review/ }).click();
+      await picker.locator('#playlist-picker-add').click();
+      await expect(picker).toBeHidden();
+      await expect(page.locator('.playlist-undo')).toContainText(title);
+      return title;
+    };
+    await add(0);
+    let arrived;
+    const received = new Promise(resolve => { arrived = resolve; });
+    const held = new Promise(resolve => { release = resolve; });
+    const endpoint = `**/api/playlists/${list.id}/items/*`;
+    const deletes = [];
+    const holdDelete = async route => {
+      if (route.request().method() !== 'DELETE') { await route.continue(); return; }
+      deletes.push(route.request().url());
+      const response = await route.fetch();
+      expect(response.ok()).toBeTruthy();
+      arrived();
+      await held;
+      await route.fulfill({ response });
+    };
+    await page.route(endpoint, holdDelete);
+    await page.locator('.playlist-undo').getByRole('button', { name: 'Undo', exact: true }).click();
+    await received;
+    const pending = page.locator('.playlist-undo').getByRole('button', { name: 'Undoing…', exact: true });
+    await expect(pending).toBeDisabled();
+    await pending.dispatchEvent('click');
+    expect((await detail()).items).toHaveLength(0);
+    const secondTitle = await add(1);
+    await expect(page.locator('.playlist-undo')).toContainText(secondTitle);
+    release(); release = null;
+    await expect(page.locator('.playlist-undo').getByRole('button', { name: 'Undo', exact: true })).toBeEnabled();
+    await expect(page.locator('.playlist-undo')).toContainText(secondTitle);
+    await expect(page.getByRole('status').filter({ hasText: 'Removed the added track.' })).toHaveCount(0);
+    expect(deletes).toHaveLength(1);
+    expect((await detail()).items).toHaveLength(1);
+    await page.unroute(endpoint, holdDelete);
+
+    // The first DELETE commits but its response is lost. A manual retry uses
+    // exactly the same item/revision/mutation id and succeeds idempotently.
+    let lose = true;
+    const retryDelete = async route => {
+      if (route.request().method() !== 'DELETE') { await route.continue(); return; }
+      deletes.push(route.request().url());
+      const response = await route.fetch();
+      expect(response.ok()).toBeTruthy();
+      if (lose) { lose = false; await route.abort('failed'); }
+      else { await route.fulfill({ response }); }
+    };
+    await page.route(endpoint, retryDelete);
+    await page.locator('.playlist-undo').getByRole('button', { name: 'Undo', exact: true }).click();
+    await expect(page.getByRole('alert').filter({ hasText: 'Connection interrupted. Please try again.' })).toBeVisible();
+    await expect(page.locator('.playlist-undo').getByRole('button', { name: 'Undo', exact: true })).toBeEnabled();
+    expect((await detail()).items).toHaveLength(0);
+    await page.locator('.playlist-undo').getByRole('button', { name: 'Undo', exact: true }).click();
+    await expect(page.locator('.playlist-undo')).toHaveCount(0);
+    expect(deletes).toHaveLength(3);
+    expect(deletes[2]).toBe(deletes[1]);
+    expect((await detail()).items).toHaveLength(0);
+    await page.unroute(endpoint, retryDelete);
+  } finally {
+    release?.();
+    await runtime.close();
+  }
+});
+
+test('REVIEW03 queue states, next labels, mute reconciliation and reachable touch controls', async ({ page }) => {
+  test.setTimeout(120000);
+  const output = resolve(root, process.env.VELA_TRANSFER_EVIDENCE || 'target/checks/prototype-transfer-web');
+  await mkdir(output, { recursive: true });
+  const runtime = await signedInFixture(output);
+  let release;
+  try {
+    await setupWithTracks(page, runtime, 3);
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.goto(runtime.origin);
+    await settle(page);
+    await navigate(page, 'Library');
+    const rows = page.locator('.track-row');
+    await expect(rows).toHaveCount(3);
+    const titles = await rows.locator('.track-title strong').allTextContents();
+    await rows.nth(1).getByRole('button', { name: `Play ${titles[1]}`, exact: true }).click();
+    const audio = page.locator('#vela-audio');
+    await expect.poll(() => audio.evaluate(el => el.currentTime)).toBeGreaterThan(0);
+    await page.getByRole('button', { name: 'Mute', exact: true }).click();
+    await page.getByRole('button', { name: 'Show playback queue', exact: true }).click();
+    const drawer = page.locator('#queue-drawer-dialog');
+    await expect(drawer).toBeVisible();
+    await expect(drawer.getByRole('heading', { name: 'Saved queue', exact: true })).toBeVisible();
+    await expect(drawer.locator('.queue-count')).toHaveText('3');
+    await expect(drawer.locator('.queue-row-next strong')).toHaveText(titles[2]);
+    await expect(drawer.locator('#queue-volume')).toHaveValue('0');
+    await drawer.locator('#queue-volume').fill('0.35');
+    await expect.poll(() => audio.evaluate(el => el.volume)).toBeCloseTo(0.35, 2);
+    await expect(drawer.locator('#queue-volume')).toHaveValue('0.35');
+    await drawer.getByRole('button', { name: 'Next in queue', exact: true }).click();
+    await expect(drawer.locator('.queue-current-title')).toHaveText(titles[2]);
+    await expect(drawer.locator('.queue-row-next')).toHaveCount(0);
+    await drawer.getByRole('button', { name: 'Shuffle', exact: true }).click();
+    await expect(drawer.locator('.queue-row-next')).toHaveCount(0);
+    await expect(drawer.locator('.queue-note')).toContainText('порядок определяется');
+
+    const capture = process.env.VELA_BD_CAPTURE_SCRIPT
+      ? await readFile(resolve(root, process.env.VELA_BD_CAPTURE_SCRIPT), 'utf8') : null;
+    const states = [];
+    for (const width of [390, 1440, 1728]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 });
+      await settle(page);
+      const buttons = await drawer.locator('button.icon-button').evaluateAll(items => items.map(el => {
+        const r = el.getBoundingClientRect();
+        return { label: el.getAttribute('aria-label'), width: r.width, height: r.height };
+      }));
+      expect(buttons.length).toBeGreaterThan(10);
+      for (const button of buttons) {
+        expect(button.width, `${width}: ${button.label} width`).toBeGreaterThanOrEqual(43.5);
+        expect(button.height, `${width}: ${button.label} height`).toBeGreaterThanOrEqual(43.5);
+      }
+      expect(await drawer.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
+      await page.screenshot({ path: `${output}/queue-${width}.png`, animations: 'disabled' });
+      if (capture) {
+        const state = await page.evaluate(capture);
+        state.name = `queue-${width}`;
+        // Only the top-layer modal is interactive. Retain every captured
+        // descendant rather than reporting the inert background as a target.
+        const within = new Set(['#queue-drawer-dialog']);
+        state.elements = state.elements.filter(el => {
+          if (el.id === '#queue-drawer-dialog' || within.has(el.parentId)) { within.add(el.id); return true; }
+          return false;
+        });
+        states.push(state);
+      }
+    }
+    if (capture) await writeFile(`${output}/better-design-queue-states.json`, JSON.stringify(states, null, 2));
+    await drawer.getByRole('button', { name: 'Close playback queue', exact: true }).click();
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await expect(page.getByRole('button', { name: 'Mute', exact: true })).toHaveAttribute('aria-pressed', 'false');
+    await expect(page.locator('#player-volume')).toHaveValue('0.35');
+
+    // A delayed real source remains Connecting inside the modal, and an
+    // interrupted transfer has its own recovery there (background is inert).
+    const id = (await rows.nth(0).getAttribute('id')).replace('track-row-', '');
+    let arrived;
+    const received = new Promise(resolve => { arrived = resolve; });
+    const held = new Promise(resolve => { release = resolve; });
+    const endpoint = `**/api/tracks/${id}/stream`;
+    await page.route(endpoint, async route => {
+      if (route.request().method() !== 'GET') { await route.continue(); return; }
+      arrived(); await held; await route.abort('connectionreset');
+    });
+    await rows.nth(0).getByRole('button', { name: `Play ${titles[0]}`, exact: true }).click();
+    await received;
+    await page.getByRole('button', { name: 'Show playback queue', exact: true }).click();
+    await expect(drawer.locator('.queue-current-state')).toHaveText('Connecting…');
+    release(); release = null;
+    await expect(drawer.getByRole('button', { name: 'Retry playback', exact: true })).toBeVisible({ timeout: 20000 });
+    await expect(drawer.locator('.queue-current-state')).toHaveText('Playback needs attention');
+    await page.unroute(endpoint);
+    await drawer.getByRole('button', { name: 'Retry playback', exact: true }).click();
+    await expect.poll(() => audio.evaluate(el => el.currentTime)).toBeGreaterThan(0);
+    await expect(drawer.locator('.queue-current-state')).toHaveText('Playing');
+    await expect(drawer.getByRole('button', { name: 'Retry playback', exact: true })).toHaveCount(0);
+    expect(await page.locator('audio').count()).toBe(1);
+  } finally {
+    release?.();
+    await runtime.close();
+  }
+});
+
+test('REVIEW04 Home thumbnails and large touch-screen targets use the real component bounds', async ({ browser }) => {
+  const output = resolve(root, process.env.VELA_TRANSFER_EVIDENCE || 'target/checks/prototype-transfer-web');
+  await mkdir(output, { recursive: true });
+  const runtime = await signedInFixture(output);
+  const context = await browser.newContext({ viewport: { width: 1024, height: 1000 }, hasTouch: true });
+  try {
+    const page = await context.newPage();
+    const first = await setupWithTracks(page, runtime, 3);
+    const auth = await (await page.request.get(runtime.origin + '/api/me')).json();
+    const headers = { 'X-CSRF-Token': auth.csrf_token, Origin: runtime.origin };
+    const response = await page.request.post(runtime.origin + '/api/playlists', { headers, data: { name: 'Touch collection' } });
+    expect(response.ok()).toBeTruthy();
+    const list = await response.json();
+    expect((await page.request.post(`${runtime.origin}/api/playlists/${list.id}/items`, {
+      headers, data: { revision: list.revision, mutation_id: crypto.randomUUID(), track_id: first.id },
+    })).ok()).toBeTruthy();
+    await page.goto(runtime.origin);
+    await settle(page);
+    await expect(page.locator('.home-playlist-card')).toHaveCount(1);
+    expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true);
+    const thumbnail = await page.locator('.home-playlist-card > .catalog-cover').boundingBox();
+    expect(thumbnail.width).toBeCloseTo(56, 0);
+    expect(thumbnail.height).toBeCloseTo(56, 0);
+    const controls = await page.locator('.home-filter, .home-feature button, .home-wave button, .personal-mix-actions button, .home-track-actions button, .sidebar .nav-item, .text-button').evaluateAll(items => items.filter(el => {
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0 && !el.disabled;
+    }).map(el => {
+      const r = el.getBoundingClientRect();
+      return { label: el.getAttribute('aria-label') || el.textContent, width: r.width, height: r.height };
+    }));
+    expect(controls.length).toBeGreaterThan(15);
+    for (const control of controls) {
+      expect(control.width, `${control.label} width`).toBeGreaterThanOrEqual(43.5);
+      expect(control.height, `${control.label} height`).toBeGreaterThanOrEqual(43.5);
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
+    await writeFile(`${output}/home-coarse-1024-controls.json`, JSON.stringify(controls, null, 2));
+    await page.screenshot({ path: `${output}/home-coarse-1024.png`, animations: 'disabled' });
+  } finally { await context.close(); await runtime.close(); }
+});
+
 test('TR09 mobile composition, tablet boundaries and one reserved bottom band', async ({ page }) => {
   test.setTimeout(240000);
   const output = resolve(root, process.env.VELA_TRANSFER_EVIDENCE || 'target/checks/prototype-transfer-web');
@@ -2564,9 +2977,14 @@ test('TR09 keyboard and touch contract: transport ownership, focus rings, no sho
     // selector, never from whatever happens to hold focus in that engine.
     const ringOf = async (selector) => {
       await page.keyboard.press('Tab');
-      await page.locator(selector).focus();
+      // The row can be re-rendered between the Tab press and the focus call, so
+      // the node that was focused may already be detached. Re-resolve and focus
+      // the current node instead of asserting on a stale one.
       await expect.poll(
-        () => page.evaluate(sel => document.activeElement === document.querySelector(sel), selector),
+        async () => {
+          await page.locator(selector).focus();
+          return page.evaluate(sel => document.activeElement === document.querySelector(sel), selector);
+        },
         { message: `${selector} receives focus` },
       ).toBe(true);
       return page.evaluate(sel => {

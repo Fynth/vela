@@ -115,6 +115,22 @@ dialog.queue-drawer[open] {
   flex-wrap: wrap;
 }
 
+/* The drawer is the only active transport while its native dialog is open.
+   Keep its actual hit rectangles usable with touch, without overlapping halos. */
+.queue-panel .icon-button {
+  min-width: 44px;
+  width: 44px;
+  min-height: 44px;
+  height: 44px;
+  flex-shrink: 0;
+}
+
+.queue-playback-error p {
+  margin: 0 0 8px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
 .queue-transport .icon-button.selected {
   color: var(--accent);
   background: var(--surface-hover);

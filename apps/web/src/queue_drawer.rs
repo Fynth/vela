@@ -36,6 +36,7 @@ pub fn QueueDrawer(
     current: Option<usize>,
     playing: bool,
     requested: bool,
+    status: String,
     context_label: String,
     shuffle: bool,
     repeat: String,
@@ -57,6 +58,7 @@ pub fn QueueDrawer(
     onrepeat: EventHandler<()>,
     onseek: EventHandler<f64>,
     onvolume: EventHandler<f64>,
+    onretry: EventHandler<()>,
     onsleep: EventHandler<String>,
     onchoose: EventHandler<()>,
 ) -> Element {
@@ -69,9 +71,10 @@ pub fn QueueDrawer(
         });
     });
 
-    let next_list = projection.next();
-    let next_count = next_list.len();
-    let next_occurrence = next_list.first().copied();
+    let next_occurrence = projection.scheduled_next;
+    let next_title = next_occurrence
+        .and_then(|at| queue.get(at))
+        .map(|track| track.title.clone());
     let explicit_next = projection.explicit_next.clone();
     let current_index = current.unwrap_or(usize::MAX);
     let last_index = queue.len().saturating_sub(1);
@@ -88,15 +91,19 @@ pub fn QueueDrawer(
     // The real running order is the pending deck only when shuffle is off.
     // Under shuffle the deck is drawn at play time, so the drawer says so
     // instead of presenting the pending list as a guarantee.
-    let shuffle_pending = shuffle && explicit_next.is_empty();
+    let shuffle_pending = shuffle && next_occurrence.is_none() && !projection.next().is_empty();
     // "Upcoming" means the occurrences after the playing one, exactly the set
     // the root's clear-upcoming edit removes.
     let cursor = current.unwrap_or(0);
     let has_upcoming = queue.len() > cursor.saturating_add(1);
     let state = if !has_current {
         "Nothing playing"
+    } else if !status.is_empty() {
+        "Playback needs attention"
     } else if playing {
         "Playing"
+    } else if requested {
+        "Connecting…"
     } else {
         "Paused"
     };
@@ -240,12 +247,21 @@ pub fn QueueDrawer(
                 hr { class: "queue-divider" }
 
                 div { class: "queue-upcoming-heading",
-                    h3 { "Дальше" }
-                    span { class: "queue-count", "{next_count}" }
+                    h3 { "Saved queue" }
+                    span { class: "queue-count", "{queue.len()}" }
                 }
 
+                if let Some(title) = next_title {
+                    p { class: "queue-note", "Next: {title}" }
+                }
                 if shuffle_pending {
                     p { class: "queue-note", "Перемешивание: порядок определяется при воспроизведении." }
+                }
+                if !status.is_empty() {
+                    div { class: "queue-playback-error", role: "alert",
+                        p { "{status}" }
+                        button { class: "button secondary", onclick: move |_| onretry.call(()), "Retry playback" }
+                    }
                 }
 
                 div { class: "queue-list",

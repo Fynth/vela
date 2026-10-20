@@ -7,6 +7,24 @@ const originalConsoleError = console.error.bind(console);
 console.error = (...args) => { runtimeErrors.push(args.map(String).join(' ')); originalConsoleError(...args); };
 const checks = [];
 const viewportEvidence = [];
+// Bounded transport-only evidence: never record text fields, accounts or URLs.
+// It distinguishes a stale assertion from an input or system-driven volume change.
+const transportTrace = [];
+const traceTransport = action => {
+  const state = {action, at: Math.round(performance.now()), generation: generation(), phase: phase(),
+    position: position(), volume: Number(el('#native-volume')?.value || 0),
+    muted: el('[data-testid="native-player-mute"]')?.getAttribute('aria-pressed')};
+  transportTrace.push(state);
+  if (transportTrace.length > 60) transportTrace.shift();
+};
+document.addEventListener('input', event => {
+  if (event.target?.id === 'native-volume' || event.target?.id === 'native-seek')
+    traceTransport(`input:${event.target.id}:${event.isTrusted ? 'trusted' : 'fixture'}`);
+}, true);
+document.addEventListener('change', event => {
+  if (event.target?.id === 'native-volume' || event.target?.id === 'native-seek')
+    traceTransport(`change:${event.target.id}:${event.isTrusted ? 'trusted' : 'fixture'}`);
+}, true);
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const wait = async (test, name, timeout = 18000) => {
   const end = performance.now() + timeout;
@@ -568,6 +586,61 @@ try {
   const rowActions = firstNativeRow.querySelector('.native-track-actions').getBoundingClientRect();
   assert(rowActions.left >= rowTime.right - 1, 'Track duration and four action controls do not overlap');
   assert(el('.native-player').getBoundingClientRect().height <= 160, 'Idle desktop transport does not reserve a large empty status strip');
+  if (config.testPreparation) {
+    const preparationCommand = async command => {
+      dioxus.send({preparation: command});
+      return (await dioxus.recv()).preparation;
+    };
+    await preparationCommand('arm');
+    const idleHeight = box('.native-player').height;
+    await click('Play Native Continuity');
+    await wait(() => Number(el('[data-testid="native-source-preparation"]')?.dataset.receivedBytes) > 0,
+      'Real throttled source publishes byte progress');
+    const pending = el('[data-testid="native-source-preparation"]');
+    assert(pending.textContent.includes('Preparing audio') && Number(pending.dataset.totalBytes) > Number(pending.dataset.receivedBytes),
+      'Pending player shows real incomplete byte progress instead of claiming playback');
+    assert(button('Cancel audio preparation') && !button('Cancel audio preparation').disabled,
+      'Pending player offers an explicit enabled Cancel action');
+    assert(near(box('.native-player').height, idleHeight), 'Preparation preserves the approved desktop player height');
+    assert(!['Playing', 'Paused'].includes(phase()) && position() === 0,
+      'A partially transferred original never reaches the decoder');
+    await capture('preparation-dark');
+    await resizeCompact();
+    assert(el('[data-testid="native-source-preparation"]')?.getBoundingClientRect().width > 0
+      && button('Cancel audio preparation')?.getBoundingClientRect().right <= innerWidth,
+      'Preparation status and Cancel stay reachable in the compact native window');
+    await capture('preparation-compact-dark');
+    await resize(1280, 840);
+    const pendingGeneration = generation();
+    await click('Cancel audio preparation');
+    await wait(() => el('[data-testid="native-source-canceled"]') && generation() !== pendingGeneration,
+      'Cancel invalidates the pending generation and explains Play retry');
+    const canceledGeneration = generation();
+    let socketState;
+    for (let attempt = 0; attempt < 40; attempt++) {
+      socketState = await preparationCommand('state');
+      if (socketState.cancelled >= 1) break;
+      await sleep(50);
+    }
+    assert(socketState.cancelled >= 1 && socketState.heldBytes > 0,
+      'Cancel physically closes the partially transferred real-source socket');
+    await preparationCommand('release');
+    await sleep(350);
+    assert(generation() === canceledGeneration && phase() === 'Idle' && position() === 0 && button('Play'),
+      'Releasing the obsolete source cannot load or autoplay after Cancel');
+    assert(!el('[data-testid="native-source-preparation"]') && !button('Cancel audio preparation'),
+      'Canceled preparation clears pending controls');
+    await capture('preparation-canceled-dark');
+    await click('Play');
+    await wait(() => phase() === 'Playing' && position() > 250, 'Play retries the same authorized original');
+    assert(!el('[data-testid="native-source-canceled"]') && !el('[data-testid="native-source-preparation"]'),
+      'Successful retry clears cancellation and preparation feedback');
+    checks.push(`Native preparation: real ${socketState.heldBytes}-byte partial transfer canceled on socket, generation ${pendingGeneration}→${canceledGeneration}, no late load and successful Play retry`);
+    await click('Open queue');
+    await click('Clear queue');
+    await click('Library');
+    await wait(() => button('Play Native Continuity'), 'Library restored after preparation regression');
+  }
   const rapidRow = button('Play Native Continuity');
   rapidRow.click(); rapidRow.click();
   await wait(() => phase() === 'Paused', 'Rapid repeated selection stays paused after preparation');
@@ -655,7 +728,12 @@ try {
   await wait(() => muteState() === 'false' && volumeLevel() === 45, 'Unmute restores the remembered audible level');
   assert(generation() === tr03Source && button('Pause'), 'Unmute keeps the same native source and playing state');
   checks.push(`TR03 volume/mute: 45% → 0% → 45% on source ${tr03Source}, position ${tr03Position}→${position()}ms, no source replacement`);
-  fill('#native-volume', '0'); await sleep(250);
+  fill('#native-volume', '0');
+  // The output thread acknowledges commands through a200ms renderer poll. A fixed
+  // delay can continue before that acknowledgement; wait for both real projections.
+  await wait(() => muteState() === 'true' && volumeLevel() === 0,
+    'TR03 reset volume is acknowledged by the native engine before navigation');
+  traceTransport('muted-before-navigation');
   const queueEntry = el('[data-testid="native-player-queue"]');
   assert(queueEntry && queueEntry.getAttribute('aria-label') === 'Open queue', 'TR03 band exposes the real Queue entry');
   const queueSource = generation(), queuePosition = position();
@@ -710,12 +788,24 @@ try {
   await wait(() => phase() === 'Playing', 'Current queue row resumes');
   assert(generation() === gen, 'Current queue row toggle preserves occurrence, source and shuffle order');
   await click('Pause'); await wait(() => phase() === 'Paused', 'Native pause');
+  traceTransport('paused-before-seek');
+  if (muteState() !== 'true' || volumeLevel() !== 0)
+    throw new Error(`TR03 queue pause changed zero native volume: ${JSON.stringify(transportTrace)}`);
+  assert(true, 'TR03 queue pause preserves zero native volume');
   const paused = position(); await sleep(450);
   assert(Math.abs(position() - paused) < 150, 'Paused native position is stable');
   fill('#native-seek', '6000', 'change');
   await wait(() => position() >= 5900 && position() <= 6300 && phase() === 'Paused', 'Native seek remains paused');
+  traceTransport('paused-after-seek');
+  if (muteState() !== 'true' || volumeLevel() !== 0)
+    throw new Error(`TR03 seek changed zero native volume: ${JSON.stringify(transportTrace)}`);
+  assert(true, 'TR03 seek preserves zero native volume');
   await click('Play'); await wait(() => phase() === 'Playing' && position() > 6400, 'Native resume after seek');
   await click('Pause'); await wait(() => phase() === 'Paused', 'Pause before queue edits');
+  traceTransport('paused-after-resume');
+  if (muteState() !== 'true' || volumeLevel() !== 0)
+    throw new Error(`TR03 resume and pause changed zero native volume: ${JSON.stringify(transportTrace)}`);
+  assert(true, 'TR03 resume and pause preserve zero native volume');
   // TR03: record the actual queue signature before the appearance changes below.
   const appearanceQueue = {count: document.querySelectorAll('[data-native-queue-index]').length, current: [...document.querySelectorAll('.native-queue-row')].findIndex(row => row.classList.contains('current'))};
   assert(appearanceQueue.count > 0 && appearanceQueue.current >= 0, 'Queue view exposes the current occurrence before the appearance checks');

@@ -12,6 +12,7 @@ mod network;
 mod now_playing;
 mod personal_mixes;
 mod playback;
+mod playlist_command;
 mod preferences;
 mod queue_drawer;
 mod radio;
@@ -1127,13 +1128,14 @@ fn GroupTracks(
     } }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 struct PlaylistUndo {
     playlist_id: String,
     item_id: String,
     revision: i64,
     name: String,
     title: String,
+    mutation_id: String,
 }
 
 /// TR07: one frozen command description per row action. The visible More
@@ -1193,10 +1195,32 @@ struct Surfaces {
     picker_choice: Signal<Option<String>>,
     picker_busy: Signal<bool>,
     picker_error: Signal<String>,
+    picker_intent: Signal<Option<playlist_command::AddIntent>>,
+    generation: Signal<u64>,
+    command: Signal<u64>,
+    reads: client::RequestScope,
     return_focus: Rc<RefCell<Option<web_sys::Element>>>,
 }
 
 impl Surfaces {
+    fn supersede(&self) {
+        self.reads.cancel();
+        let mut generation = self.generation;
+        let next = generation.peek().wrapping_add(1);
+        generation.set(next);
+    }
+    fn owns_picker(&self, generation: u64) -> bool {
+        *self.generation.peek() == generation && self.picker.peek().is_some()
+    }
+    fn next_command(&self) -> u64 {
+        let mut command = self.command;
+        let next = command.peek().wrapping_add(1);
+        command.set(next);
+        next
+    }
+    fn picker_locked(&self) -> bool {
+        *self.picker_busy.read() || self.picker_intent.read().is_some()
+    }
     fn open_menu_target(&self) -> Option<String> {
         self.menu.read().clone()
     }
@@ -1234,6 +1258,7 @@ impl Surfaces {
     }
 
     fn open_menu(&self, row_id: &str) {
+        self.supersede();
         self.capture_focus(row_id);
         let mut menu = self.menu;
         menu.set(Some(row_id.to_string()));
@@ -1249,6 +1274,7 @@ impl Surfaces {
 
     /// Close the row menu and put focus back on the control that invoked it.
     fn dismiss_menu(&self) {
+        self.supersede();
         let mut menu = self.menu;
         menu.set(None);
         self.restore_focus();
@@ -1263,11 +1289,14 @@ impl Surfaces {
         // dialog also leaves the top layer there and would otherwise pull focus
         // to the document body), so focus is restored after that batch instead
         // of racing it. A trigger that is no longer connected is not focused.
+        let surfaces = self.clone();
+        let generation = *self.generation.peek();
         wasm_bindgen_futures::spawn_local(async move {
             TimeoutFuture::new(0).await;
-            if element
-                .dyn_ref::<web_sys::Node>()
-                .is_some_and(web_sys::Node::is_connected)
+            if *surfaces.generation.peek() == generation
+                && element
+                    .dyn_ref::<web_sys::Node>()
+                    .is_some_and(web_sys::Node::is_connected)
                 && let Ok(control) = element.dyn_into::<web_sys::HtmlElement>()
             {
                 let _ = control.focus();
@@ -1278,6 +1307,9 @@ impl Surfaces {
     /// Hand the frozen row target to the picker layer. The menu closes without
     /// restoring focus because the picker now owns the interaction.
     fn open_picker(&self, track: &Track) {
+        self.supersede();
+        let mut intent = self.picker_intent;
+        intent.set(None);
         let mut menu = self.menu;
         let mut query = self.picker_query;
         let mut choice = self.picker_choice;
@@ -1296,6 +1328,9 @@ impl Surfaces {
     }
 
     fn close_picker(&self) {
+        self.supersede();
+        let mut intent = self.picker_intent;
+        intent.set(None);
         let mut picker = self.picker;
         let mut busy = self.picker_busy;
         let mut error = self.picker_error;
@@ -1314,11 +1349,17 @@ impl Surfaces {
     }
 
     fn set_query(&self, value: String) {
+        if *self.picker_busy.peek() || self.picker_intent.peek().is_some() {
+            return;
+        }
         let mut query = self.picker_query;
         query.set(value);
     }
 
     fn set_choice(&self, value: Option<String>) {
+        if *self.picker_busy.peek() || self.picker_intent.peek().is_some() {
+            return;
+        }
         let mut choice = self.picker_choice;
         choice.set(value);
     }
@@ -1326,6 +1367,11 @@ impl Surfaces {
     fn set_busy(&self, value: bool) {
         let mut busy = self.picker_busy;
         busy.set(value);
+    }
+
+    fn clear_picker_error(&self) {
+        let mut error = self.picker_error;
+        error.set(String::new());
     }
 
     fn fail_picker(&self, message: String) {
@@ -1338,6 +1384,10 @@ impl Surfaces {
     /// An account change drops every overlay and the captured trigger. Focus is
     /// not restored because the previous account's DOM is already gone.
     fn reset(&self) {
+        self.supersede();
+        self.next_command();
+        let mut intent = self.picker_intent;
+        intent.set(None);
         let mut menu = self.menu;
         let mut picker = self.picker;
         let mut query = self.picker_query;
@@ -1552,6 +1602,8 @@ fn App() -> Element {
     let mut share_days = use_signal(|| "7".to_string());
     let mut collaborator_edit = use_signal(|| false);
     let mut playlist_undo = use_signal(|| None::<PlaylistUndo>);
+    let mut playlist_undo_pending = use_signal(|| None::<String>);
+    let mut playlist_undo_error = use_signal(String::new);
     // TR07: one surface state for the row menu and the add-to-playlist picker.
     // Every invocation path (More, right-click, Shift+F10, ContextMenu, the
     // touch sheet) opens the same frozen row target through this value.
@@ -1562,6 +1614,10 @@ fn App() -> Element {
         picker_choice: Signal::new(None::<String>),
         picker_busy: Signal::new(false),
         picker_error: Signal::new(String::new()),
+        picker_intent: Signal::new(None),
+        generation: Signal::new(0),
+        command: Signal::new(0),
+        reads: client::RequestScope::default(),
         return_focus: Rc::new(RefCell::new(None)),
     });
     // The lean web build has no mounted event, so the active layer is focused
@@ -1577,10 +1633,13 @@ fn App() -> Element {
             // tick. A layer that closed in the meantime is never reopened.
             if surfaces.open_menu_target().is_some() {
                 let surfaces = surfaces.clone();
+                let generation = *surfaces.generation.peek();
                 spawn(async move {
                     for _ in 0..40 {
                         TimeoutFuture::new(1).await;
-                        if surfaces.menu.peek().is_none() {
+                        if *surfaces.generation.peek() != generation
+                            || surfaces.menu.peek().is_none()
+                        {
                             return;
                         }
                         if focus_by_id("track-menu-panel") {
@@ -1594,9 +1653,13 @@ fn App() -> Element {
             // renderer's DOM batch.
             let _open = surfaces.picker_target();
             let surfaces = surfaces.clone();
+            let generation = *surfaces.generation.peek();
             spawn(async move {
                 for _ in 0..40 {
                     TimeoutFuture::new(1).await;
+                    if *surfaces.generation.peek() != generation {
+                        return;
+                    }
                     let Some(dialog) = picker_dialog() else {
                         return;
                     };
@@ -1921,6 +1984,8 @@ fn App() -> Element {
             radio_seed.set(None);
             collaborator.set(String::new());
             playlist_undo.set(None);
+            playlist_undo_pending.set(None);
+            playlist_undo_error.set(String::new());
             // Account change: the open menu/picker and every captured row trigger
             // belong to the previous account and must not survive it.
             surfaces.reset();
@@ -2236,6 +2301,7 @@ fn App() -> Element {
     let picker_query = surfaces.picker_text();
     let picker_choice = surfaces.picker_selection();
     let picker_busy = surfaces.picker_adding();
+    let picker_locked = surfaces.picker_locked();
     let picker_error = surfaces.picker_failed();
     let has_editable_playlists = playlists.read().iter().any(|list| list.can_edit);
     let picker_lists = editable_playlists(&playlists.read(), &picker_query);
@@ -2306,17 +2372,39 @@ fn App() -> Element {
                     if !error().is_empty() { div { class: "alert error", role: "alert", span { "{error}" } button { "aria-label": "Dismiss error", onclick: move |_| error.set(String::new()), Icon { name: "close" } } } }
                     if !notice().is_empty() { div { class: "alert success", role: "status", span { "{notice}" } button { "aria-label": "Dismiss notification", onclick: move |_| notice.set(String::new()), Icon { name: "close" } } } }
                     if let Some(undo) = playlist_undo() { div { class: "alert success playlist-undo", role: "status",
-                        span { "Added “{undo.title}” to {undo.name}." }
-                        button { class: "button secondary small", onclick: move |_| {
+                        div { span { "Added “{undo.title}” to {undo.name}." }
+                            if !playlist_undo_error().is_empty() { p { role: "alert", "{playlist_undo_error}" } }
+                        }
+                        button { class: "button secondary small", disabled: playlist_undo_pending.read().is_some(), onclick: { let surfaces = surfaces.clone(); move |_| {
+                            if playlist_undo_pending.peek().is_some() || playlist_undo.peek().as_ref() != Some(&undo) { return; }
                             let undo = undo.clone();
+                            playlist_undo_error.set(String::new());
+                            playlist_undo_pending.set(Some(undo.mutation_id.clone()));
+                            let command = surfaces.next_command();
+                            let surfaces_done = surfaces.clone();
                             spawn_authorized(auth, async move {
-                                let path = format!("/api/playlists/{}/items/{}?revision={}&mutation_id={}", undo.playlist_id, undo.item_id, undo.revision, uuid::Uuid::new_v4());
-                                match mutate("DELETE", &path, None, &token(auth)).await {
-                                    Ok(()) => { playlist_undo.set(None); notice.set("Removed the added track.".into()); }
-                                    Err(message) => error.set(message),
+                                // A lost DELETE response retries the same inverse. A late
+                                // receipt may acknowledge its own removal, never erase a
+                                // newer Add receipt or publish an error over its dialog.
+                                let path = format!("/api/playlists/{}/items/{}?revision={}&mutation_id={}", undo.playlist_id, undo.item_id, undo.revision, undo.mutation_id);
+                                let outcome = mutate("DELETE", &path, None, &token(auth)).await;
+                                if playlist_undo_pending.peek().as_ref() == Some(&undo.mutation_id) { playlist_undo_pending.set(None); }
+                                if playlist_undo.peek().as_ref() == Some(&undo) {
+                                    match outcome {
+                                        Ok(()) => {
+                                            playlist_undo.set(None);
+                                            playlist_undo_error.set(String::new());
+                                            if *surfaces_done.command.peek() == command { notice.set("Removed the added track.".into()); }
+                                        }
+                                        Err(message) => if *surfaces_done.command.peek() == command { playlist_undo_error.set(message); },
+                                    }
+                                }
+                                if let Ok(value) = api::<Vec<PlaylistSummary>>("GET", "/api/playlists", None, "").await
+                                    && *surfaces_done.command.peek() == command {
+                                    playlists.set(value);
                                 }
                             });
-                        }, "Undo" }
+                        } }, if playlist_undo_pending.read().is_some() { "Undoing…" } else { "Undo" } }
                         button { class: "icon-button", "aria-label": "Dismiss added-track receipt", onclick: move |_| playlist_undo.set(None), Icon { name: "close" } }
                     } }
                     if page() != "home" {div { class: "page-heading", h1 { "{heading}" }
@@ -2838,7 +2926,11 @@ fn App() -> Element {
                 }
 
                 audio { id: "vela-audio", preload: "metadata",
-                    onplay: move |_| engine.peek().playing(true), onpause: move |_| engine.peek().playing(false),
+                    // `play` only acknowledges intent, before bytes may arrive.
+                    // `playing` confirms readiness; waiting retains requested
+                    // intent while every presentation shows Connecting.
+                    onplaying: move |_| engine.peek().playing(true), onpause: move |_| engine.peek().playing(false),
+                    onwaiting: move |_| engine.peek().playing(false),
                     ontimeupdate: move |_|engine.peek().time(false), onseeked: move |_|engine.peek().time(true),
                     onseeking: move |_|engine.peek().listening_discontinuity(), onvolumechange: move |_|engine.peek().observe_listening(true), onratechange: move |_|engine.peek().listening_discontinuity(),
                     onloadedmetadata: move |_|engine.peek().metadata(), onerror: move |_|engine.peek().failed(),
@@ -2965,7 +3057,7 @@ fn App() -> Element {
                                 }
                                 p { class: "playlist-picker-hint", id: "playlist-picker-hint", "Choose a playlist you can edit, then confirm with Add." }
                                 label { class: "sr-only", r#for: "playlist-picker-search", "Find a playlist" }
-                                input { id: "playlist-picker-search", r#type: "search", autocomplete: "off", maxlength: "120", placeholder: "Find a playlist", value: "{picker_query}",
+                                input { id: "playlist-picker-search", r#type: "search", autocomplete: "off", maxlength: "120", placeholder: "Find a playlist", value: "{picker_query}", disabled: picker_locked,
                                     oninput: { let surfaces = surfaces.clone(); move |event| {
                                         let value = event.value();
                                         surfaces.set_query(value.clone());
@@ -2989,7 +3081,7 @@ fn App() -> Element {
                                     for list in picker_lists.iter().cloned() {
                                         { let choice = picker_choice.as_deref() == Some(list.id.as_str());
                                         rsx! { button { key: "{list.id}", id: "playlist-choice-{list.id}", r#type: "button", role: "option", "data-playlist-choice": "{list.id}", "aria-selected": choice,
-                                            class: if choice { "playlist-choice selected" } else { "playlist-choice" },
+                                            class: if choice { "playlist-choice selected" } else { "playlist-choice" }, disabled: picker_locked,
                                             onfocus: { let surfaces = surfaces.clone(); let id = list.id.clone(); move |_| surfaces.set_choice(Some(id.clone())) },
                                             onclick: { let surfaces = surfaces.clone(); let id = list.id.clone(); move |_| surfaces.set_choice(Some(id.clone())) },
                                             span { class: "playlist-choice-name", "{list.name}" }
@@ -3021,45 +3113,80 @@ fn App() -> Element {
                                                 return;
                                             };
                                             surfaces.set_busy(true);
-                                            surfaces.fail_picker(String::new());
+                                            surfaces.clear_picker_error();
+                                            let generation = *surfaces.generation.peek();
+                                            let command = surfaces.next_command();
                                             let track_id = target.track_id.clone();
                                             let title = target.title.clone();
                                             let mut undo = playlist_undo;
                                             let surfaces_done = surfaces.clone();
                                             let mut playlist_list = playlists;
                                             spawn_authorized(auth, async move {
-                                                let path = format!("/api/playlists/{}/items", destination.id);
-                                                let detail = api::<PlaylistDetail>("GET", &format!("/api/playlists/{}", destination.id), None, "").await;
-                                                let outcome = match detail {
-                                                    Ok(detail) => api::<PlaylistDetail>("POST", &path, Some(json!({
-                                                        "revision": detail.playlist.revision,
-                                                        "mutation_id": uuid::Uuid::new_v4().to_string(),
-                                                        "track_id": track_id,
-                                                    })), &token(auth)).await,
-                                                    Err(message) => Err(message),
+                                                let previous = surfaces_done.picker_intent.peek().clone();
+                                                let intent = if let Some(intent) = previous.filter(|intent| intent.playlist_id == destination.id && intent.track_id == track_id) {
+                                                    intent
+                                                } else {
+                                                    let signal = match surfaces_done.reads.begin() {
+                                                        Ok(signal) => signal,
+                                                        Err(message) => { surfaces_done.fail_picker(message); return; }
+                                                    };
+                                                    let result = client::api_abortable::<PlaylistDetail>("GET", &format!("/api/playlists/{}", destination.id), None, "", Some(&signal)).await;
+                                                    // Closing/reopening cancels this read and invalidates its
+                                                    // right to start a write or change the new layer.
+                                                    if !surfaces_done.owns_picker(generation) { return; }
+                                                    surfaces_done.reads.cancel();
+                                                    let detail = match result {
+                                                        Ok(detail) => detail,
+                                                        Err(message) => { surfaces_done.fail_picker(message); return; }
+                                                    };
+                                                    let intent = playlist_command::AddIntent::new(&detail, track_id.clone());
+                                                    let mut pending = surfaces_done.picker_intent;
+                                                    pending.set(Some(intent.clone()));
+                                                    intent
                                                 };
+                                                if !surfaces_done.owns_picker(generation) { return; }
+                                                let path = format!("/api/playlists/{}/items", intent.playlist_id);
+                                                // Once dispatched, the mutation outlives its picker. An
+                                                // uncertain retry uses the exact same revision/mutation id.
+                                                let outcome = client::api_classified::<PlaylistDetail>("POST", &path, Some(intent.body()), &token(auth), None).await;
                                                 match outcome {
                                                     Ok(updated) => {
-                                                        if let Some(item) = updated.items.iter().rev().find(|item| item.track.id == track_id) {
-                                                            undo.set(Some(PlaylistUndo {
+                                                        if *surfaces_done.command.peek() == command {
+                                                            playlist_undo_error.set(String::new());
+                                                            if let Some(item_id) = intent.confirmed_entry(&updated) {
+                                                                undo.set(Some(PlaylistUndo {
                                                                 playlist_id: updated.playlist.id.clone(),
-                                                                item_id: item.id.clone(),
+                                                                item_id,
                                                                 revision: updated.playlist.revision,
                                                                 name: updated.playlist.name.clone(),
                                                                 title: title.clone(),
-                                                            }));
+                                                                mutation_id: uuid::Uuid::new_v4().to_string(),
+                                                                }));
+                                                                notice.set(String::new());
+                                                            } else {
+                                                                undo.set(None);
+                                                                notice.set(format!("Added “{title}” to {}. Undo is unavailable because the playlist changed.", updated.playlist.name));
+                                                            }
                                                         }
-                                                        // The durable receipt (with Undo) is the one success
-                                                        // message for this mutation; a second toast for the same
-                                                        // write would only repeat it.
-                                                        surfaces_done.close_picker();
+                                                        if surfaces_done.owns_picker(generation) { surfaces_done.close_picker(); }
                                                         // The sidebar/list counts come from the authoritative
                                                         // summaries, not from an invented local increment.
-                                                        if let Ok(value) = api::<Vec<PlaylistSummary>>("GET", "/api/playlists", None, "").await {
+                                                        if let Ok(value) = api::<Vec<PlaylistSummary>>("GET", "/api/playlists", None, "").await
+                                                            && *surfaces_done.command.peek() == command {
                                                             playlist_list.set(value);
                                                         }
                                                     }
-                                                    Err(message) => surfaces_done.fail_picker(message),
+                                                    Err(failure) => {
+                                                        if !surfaces_done.owns_picker(generation) { return; }
+                                                        let message = if failure.revision_conflict() {
+                                                            let mut pending = surfaces_done.picker_intent;
+                                                            pending.set(None);
+                                                            failure.message
+                                                        } else {
+                                                            format!("{} Try Add again to check whether the track was added.", failure.message)
+                                                        };
+                                                        surfaces_done.fail_picker(message);
+                                                    }
                                                 }
                                             });
                                         } },
@@ -3076,6 +3203,7 @@ fn App() -> Element {
                     current: Some(index()),
                     playing: playing(),
                     requested: requested_play,
+                    status: playback_status(),
                     context_label: context.read().label.clone(),
                     shuffle: shuffle(),
                     repeat: repeat(),
@@ -3096,7 +3224,8 @@ fn App() -> Element {
                     onshuffle: move |_| shuffle.set(!shuffle()),
                     onrepeat: move |_| change_repeat(repeat),
                     onseek: move |value| engine.peek().seek(value),
-                    onvolume: move |value| change_volume(value, volume),
+                    onvolume: move |value| { if *muted.peek() { muted.set(false); } change_volume(value, volume); },
+                    onretry: move |_| engine.peek().resume(),
                     onsleep: move |value| {
                         if value == "0" && sleep_minutes.peek().as_str() != "0" {
                             notice.set("Sleep timer canceled.".into());
