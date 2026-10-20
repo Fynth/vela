@@ -44,6 +44,12 @@ impl Fixture {
         .execute(&pool)
         .await
         .unwrap();
+        sqlx::raw_sql(include_str!(
+            "../../../migrations/0013_stats_covering_indexes.sql"
+        ))
+        .execute(&pool)
+        .await
+        .unwrap();
         for user in ["alice", "bob"] {
             sqlx::query("INSERT INTO users(id,username,password_hash) VALUES(?,?,?)")
                 .bind(user)

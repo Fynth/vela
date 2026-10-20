@@ -275,14 +275,19 @@ impl MediaService {
     }
 
     pub async fn stats(&self, owner_id: &str) -> Result<LibraryStats> {
-        let row = sqlx::query("SELECT COUNT(*) AS tracks,COALESCE(SUM(a.size_bytes),0) AS size_bytes,COALESCE(SUM(t.duration_ms),0) AS duration_ms,(SELECT COUNT(*) FROM albums b WHERE b.owner_id=? AND EXISTS(SELECT 1 FROM tracks bt INDEXED BY tracks_catalog_album WHERE bt.owner_id=b.owner_id AND bt.album_id=b.id)) AS albums,(SELECT COUNT(*) FROM artists ar WHERE ar.owner_id=? AND (EXISTS(SELECT 1 FROM tracks at INDEXED BY tracks_catalog_artist WHERE at.owner_id=ar.owner_id AND at.artist_id=ar.id) OR EXISTS(SELECT 1 FROM albums ab CROSS JOIN tracks at ON at.album_id=ab.id AND at.owner_id=ab.owner_id WHERE ab.owner_id=ar.owner_id AND ab.artist_id=ar.id))) AS artists FROM tracks t JOIN media_assets a ON a.id=t.media_asset_id WHERE t.owner_id=?")
-            .bind(owner_id).bind(owner_id).bind(owner_id).fetch_one(&self.pool).await?;
+        // AUD-09: three independent aggregates; covering indexes make the owner
+        // scan and the media-asset size lookup index-only, and the groups run in
+        // parallel on separate pool connections instead of one serial statement.
+        let base=sqlx::query("SELECT COUNT(*) AS tracks,COALESCE(SUM(a.size_bytes),0) AS size_bytes,COALESCE(SUM(t.duration_ms),0) AS duration_ms FROM tracks t INDEXED BY tracks_owner_stats JOIN media_assets a INDEXED BY media_assets_cover ON a.id=t.media_asset_id WHERE t.owner_id=?").bind(owner_id).fetch_one(&self.pool);
+        let albums=sqlx::query("SELECT COUNT(*) AS albums FROM albums b WHERE b.owner_id=? AND EXISTS(SELECT 1 FROM tracks bt INDEXED BY tracks_catalog_album WHERE bt.owner_id=b.owner_id AND bt.album_id=b.id)").bind(owner_id).fetch_one(&self.pool);
+        let artists=sqlx::query("SELECT COUNT(*) AS artists FROM artists ar WHERE ar.owner_id=? AND (EXISTS(SELECT 1 FROM tracks at INDEXED BY tracks_catalog_artist WHERE at.owner_id=ar.owner_id AND at.artist_id=ar.id) OR EXISTS(SELECT 1 FROM albums ab CROSS JOIN tracks at ON at.album_id=ab.id AND at.owner_id=ab.owner_id WHERE ab.owner_id=ar.owner_id AND ab.artist_id=ar.id))").bind(owner_id).fetch_one(&self.pool);
+        let (base, albums, artists) = tokio::try_join!(base, albums, artists)?;
         Ok(LibraryStats {
-            tracks: row.try_get("tracks")?,
-            albums: row.try_get("albums")?,
-            artists: row.try_get("artists")?,
-            size_bytes: row.try_get("size_bytes")?,
-            duration_ms: row.try_get("duration_ms")?,
+            tracks: base.try_get("tracks")?,
+            albums: albums.try_get("albums")?,
+            artists: artists.try_get("artists")?,
+            size_bytes: base.try_get("size_bytes")?,
+            duration_ms: base.try_get("duration_ms")?,
         })
     }
 }

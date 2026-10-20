@@ -94,6 +94,13 @@ impl Fixture {
         .execute(&self.pool)
         .await
         .unwrap();
+
+        sqlx::raw_sql(include_str!(
+            "../../../migrations/0013_stats_covering_indexes.sql"
+        ))
+        .execute(&self.pool)
+        .await
+        .unwrap();
     }
 
     async fn add(&self, input: TrackInput<'_>) -> String {

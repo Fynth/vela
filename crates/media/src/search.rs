@@ -1,7 +1,7 @@
 //! Bounded local search. Group names are literal substrings; tracks use FTS.
 use crate::{MediaService, catalog::*};
 use anyhow::Result;
-use sqlx::{QueryBuilder, Sqlite};
+use sqlx::{QueryBuilder, Row, Sqlite};
 use vela_domain::{AlbumSummary, ArtistSummary, Track};
 
 #[derive(Debug, thiserror::Error)]
@@ -20,44 +20,84 @@ impl MediaService {
             return Err(InvalidSearchQuery.into());
         }
         let query = query.trim();
-        let tracks = self
-            .list_tracks(owner, Some(query), None, 8, false)
-            .await?
-            .items;
-        let mut albums = QueryBuilder::<Sqlite>::new(ALBUM_SELECT);
-        albums
-            .push(" WHERE b.owner_id=")
-            .push_bind(owner)
-            .push(" AND ")
-            .push(ALBUM_VISIBLE)
-            .push(" AND (instr(lower(b.title),lower(")
-            .push_bind(query)
-            .push("))>0 OR instr(lower(ar.name),lower(")
-            .push_bind(query)
-            .push("))>0) ORDER BY b.title COLLATE NOCASE,b.id LIMIT 8");
-        let albums = albums
-            .build()
-            .fetch_all(&self.pool)
-            .await?
-            .iter()
-            .map(album_from_row)
-            .collect::<Result<Vec<_>>>()?;
-        let mut artists = QueryBuilder::<Sqlite>::new(artist_select());
-        artists
-            .push(" WHERE ar.owner_id=")
-            .push_bind(owner)
-            .push(" AND ")
-            .push(ARTIST_VISIBLE)
-            .push(" AND instr(lower(ar.name),lower(")
-            .push_bind(query)
-            .push("))>0 ORDER BY ar.name COLLATE NOCASE,ar.id LIMIT 8");
-        let artists = artists
-            .build()
-            .fetch_all(&self.pool)
-            .await?
-            .iter()
-            .map(artist_from_row)
-            .collect::<Result<Vec<_>>>()?;
+        let tracks_fut = self.list_tracks(owner, Some(query), None, 8, false);
+        let albums_fut = async {
+            let mut album_ids = QueryBuilder::<Sqlite>::new(
+                "SELECT b.id FROM albums b JOIN artists ar ON ar.id=b.artist_id AND ar.owner_id=b.owner_id WHERE b.owner_id=",
+            );
+            album_ids
+                .push_bind(owner)
+                .push(" AND ")
+                .push(ALBUM_VISIBLE)
+                .push(" AND (instr(lower(b.title),lower(")
+                .push_bind(query)
+                .push("))>0 OR instr(lower(ar.name),lower(")
+                .push_bind(query)
+                .push("))>0) ORDER BY b.title COLLATE NOCASE,b.id LIMIT 8");
+            let album_ids = album_ids.build().fetch_all(&self.pool).await?;
+            let album_ids = album_ids
+                .iter()
+                .map(|row| row.get::<String, _>("id"))
+                .collect::<Vec<_>>();
+            if album_ids.is_empty() {
+                return Ok(Vec::new());
+            }
+            let mut albums = QueryBuilder::<Sqlite>::new(ALBUM_SELECT);
+            albums
+                .push(" WHERE b.owner_id=")
+                .push_bind(owner)
+                .push(" AND b.id IN (");
+            let mut ids = albums.separated(",");
+            for id in &album_ids {
+                ids.push_bind(id);
+            }
+            ids.push_unseparated(") ORDER BY b.title COLLATE NOCASE,b.id");
+            albums
+                .build()
+                .fetch_all(&self.pool)
+                .await?
+                .iter()
+                .map(album_from_row)
+                .collect::<Result<Vec<_>>>()
+        };
+        let artists_fut = async {
+            let mut artist_ids =
+                QueryBuilder::<Sqlite>::new("SELECT ar.id FROM artists ar WHERE ar.owner_id=");
+            artist_ids
+                .push_bind(owner)
+                .push(" AND ")
+                .push(ARTIST_VISIBLE)
+                .push(" AND instr(lower(ar.name),lower(")
+                .push_bind(query)
+                .push("))>0 ORDER BY ar.name COLLATE NOCASE,ar.id LIMIT 8");
+            let artist_ids = artist_ids.build().fetch_all(&self.pool).await?;
+            let artist_ids = artist_ids
+                .iter()
+                .map(|row| row.get::<String, _>("id"))
+                .collect::<Vec<_>>();
+            if artist_ids.is_empty() {
+                return Ok(Vec::new());
+            }
+            let mut artists = QueryBuilder::<Sqlite>::new(artist_select());
+            artists
+                .push(" WHERE ar.owner_id=")
+                .push_bind(owner)
+                .push(" AND ar.id IN (");
+            let mut ids = artists.separated(",");
+            for id in &artist_ids {
+                ids.push_bind(id);
+            }
+            ids.push_unseparated(") ORDER BY ar.name COLLATE NOCASE,ar.id");
+            artists
+                .build()
+                .fetch_all(&self.pool)
+                .await?
+                .iter()
+                .map(artist_from_row)
+                .collect::<Result<Vec<_>>>()
+        };
+        let (tracks, albums, artists) = tokio::try_join!(tracks_fut, albums_fut, artists_fut)?;
+        let tracks = tracks.items;
         Ok(CatalogMatches {
             tracks,
             albums,

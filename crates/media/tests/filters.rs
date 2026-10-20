@@ -62,6 +62,7 @@ impl Fixture {
             include_str!("../../../migrations/0001_initial.sql"),
             include_str!("../../../migrations/0002_catalog_groups.sql"),
             include_str!("../../../migrations/0003_catalog_metadata_revision.sql"),
+            include_str!("../../../migrations/0013_stats_covering_indexes.sql"),
             include_str!("../../../migrations/0004_readonly_scan_sources.sql"),
         ] {
             sqlx::raw_sql(migration).execute(&pool).await.unwrap();
