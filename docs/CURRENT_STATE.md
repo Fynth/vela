@@ -70,9 +70,11 @@ changed for this page.
   0playlists/0folders/0publications. The20 analysis rows retain extractor
   `vela-pcm-spectral-1`; new jobs on this runtime use `vela-pcm-spectral-4`.
 - The portable native0.12.6 tar
-  (`target/desktop-releases/vela-desktop-0.12.6-linux-x86_64-unknown-linux-gnu.tar.gz`,
-  SHA256 `7abe3982…`, BUILD commit `7fe1ca0`) is a separate artifact from the server
-  runtime; both derive from the same release commit.
+  (`target/desktop-releases/vela-desktop-0.12.6-linux-x86_64-unknown-linux-gnu.tar.gz`)
+  was rebuilt for TR10 from source `4ceafdc` (SHA256 `58da18db…`, version0.12.6,
+  launch-verified); the earlier `7fe1ca0` archive (SHA256 `7abe3982…`) is preserved
+  under `target/desktop-releases/previous/`. The live server runtime remains
+  `7fe1ca0`; only the desktop artifact carries TR10 typography.
 - Consequence: source-verified fixes newer than `7fe1ca0` are absent from the live
   server/web runtime until a future patch release and installer handover. Do not
   call a source-only fix "deployed", and do not call the live runtime "source HEAD".

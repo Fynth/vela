@@ -8,10 +8,12 @@ AUD-01/02/04/11 are fixed in source `3094754` (real two-process Secret Service Q
 AUD-03/07/08/12 fixed in source `e225b63` (basic native offline QA passed); AUD-05/06 remain open; see [CURRENT_STATE.md](CURRENT_STATE.md).
 Evidence is listed at the end; see ADR0017 for the decision record.
 
-TR10 (2026-10-20, source `47fb518`/`d314a2c`): the packaged stylesheet now self-hosts the
-approved Manrope typography and the real X11 native QA verifies fonts, frameless window
-controls, app scale80–150 and one `AudioEngine` output authority. The portable package rebuild is pending at this checkpoint, so the packaged slice
-described below remains0.12.6 evidence only.
+TR10 (2026-10-20, source `4ceafdc`; typography/QA `47fb518`+`d314a2c`): the packaged
+stylesheet now self-hosts the approved Manrope typography and the real X11 native QA
+verifies fonts, frameless window controls, app scale80–150 and one `AudioEngine`
+output authority. The portable package was rebuilt and launch-verified from source
+`4ceafdc` (SHA256 `58da18db…`); the earlier0.12.6 archive from `7fe1ca0` is preserved
+under `target/desktop-releases/previous/`.
 
 ## Ownership
 
@@ -166,7 +168,7 @@ fallbacks. The stylesheet grows from51,263 to98,729 bytes; the 34,876 raw font b
 become the embedded base64 `include_str!` compiles into the binary.
 
 The real X11 window QA (`scripts/verify_native_client.py --test-peer`, evidence
-`target/checks/tr10-native-final/`) passed260 checks and15 screenshots, including
+`target/checks/tr10-native-head/`) passed260 checks and15 screenshots, including
 `native-typography-dark.png` at1280×840 = DOM×DPR. TR10 typography checks read the
 real renderer, not a stylesheet claim: computed `:root` and `.native-app`
 `font-family` start with `Manrope` and keep the fallbacks; exactly two `Manrope`
@@ -197,28 +199,33 @@ release binary, `vela-desktop.desktop`, scalable icon, README, LICENSE and BUILD
 `scripts/verify_desktop_package.py --launch` validates the exact manifest/modes,
 `--version`, missing-library check, a real GUI launch/screenshot and normal window
 close with zero temporary originals. This is not a `.deb`/AppImage/Flatpak, signature,
-app-store or physical-audio certification. Evidence:
-`target/desktop-releases/vela-desktop-0.12.6-linux-x86_64-unknown-linux-gnu.tar.gz`
-(SHA256 `7abe3982073470d36e4680b56845aa6858a0c21b3c86f2007862ba9ba16d6063`,
-BUILD commit `7fe1ca0`); prior0.12.0–0.12.5 archives are preserved. It adds the
-opt-in Secret Service session resume flow, v2 BLAKE3 offline manifests, the startup
-integrity sweep and the folder/filter/move controls. It includes saved
-peers, cached browse-only metadata and preview/per-peer search pagination. Evidence:
-`target/checks/desktop-0.12.6-verify.log`,
-`desktop-package-screens/vela-desktop-0.12.6-package-launch.png`.
+app-store or physical-audio certification.
 
-TR10 packaging was attempted and refused honestly: with the TR10 changes uncommitted,
-`scripts/package-desktop-linux.sh` exits1 before any build with
-`Commit the verified checkpoint before packaging the desktop binary.` No archive was
-created, replaced or re-verified, so the evidence above still describes source
-`7fe1ca0` and does **not** contain the embedded Manrope faces.
-`scripts/verify_desktop_package.py --launch` was therefore NOT_RUN for TR10. The
-would-be artifact path is
-`target/desktop-releases/vela-desktop-0.12.6-linux-x86_64-unknown-linux-gnu.tar.gz`;
-it still holds the prior SHA256
-`7abe3982073470d36e4680b56845aa6858a0c21b3c86f2007862ba9ba16d6063`. Packaging and
-launch verification stay blocked until the verified checkpoint is committed, which is
-outside this increment.
+TR10 package (2026-10-20, source `4ceafdc`): after preserving the previous0.12.6
+artifact, `scripts/package-desktop-linux.sh` (release build,2 cargo jobs) created
+`target/desktop-releases/vela-desktop-0.12.6-linux-x86_64-unknown-linux-gnu.tar.gz`
+(SHA256 `58da18db0f0af4986ab1069840682f2e673f3024f5137fe25241820c00a367ac`,
+version0.12.6, BUILD commit `4ceafdc482db1789159e6bae53f7015769b9b700`,
+5,323,519 bytes). Its packaged `bin/vela-desktop` (13,790,928 bytes) prints
+`vela-desktop 0.12.6`, contains both embedded `data:font/woff2;base64` Manrope faces
+and the `Manrope,Inter,ui-sans-serif` root stack, and `ldd` reports no missing
+libraries. `scripts/verify_desktop_package.py … --launch` exited0 with the exact
+six-file manifest/modes, the version match, a real `Vela Music` window at a real X11
+launch, a screenshot, a normal window close and zero temporary originals. Evidence:
+`target/checks/tr10-package-verify.json`, `tr10-package-evidence.txt`,
+`desktop-package-screens/vela-desktop-0.12.6-tr10-package-launch.png` (plus the earlier
+`tr10-package-guard-refused.log` from the uncommitted-tree attempt).
+
+The previously documented0.12.6 package built from `7fe1ca0` (SHA256
+`7abe3982073470d36e4680b56845aa6858a0c21b3c86f2007862ba9ba16d6063`) is preserved
+byte-for-byte under `target/desktop-releases/previous/` with its original `.sha256`
+file (whose recorded path still names the canonical location); nothing was deleted.
+Prior0.12.0–0.12.5 archives are preserved, and the historical0.12.6 feature evidence
+(`target/checks/desktop-0.12.6-verify.log`,
+`desktop-package-screens/vela-desktop-0.12.6-package-launch.png`) describes the
+`7fe1ca0` build. The new archive keeps version0.12.6 but is built from source
+`4ceafdc`, so it also carries source changes made after `7fe1ca0`; only its BUILD
+commit identifies it.
 
 ## Reusable complete-file media cache
 
@@ -338,3 +345,23 @@ audio/manifest exist at0600 and the v2 manifest carries a64-hex BLAKE3 digest.
 - A first compact run exposed queue grid tracks overflowing640px; the assertion was
   made element-level, `.native-queue-list` was constrained to `minmax(0,1fr)`, and
   the complete run passed. Failed evidence remains under `native-0.12-window2/`.
+
+- TR10 source checkpoint (`4ceafdc`; TR10 code `47fb518`+`d314a2c`):
+  `cargo fmt --all -- --check` passed; strict Clippy `-p vela-desktop --all-targets
+  --features native-qa -- -D warnings` passed; `cargo test --locked -p vela-desktop`
+  ran116 tests with113 passed,3 ignored (opt-in audio/MPRIS) and0 failed; the
+  `native-ui-qa` example builds. The real X11 native QA (`--test-peer`, owned null
+  sink) passed260 checks and15 screenshots with0 temporary originals:
+  `target/checks/tr10-native-head/` (`report.json`, `native-typography-dark.png`);
+  logs `target/checks/tr10-head-{fmt,clippy,build,tests}.log` and
+  `tr10-native-head.log`. That run verifies both embedded Manrope subsets and the
+  Cyrillic sample metrics, the frameless window controls/drag region, app scale80–150
+  on the real stepper, and exactly one `AudioEngine` output stream. Wayland remains
+  the earlier window-only evidence; hardware output, screen readers, physical media
+  keys, Internet/two-host and every non-Linux target remain NOT_RUN.
+- TR10 portable package (source `4ceafdc`, version0.12.6): the release build and
+  `scripts/package-desktop-linux.sh` produced the archive above, and
+  `scripts/verify_desktop_package.py --launch` passed (real `Vela Music` window,
+  screenshot, normal close, exit0,0 temporary originals). This is not a
+  `.deb`/AppImage/Flatpak, signature, app-store or hardware-audio certification;
+  Windows/macOS/mobile packaging remains NOT_RUN.

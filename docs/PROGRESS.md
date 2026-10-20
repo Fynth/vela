@@ -488,6 +488,14 @@ SHA256 `7abe3982073470d36e4680b56845aa6858a0c21b3c86f2007862ba9ba16d6063`, BUILD
 launch, normal close exit0 and zero temporary originals. It includes the session resume
 flow, v2 offline manifests with startup sweep, folder UI and all prior native features.
 
+TR10 (2026-10-20) rebuilt that canonical0.12.6 desktop archive from source `4ceafdc`
+(SHA256 `58da18db0f0af4986ab1069840682f2e673f3024f5137fe25241820c00a367ac`,
+5,323,519 B): both Manrope subsets are embedded as data-URI faces,260-check native X11
+QA passed (fonts/Cyrillic metrics, frameless controls, scale80-150, one AudioEngine),
+and `verify_desktop_package.py --launch` passed with a real window, exit0 and0
+temporary originals. The prior `7fe1ca0` archive (`7abe3982…`) is preserved under
+`target/desktop-releases/previous/`; the live server runtime remains `7fe1ca0`.
+
 `before-0.12.6-20261018T204840Z.tar.gz` (440464582 bytes,0600) was created while the
 live DB was schema12 and restore-verified in an empty isolated directory (integrity/FK
 ok, schema12,20 tracks). The0.12.5 unit file was preserved at0600. The service was
