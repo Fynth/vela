@@ -2390,6 +2390,7 @@ test('TR09 short-height 390x600 keeps both bands reserved and every layer usable
     expect(dialog.bottom).toBeLessThanOrEqual(600.5);
     expect(dialog.close.top).toBeGreaterThanOrEqual(0);
     expect(dialog.close.bottom).toBeLessThanOrEqual(600.5);
+    expect(dialog.close.height, 'the modal dismiss control is a 44px target').toBeGreaterThanOrEqual(43.5);
     expect(dialog.submit.bottom).toBeLessThanOrEqual(600.5);
     expect(dialog.submit.height).toBeGreaterThanOrEqual(43.5);
     await page.screenshot({ path: `${output}/tr09-short-600-upload.png`, animations: 'disabled' });
@@ -2436,14 +2437,20 @@ test('TR09 short-height 390x600 keeps both bands reserved and every layer usable
     const drawer = await page.evaluate(() => {
       const dialog = document.querySelector('#queue-drawer-dialog');
       const rect = dialog.getBoundingClientRect();
+      const close = dialog.querySelector('.queue-close')?.getBoundingClientRect();
       return {
         top: rect.top, bottom: rect.bottom, width: rect.width,
-        closeLabel: dialog.querySelector('[data-dialog-dismiss], .queue-close')?.getAttribute('aria-label') || null,
+        closeLabel: dialog.querySelector('.queue-close')?.getAttribute('aria-label') || null,
+        close: close ? { top: close.top, bottom: close.bottom, height: close.height, width: close.width } : null,
         overflow: document.documentElement.scrollWidth - innerWidth,
       };
     });
     expect(drawer.top).toBeGreaterThanOrEqual(0);
     expect(drawer.overflow).toBeLessThanOrEqual(1);
+    expect(drawer.close, 'the drawer keeps a real close control').not.toBeNull();
+    expect(drawer.close.height, 'the drawer dismiss control is a 44px target').toBeGreaterThanOrEqual(43.5);
+    expect(drawer.close.width, 'the drawer dismiss control is a 44px target').toBeGreaterThanOrEqual(43.5);
+    expect(drawer.close.bottom, 'the drawer close stays inside the viewport').toBeLessThanOrEqual(600.5);
     await page.screenshot({ path: `${output}/tr09-short-600-queue.png`, animations: 'disabled' });
     await writeFile(`${output}/tr09-short-height-evidence.json`, JSON.stringify({ short, primary, sheet, dialog, playing, drawer }, null, 2));
   } finally { await runtime.close(); }

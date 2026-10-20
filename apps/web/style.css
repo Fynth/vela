@@ -1537,6 +1537,10 @@ input[type="range"]:focus { outline:2px solid var(--accent); outline-offset:3px;
   .settings-grid .button,
   .inline-form .button { min-height:44px; }
   .share-form select, .import-card input, .inline-form input { min-height:44px; }
+  /* A dialog's own dismiss control is the primary escape on a phone; the
+     picker/Now Playing already size theirs, so the upload modal and the queue
+     drawer join them instead of keeping a 36px desktop hit box. */
+  .modal .icon-button, .queue-close { min-width:44px; min-height:44px; }
   /* The personal-mix card actions are that card's primary controls on a phone;
      they reach the same 44px goal from the same boundary as the rest. */
   .personal-mix-actions .icon-button { min-width:44px; width:44px; }
