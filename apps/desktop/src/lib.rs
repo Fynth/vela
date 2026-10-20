@@ -10,6 +10,10 @@ pub mod client;
 mod media_cache;
 pub mod mpris;
 pub mod offline;
+/// Private, non-secret offline profile (canonical origin + account UUID) that lets
+/// a cold start name the saved copies without any server or stored credential
+/// (AUD-05). It owns no grant, session, media path or playback authority.
+pub mod offline_profile;
 pub mod peers;
 #[path = "../../web/src/playback.rs"]
 pub mod playback;

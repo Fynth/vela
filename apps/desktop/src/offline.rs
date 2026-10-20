@@ -147,7 +147,9 @@ fn origin_hash(origin: &str) -> String {
 
 /// `$XDG_DATA_HOME/vela/offline`, or `$HOME/.local/share/vela/offline`. A missing
 /// private data root means no offline copies, never a public temporary directory.
-fn offline_base() -> Result<PathBuf, String> {
+/// The private offline profile document lives in this same tree (AUD-05), so it can
+/// never point at a namespace this module would not create.
+pub(crate) fn offline_base() -> Result<PathBuf, String> {
     let base = std::env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
         .filter(|path| path.is_absolute())

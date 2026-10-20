@@ -225,9 +225,17 @@ if (config.windowOnly) {
   } catch(error) { dioxus.send({ok:false, checks, failure:String(error.message)}); }
 } else if (config.sessionPhase === 'resume') {
   try {
-    await wait(() => button('Continue saved session') && !button('Continue saved session').disabled, 'Saved session option');
-    await click('Continue saved session');
+    // AUD-05: a cold start whose private offline profile names the saved session's
+    // origin attempts that session once by itself, so this phase may land on the
+    // private account directly. The explicit Continue action stays available (and is
+    // used) whenever the startup did not already resume it; both paths exercise the
+    // same stored token and the same guarded resume routine.
+    await wait(() => button('Continue saved session') || button('Sign out') || el('[data-testid="native-offline-library"]'), 'Saved-session startup decision');
+    assert(!el('[data-testid="native-offline-library"]'), 'A reachable server resumes or offers the saved session instead of the offline library');
+    const automatic = !button('Continue saved session');
+    if (!automatic) await click('Continue saved session');
     await wait(() => document.querySelectorAll('[data-native-track-id]').length === 3, 'Saved session resume');
+    checks.push(automatic ? 'Saved session resumed from the private offline profile at startup' : 'Saved session resumed through the explicit Continue action');
     assert(button('Sign out'), 'Saved session resumes the private account without a password');
     if (config.testSession) {
       await wait(() => (el('[data-offline-track-id]')?.textContent || '').includes('Integrity check failed'), 'Offline startup integrity sweep');
@@ -235,6 +243,64 @@ if (config.windowOnly) {
     }
     await click('Sign out'); await wait(() => button('Sign in'), 'Resume sign-out');
     assert(!el('.native-player') && !document.querySelector('[data-native-track-id]'), 'Resume sign-out clears private state');
+    // AUD-05: an explicit sign-out withdraws the local offline hint immediately in the
+    // UI and (off the UI thread) on this device; the fixture asserts the file too, so
+    // this window gives the bounded local withdrawal a moment before it closes.
+    assert(!button('Open offline library'), 'Explicit sign-out withdraws the local offline library entry');
+    await sleep(700);
+    dioxus.send({ok:true, checks, viewportEvidence});
+  } catch(error) { dioxus.send({ok:false, checks, failure:String(error.message)}); }
+} else if (config.sessionPhase === 'offline') {
+  // AUD-05/REG-AUD-05 cold offline launch: the fixture server was stopped by the
+  // previous run, and the private offline profile plus its real saved copies are on
+  // disk. This window must open a truthful local library, play the saved original
+  // through the one native AudioEngine, and never invent an account or a request.
+  try {
+    await wait(() => el('[data-testid="native-offline-library"]'), 'Cold-start offline library');
+    assert(!el('.native-signin'), 'No reachable server: the sign-in form is not the landing screen');
+    assert(button('Sign in to Vela'), 'The offline library offers a real sign-in instead of pretending to be signed in');
+    const surface = el('[data-testid="native-offline-library"]');
+    assert((surface.dataset.offlineOrigin || '') === config.origin + '/', `The offline library names the canonical origin it belongs to (actual "${surface.dataset.offlineOrigin}")`);
+    const rows = [...document.querySelectorAll('[data-offline-track-id]')];
+    assert(rows.length >= 1, 'The offline library lists the real saved copies on this device');
+    assert((surface.dataset.offlineCount || '0') === String(rows.length), `The offline library discloses its exact copy count (${surface.dataset.offlineCount} vs ${rows.length})`);
+    assert(document.querySelectorAll('[data-native-track-id]').length === 0, 'The offline library invents no server catalog rows');
+    assert(document.querySelectorAll('img[src^="data:image/"]').length === 0, 'No authorized artwork data URL exists without a session');
+    // Read/play only: nothing that needs a session is offered.
+    assert(!el('#native-search'), 'The offline library exposes no library search');
+    assert(!button('Refresh library') && !button('Sign out') && !button('Favorites') && !button('Playlists'),
+      'The offline library exposes no account navigation or sign-out');
+    assert(document.querySelectorAll('[aria-label^="Remove offline copy"]').length === 0, 'The offline library cannot remove a copy');
+    assert(!el('[data-testid="native-player-favorite"]'), 'The offline library exposes no favorite mutation');
+    assert(!document.querySelector('[data-testid="native-player-queue"]'), 'The offline library exposes no server queue view');
+    const title = (rows[0].querySelector('.native-queue-select strong')?.textContent || '').trim();
+    assert(title.length > 0, 'Offline rows carry their real saved title');
+    assert(!button(`Play ${title}`), 'The saved copy is played only through the offline path, never as a server original');
+    assert(button('Shuffle')?.disabled && !button('Repeat off')?.disabled, 'The offline screen exposes repeat one but disables the shuffle it cannot execute');
+    await capture('offline-dark');
+    await click(`Play offline ${title}`);
+    await wait(() => phase() === 'Playing' && position() > 200, 'Cold-start offline playback advances the native clock');
+    const source = generation();
+    assert(position() > 0 && source !== null && source !== undefined, `Cold-start offline playback reports a real native source (generation ${source}, position ${position()}ms)`);
+    const engine = await waitForEngineStreams();
+    assert(document.querySelectorAll('.native-player').length === 1
+      && document.querySelectorAll('[data-audio-generation]').length === 1
+      && document.querySelectorAll('[data-audio-phase]').length === 1,
+      `Exactly one native player/engine surface exists offline (players ${document.querySelectorAll('.native-player').length}, generation surfaces ${document.querySelectorAll('[data-audio-generation]').length})`);
+    assert(document.querySelectorAll('audio,video,iframe').length === 0, 'The cold-start window renders no HTML media/iframe audio substitute');
+    assert(Number(engine.sinkInputs) === 1,
+      `Exactly one native output stream exists on the QA-owned sink (sink "${engine.sink}", streams ${engine.sinkInputs}, process id ${engine.pid})`);
+    assert(engine.processStreams === null || Number(engine.processStreams) === 1,
+      `Every stream on the QA-owned sink belongs to this window process (process-matched ${engine.processStreams}, sink total ${engine.sinkInputs})`);
+    assert((el('.native-player-status small')?.textContent || '').includes(`Offline · ${title}`), 'The player states the offline source context');
+    await click(`Pause offline ${title}`);
+    await wait(() => phase() === 'Paused', 'Cold-start offline pause');
+    const paused = position(); await sleep(300);
+    assert(generation() === source && Math.abs(position() - paused) < 200, 'Pausing offline keeps the same native source and position');
+    await click(`Play offline ${title}`);
+    await wait(() => phase() === 'Playing' && position() > paused + 100, 'Cold-start offline resume');
+    assert(generation() === source, 'Resuming offline retains the single native source');
+    checks.push(`REG-AUD-05 cold offline launch: ${rows.length} real saved cop(ies) for ${surface.dataset.offlineOrigin}, no sign-in, no catalog rows, played "${title}" to ${position()}ms on one native source (${engine.sinkInputs} output stream, generation ${source})`);
     dioxus.send({ok:true, checks, viewportEvidence});
   } catch(error) { dioxus.send({ok:false, checks, failure:String(error.message)}); }
 } else {

@@ -5,7 +5,7 @@ explicit offline device copies, opt-in Secret Service session resume and native
 playlist folders. It is not a system installer/auto-updater, not mobile/background
 audio and not completion of G18. The audit's keyring/offline lifecycle defects
 AUD-01/02/04/11 are fixed in source `3094754` (real two-process Secret Service QA);
-AUD-03/07/08/12 fixed in source `e225b63` (basic native offline QA passed); AUD-06 fixed in `a913574` (origin-scoped offline namespace); AUD-05 (cold offline launch) remains open; see [CURRENT_STATE.md](CURRENT_STATE.md).
+AUD-03/07/08/12 fixed in source `e225b63` (basic native offline QA passed); AUD-06 fixed in `a913574` (origin-scoped offline namespace); AUD-05 (cold offline launch) fixed in the working tree on top of `10e2a62` (private offline profile + read/play-only offline library, real X11 cold-launch QA); see [CURRENT_STATE.md](CURRENT_STATE.md).
 Evidence is listed at the end; see ADR0017 for the decision record.
 
 TR10 (2026-10-20, source `4ceafdc`; typography/QA `47fb518`+`d314a2c`): the packaged
@@ -255,7 +255,11 @@ from that authenticated response. No automatic passwordless login occurs.
 Saving clears the fixed Service attribute first so repeated opt-ins do not accumulate
 stale tokens. Explicit sign-out waits for deletion and reports a visible error if the
 item remains; malformed/expired saved sessions are also cleared with a visible sign-in
-error. The fixed release service name is
+error. AUD-05 scope: when the private offline profile (below) names the same canonical
+origin and real saved copies exist, a cold start attempts that saved session once by
+itself and falls through to the offline library when the server does not answer. Nothing
+is stored beyond the already opt-in token, no password is ever used, and no attempt is
+retried. The fixed release service name is
 `org.vela.music.desktop.session`; QA may override it only in debug builds. This is Linux
 freedesktop Secret Service only — no Windows Credential Manager/macOS Keychain, Android
 Keystore or biometric unlock is claimed. The token is a bearer credential protected by
@@ -279,6 +283,40 @@ re-hashes the file from the same opened descriptor and refuses a same-size tampe
 with a visible integrity error; a failed manifest write removes the copied audio.
 Legacy v1 manifests (length-only) remain readable and will verify on the next save. No
 credentials, session tokens, audio URLs or listening events are stored.
+
+### Cold offline launch (AUD-05)
+
+A cold start has no account and no session, so the private namespace (canonical origin +
+account UUID, AUD-06) cannot be derived from the device. `offline_profile.rs` therefore
+keeps one private, non-secret profile document at
+`$XDG_DATA_HOME/vela/offline/profile.json`: `version`, canonical `origin` and
+`account_id` only — never a session token, password, CSRF token, audio URL, media path,
+username, queue or listening event. It is mode 0600 inside the 0700 offline tree, written
+atomically (private `create_new` temp file, `fsync`, `rename`), claimed by a sign-in
+generation so a pending write cannot recreate it after an explicit sign-out, written after
+a real sign-in/resume and removed on explicit sign-out. The saved copies and manifests are
+never deleted, rewritten or derived from a profile lookup; a corrupt, oversized,
+foreign-version or non-canonical document is ignored (`None`) and left in place. Two
+origins that mint the same UUIDs also get two different profile states, because the profile
+is only ever used together with its own canonical origin.
+
+Startup order: (1) read the profile and the real saved copies of exactly its namespace,
+locally; (2) read the opt-in saved session exactly as before; (3) if a saved session names
+that origin, resume it once through the existing guarded resume; (4) otherwise, and after
+an unreachable, timed-out, refused, unusable or expired resume, open the offline library.
+A real sign-in always wins, nothing autoplays, nothing is retried and no account is
+fabricated. If there is no usable profile, no real copy, or the profile/copy lookup fails,
+the ordinary sign-in screen stays (with an honest reason for a failed lookup).
+
+The offline library is **read/play-only**: real saved copies only, Play through the existing
+`offline::prepare` path (manifest check plus BLAKE3 re-hash on the same descriptor) and the
+single native `AudioEngine`, honest empty/unreadable/corrupt states, and an explicit
+**Sign in to Vela** action. Saving, removing, favorites, search, playlists, the server
+library, the server queue and sign-out remain unavailable without a real sign-in; the
+screen renders no account, no account navigation and publishes no listening event. Every
+deferred local result is guarded by the same generation/epoch/identity rule as the
+signed-in list (AUD-03/AUD-08), with the profile as the live identity. A normal sign-in
+replaces the offline screen and drops its transient queue, decoder lease and projected list.
 
 The Library shows saved copies and **Play offline** decodes the local file through the
 single native engine with context `Offline · <title>`. The offline queue contains all

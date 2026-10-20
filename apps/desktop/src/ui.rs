@@ -123,6 +123,17 @@ struct Account {
     user: User,
     origin: String,
 }
+
+/// AUD-05: the local-only offline identity — the canonical origin plus the account
+/// UUID that a private device copy is scoped by (AUD-06). It is deliberately *not* an
+/// [`Account`]: it carries no HTTP client, no session token, no CSRF token and no
+/// username, so it can never authorize a request. It exists only to name the private
+/// copy namespace and to render a read/play-only screen when no server answers.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct OfflineSession {
+    origin: String,
+    account_id: String,
+}
 #[derive(Clone)]
 struct Catalog {
     epoch: u64,
@@ -245,6 +256,13 @@ struct Ui {
     offline_error: Signal<String>,
     offline_corrupt: Signal<Vec<String>>,
     offline_active: Signal<bool>,
+    /// AUD-05: the private offline profile this device holds and whose namespace has
+    /// real saved copies. `Some` makes the offline screen reachable and nothing else:
+    /// it never enables a server route, an account or a credential.
+    offline_local: Signal<Option<OfflineSession>>,
+    /// AUD-05: the local-only offline screen that is on screen now. While this is
+    /// `Some` no account is adopted; a real sign-in replaces it.
+    offline_session: Signal<Option<OfflineSession>>,
     offline_confirm: Signal<String>,
     cache_usage: Signal<Option<(usize, u64)>>,
     cache_busy: Signal<bool>,
@@ -287,6 +305,17 @@ impl Ui {
                 .as_ref()
                 .is_some_and(|account| account.epoch == *self.epoch.peek())
     }
+    /// AUD-05: the local-only offline library is on screen. This is not a signed-in
+    /// state: there is no account, no client and no credential.
+    fn offline_mode(&self) -> bool {
+        self.alive.get() && self.offline_session.peek().is_some()
+    }
+    /// Transport and the private saved copies are usable for a real signed-in
+    /// account or for the local offline library. Every write, search, save, removal
+    /// and server route still requires [`Self::signed_in`].
+    fn can_play(&self) -> bool {
+        self.signed_in() || self.offline_mode()
+    }
     fn audio_alive(&self) -> bool {
         self.audio.read().as_ref().is_some_and(AudioEngine::alive)
     }
@@ -294,7 +323,7 @@ impl Ui {
         self.audio_alive()
     }
     fn current_track(&self) -> Option<Track> {
-        if !self.signed_in() {
+        if !self.can_play() {
             return None;
         }
         self.order
@@ -438,6 +467,10 @@ impl Ui {
         self.offline_busy.set(String::new());
         self.offline_error.set(String::new());
         self.offline_corrupt.set(Vec::new());
+        // AUD-05: an explicit sign-out also ends the local offline screen and
+        // withdraws the profile hint (the saved copies stay on this device).
+        self.offline_local.set(None);
+        self.offline_session.set(None);
         self.cache_usage.set(None);
         self.cache_busy.set(false);
         self.cache_confirm.set(false);
@@ -809,6 +842,11 @@ fn adopt_account(
     origin: String,
     epoch: u64,
 ) {
+    // AUD-05: a real sign-in replaces the local offline screen. Its transient state
+    // (offline queue, decoder source, projected list) is dropped here; the private
+    // saved copies and the profile file are not touched.
+    leave_offline_mode(&mut ui);
+    ui.login_error.set(String::new());
     ui.account.set(Some(Account {
         epoch,
         client,
@@ -872,15 +910,302 @@ fn adopt_account(
         }
     });
     restore_queue_snapshot(catalog_ui.clone());
+    // AUD-05: the private, non-secret offline profile is written after a real
+    // sign-in/resume so a later cold start can name this account's saved copies
+    // without any server or stored credential. Local file work only.
+    remember_offline_profile(catalog_ui.clone());
     load_catalog(catalog_ui, String::new(), None, false);
 }
 
-fn resume_saved(mut ui: Ui) {
+/// AUD-05: fixed honest message for a private offline namespace that exists but
+/// cannot be read. It never claims the copies are gone.
+const OFFLINE_UNREADABLE: &str = "Saved offline music could not be read.";
+
+/// AUD-05: record the private offline profile for the currently signed-in account.
+/// Best effort and local-only: the document holds a canonical origin and an account
+/// UUID, never a token, password, CSRF value, media path or username. A failure is
+/// reported honestly, because it means cold offline playback needs one more sign-in.
+fn remember_offline_profile(mut ui: Ui) {
+    let Some(account) = ui.account.peek().clone().filter(|_| ui.signed_in()) else {
+        return;
+    };
+    let epoch = *ui.epoch.peek();
+    let (origin, account_id) = (account.origin.clone(), account.user.id.clone());
+    // Claimed before the blocking write, so an explicit sign-out that happens while
+    // the write is queued supersedes it and the withdrawn hint cannot reappear
+    // (AUD-01/AUD-05).
+    let attempt = crate::offline_profile::begin_attempt();
+    spawn(async move {
+        let stored = tokio::task::spawn_blocking(move || {
+            crate::offline_profile::save(attempt, &origin, &account_id)
+        })
+        .await;
+        if !ui.alive.get() || *ui.epoch.peek() != epoch || !ui.signed_in() {
+            return;
+        }
+        match stored {
+            Ok(Ok(crate::offline_profile::StoreOutcome::Stored))
+            | Ok(Ok(crate::offline_profile::StoreOutcome::Superseded)) => {}
+            _ => ui.notice.set(
+                "Saved offline copies will need a sign-in after a restart: the private offline profile could not be stored on this device."
+                    .into(),
+            ),
+        }
+    });
+}
+
+/// What the local-only offline check found before any server contact (AUD-05).
+enum OfflineEvidence {
+    /// No usable profile, or a valid profile whose namespace has no real copies.
+    None,
+    /// A usable profile plus the real saved copies of exactly its namespace.
+    Ready(OfflineSession, Vec<crate::offline::OfflineTrack>),
+    /// The profile or its namespace could not be read. The caller shows the ordinary
+    /// sign-in screen with this honest reason instead of guessing.
+    Unreadable(String),
+}
+
+/// Read the private offline profile and its real saved copies. Purely local: no
+/// request, no credential and no path outside the private data tree. A corrupt or
+/// foreign profile is already reported as `None` by the store and never deletes or
+/// rewrites a copy.
+fn read_offline_evidence() -> OfflineEvidence {
+    let profile = match crate::offline_profile::load() {
+        Ok(Some(profile)) => profile,
+        Ok(None) => return OfflineEvidence::None,
+        Err(error) => return OfflineEvidence::Unreadable(error),
+    };
+    match crate::offline::load(&profile.origin, &profile.account_id) {
+        Ok(tracks) if tracks.is_empty() => OfflineEvidence::None,
+        Ok(tracks) => OfflineEvidence::Ready(
+            OfflineSession {
+                origin: profile.origin,
+                account_id: profile.account_id,
+            },
+            tracks,
+        ),
+        Err(error) => OfflineEvidence::Unreadable(error),
+    }
+}
+
+/// AUD-05 cold-start sequence, in this order and only with bounded local work:
+///
+/// 1. read the private offline profile and its real saved copies (no network);
+/// 2. read the opt-in saved session exactly as before (bounded keyring helper);
+/// 3. if a saved session exists for the profile's canonical origin, resume it once
+///    through the existing guarded path. A real sign-in wins; an unreachable,
+///    expired, unusable or refused server falls through to the offline library;
+/// 4. with no saved session, or no saved session for this origin, open the offline
+///    library directly.
+///
+/// Nothing is played automatically, no request is retried and no account is invented.
+async fn startup(mut ui: Ui) {
+    if !ui.alive.get() {
+        return;
+    }
+    let generation = ui.login_gate.generation.get();
+    let evidence = tokio::task::spawn_blocking(read_offline_evidence)
+        .await
+        .unwrap_or(OfflineEvidence::None);
+    if !ui.alive.get() {
+        return;
+    }
+    // Claim the item for this read: a cleanup may only delete the record that was
+    // actually read, never one a newer login already saved (AUD-01).
+    let attempt = crate::session_store::begin_attempt();
+    let loaded = tokio::task::spawn_blocking(crate::session_store::load).await;
+    if !ui.alive.get() || ui.signed_in() || ui.login_gate.generation.get() != generation {
+        return;
+    }
+    let mut cleanup = None;
+    match loaded {
+        Ok(Ok(Some(saved))) => ui.saved_session.set(Some(saved)),
+        Ok(Ok(None)) => {}
+        Ok(Err(error)) => {
+            ui.login_error.set(error.message().to_owned());
+            // AUD-04/AUD-11: only a malformed record is cleaned up, and only after
+            // the user-visible error is published.
+            if error.is_corrupt_record() {
+                cleanup = Some(attempt);
+            }
+        }
+        Err(_) => ui.login_error.set(
+            crate::session_store::KeyringError::Unavailable
+                .message()
+                .to_owned(),
+        ),
+    }
+    if let Some(attempt) = cleanup {
+        let _ = delete_saved_session(move || crate::session_store::clear_attempt(attempt)).await;
+        if !ui.alive.get() || ui.login_gate.generation.get() != generation {
+            return;
+        }
+    }
+    let (session, tracks) = match evidence {
+        OfflineEvidence::None => return,
+        OfflineEvidence::Unreadable(error) => {
+            // Requirement of AUD-05: a failed profile/copy lookup never guesses; the
+            // ordinary sign-in screen stays and says what happened.
+            ui.login_error.set(error);
+            return;
+        }
+        OfflineEvidence::Ready(session, tracks) => (session, tracks),
+    };
+    ui.offline_local.set(Some(session.clone()));
+    let resume = ui
+        .saved_session
+        .peek()
+        .clone()
+        .filter(|saved| saved.origin == session.origin);
+    match resume {
+        Some(_) => resume_attempt(ui, Some((session, tracks))),
+        None => enter_offline_mode(ui, session, tracks),
+    }
+}
+
+/// AUD-05: open the local-only offline screen. It is a read/play surface: no account
+/// is adopted, no request is made, no queue is uploaded and no listening event
+/// exists. The integrity sweep runs on a blocking worker and nothing is played until
+/// the listener presses Play.
+fn enter_offline_mode(
+    mut ui: Ui,
+    session: OfflineSession,
+    tracks: Vec<crate::offline::OfflineTrack>,
+) {
+    if !ui.alive.get() || ui.signed_in() {
+        return;
+    }
+    ui.offline_local.set(Some(session.clone()));
+    ui.offline_session.set(Some(session.clone()));
+    ui.offline.set(tracks);
+    ui.offline_error.set(String::new());
+    ui.offline_checking.set(None);
+    ui.offline_active.set(false);
+    ui.wants_play.set(false);
+    sweep_offline_copies(ui, session);
+}
+
+/// AUD-05: reopen an offline library the profile already vouched for (for example
+/// after visiting the sign-in screen). Local reload only.
+fn open_offline_library(mut ui: Ui) {
+    if !ui.alive.get() || ui.signed_in() {
+        return;
+    }
+    let Some(session) = ui.offline_local.peek().clone() else {
+        return;
+    };
+    if ui.offline_session.peek().is_some() {
+        return;
+    }
+    ui.offline_session.set(Some(session.clone()));
+    ui.offline_checking.set(None);
+    ui.offline_active.set(false);
+    ui.wants_play.set(false);
+    refresh_offline_copies(ui);
+}
+
+/// AUD-05: leave the local-only offline screen and drop its transient state. The
+/// private profile file, the saved copies and the device preferences stay exactly
+/// as they are; this only withdraws the current presentation and its decoder.
+fn leave_offline_mode(ui: &mut Ui) {
+    if ui.offline_session.peek().is_none() {
+        return;
+    }
+    ui.offline_session.set(None);
+    ui.offline_list_gate.cancel();
+    ui.offline_play_gate.cancel();
+    ui.offline_checking.set(None);
+    ui.new_selection();
+    ui.prepared.set(None);
+    ui.offline_active.set(false);
+    ui.offline_error.set(String::new());
+    ui.queue.set(Vec::new());
+    ui.order.write().reset(0, 0);
+    ui.context.set(String::new());
+    ui.source_error.set(String::new());
+}
+
+/// Reload the saved-copy list of the offline screen from this device, then sweep its
+/// integrity. Local file work only; a late result publishes only while the same
+/// profile is still the live offline identity (AUD-03/AUD-08).
+fn refresh_offline_copies(mut ui: Ui) {
+    let Some(session) = ui.offline_session.peek().clone() else {
+        return;
+    };
+    let epoch = *ui.epoch.peek();
+    let ticket = ui.offline_list_gate.begin(epoch);
+    let owner = OfflineOwner::profile(&ui.offline_list_gate, &ticket, epoch, &session);
+    spawn(async move {
+        let scope = OfflineScope::new(&owner);
+        let loaded = tokio::task::spawn_blocking({
+            let scope = scope.clone();
+            move || crate::offline::load(&scope.origin, &scope.account_id)
+        })
+        .await;
+        if !owner.current(&ui, &ticket) {
+            return;
+        }
+        match loaded {
+            Ok(Ok(tracks)) => {
+                ui.offline.set(tracks);
+                ui.offline_error.set(String::new());
+            }
+            Ok(Err(error)) => ui.offline_error.set(error),
+            Err(_) => ui.offline_error.set(OFFLINE_UNREADABLE.into()),
+        }
+        sweep_verified(&mut ui, owner, ticket, scope).await;
+    });
+}
+
+/// Start one guarded integrity sweep of the offline screen's copies.
+fn sweep_offline_copies(ui: Ui, session: OfflineSession) {
+    let epoch = *ui.epoch.peek();
+    let ticket = ui.offline_list_gate.begin(epoch);
+    let owner = OfflineOwner::profile(&ui.offline_list_gate, &ticket, epoch, &session);
+    let mut sweeping = ui.clone();
+    spawn(async move {
+        let scope = OfflineScope::new(&owner);
+        sweep_verified(&mut sweeping, owner, ticket, scope).await;
+    });
+}
+
+/// Hash the saved copies on a blocking worker and publish the corrupt set only for a
+/// live identity. Cancellation is observed between blocks inside `offline::verify`.
+async fn sweep_verified(ui: &mut Ui, owner: OfflineOwner, ticket: Ticket, scope: OfflineScope) {
+    let verified = tokio::task::spawn_blocking({
+        let cancel = ticket.cancel.clone();
+        move || crate::offline::verify(&scope.origin, &scope.account_id, &|| cancel.is_cancelled())
+    })
+    .await;
+    if !owner.current(ui, &ticket) {
+        return;
+    }
+    if let Ok(Ok(report)) = verified {
+        ui.offline_corrupt.set(report.corrupt);
+    }
+}
+/// Resume the saved session after an explicit **Continue saved session** action.
+fn resume_saved(ui: Ui) {
+    resume_attempt(ui, None);
+}
+
+/// The resume attempt. `fallback` is present only for the AUD-05 cold start: it
+/// carries the private offline evidence so a server that does not answer falls
+/// through to the offline library on this device instead of a dead end.
+fn resume_attempt(
+    mut ui: Ui,
+    fallback: Option<(OfflineSession, Vec<crate::offline::OfflineTrack>)>,
+) {
     if !ui.alive.get()
         || ui.signed_in()
         || *ui.connecting.peek()
         || *ui.resuming.peek()
-        || (ui.audio.peek().is_none() && ui.audio_error.peek().is_empty())
+        // The button waits for the native output; an automatic startup attempt must
+        // still be able to learn that the saved session is unusable while the
+        // output thread is being prepared.
+        || (fallback.is_none()
+            && ui.audio.peek().is_none()
+            && ui.audio_error.peek().is_empty())
     {
         return;
     }
@@ -917,28 +1242,36 @@ fn resume_saved(mut ui: Ui) {
                     // AUD-04: a timeout, a network/DNS failure, a 5xx or a
                     // malformed record must keep the saved item so the listener
                     // can retry instead of losing a valid login.
-                    if !matches!(failure, SavedSessionFailure::Canceled) {
-                        ui.login_error.set(failure.message(&error));
+                    if matches!(failure, SavedSessionFailure::Canceled) {
+                        return;
                     }
-                    return;
+                    ui.login_error.set(failure.message(&error));
+                } else {
+                    // Genuine rejection (HTTP 401 / expired session): the stored
+                    // token can never authenticate again. Drop the in-memory copy
+                    // first so the button cannot start another doomed attempt, then
+                    // delete the item off the UI thread with a bounded deadline.
+                    let message = failure.message(&error);
+                    ui.saved_session.set(None);
+                    let deletion =
+                        delete_saved_session(move || crate::session_store::clear_attempt(attempt))
+                            .await;
+                    // AUD-01: the deletion may outlive the UI state that ordered it.
+                    if !ticket.current(&ui) {
+                        return;
+                    }
+                    ui.login_error.set(match deletion {
+                        Ok(()) => message,
+                        Err(problem) => format!("{message} {problem}"),
+                    });
                 }
-                // Genuine rejection (HTTP 401 / expired session): the stored
-                // token can never authenticate again. Drop the in-memory copy
-                // first so the button cannot start another doomed attempt, then
-                // delete the item off the UI thread with a bounded deadline.
-                let message = failure.message(&error);
-                ui.saved_session.set(None);
-                let deletion =
-                    delete_saved_session(move || crate::session_store::clear_attempt(attempt))
-                        .await;
-                // AUD-01: the deletion may outlive the UI state that ordered it.
-                if !ticket.current(&ui) {
-                    return;
+                // AUD-05: an unreachable, timed-out, refused or expired server does
+                // not strand the listener. The private saved copies on this device
+                // open in a read/play-only offline screen, with the reason kept
+                // visible; nothing is played and nothing is requested again.
+                if let Some((session, tracks)) = fallback {
+                    enter_offline_mode(ui, session, tracks);
                 }
-                ui.login_error.set(match deletion {
-                    Ok(()) => message,
-                    Err(problem) => format!("{message} {problem}"),
-                });
             }
         }
     });
@@ -1054,6 +1387,23 @@ fn sign_out(mut ui: Ui) {
             keyring_ui.login_error.set(format!(
                 "Local sign-out is complete, but the saved session was not confirmed as removed: {problem}"
             ));
+        }
+    });
+    // AUD-05: an explicit sign-out withdraws the private offline profile, so a cold
+    // start asks for a sign-in again. Only this non-secret hint is removed: saved
+    // copies, their manifests and their audio stay on this device. Local file work
+    // only, on a blocking worker.
+    let mut profile_ui = ui.clone();
+    spawn(async move {
+        let cleared = tokio::task::spawn_blocking(crate::offline_profile::clear).await;
+        if !profile_ui.alive.get() || *profile_ui.epoch.peek() != epoch || profile_ui.signed_in() {
+            return;
+        }
+        if !matches!(cleared, Ok(Ok(()))) {
+            profile_ui.login_error.set(
+                "Signed out. The private offline profile could not be removed, so saved copies may still open offline after a restart."
+                    .into(),
+            );
         }
     });
     let Some(account) = old else {
@@ -2092,7 +2442,7 @@ fn select_queue(mut ui: Ui, at: usize) {
 }
 
 fn advance(mut ui: Ui, command: Command) {
-    if !ui.signed_in() || ui.current_track().is_none() {
+    if !ui.can_play() || ui.current_track().is_none() {
         return;
     }
     // Natural EOF during offline playback must stay on the device queue; the
@@ -2181,7 +2531,7 @@ fn toggle(ui: Ui) {
 }
 
 fn set_playing(mut ui: Ui, desired: bool) {
-    if !ui.signed_in() || ui.offline_checking.peek().is_some() {
+    if !ui.can_play() || ui.offline_checking.peek().is_some() {
         return;
     }
     let Some(audio) = ui.audio.peek().clone() else {
@@ -2226,7 +2576,7 @@ fn set_playing(mut ui: Ui, desired: bool) {
 }
 
 fn seek_to(mut ui: Ui, position: u64) {
-    if !ui.signed_in() || *ui.preparing.peek() || ui.prepared.peek().is_none() {
+    if !ui.can_play() || *ui.preparing.peek() || ui.prepared.peek().is_none() {
         return;
     }
     let maximum = ui.snapshot.peek().duration_ms;
@@ -2267,7 +2617,7 @@ fn pause_system(ui: Ui) {
 }
 
 fn stop_system(mut ui: Ui) {
-    if !ui.signed_in() {
+    if !ui.can_play() {
         return;
     }
     ui.new_selection();
@@ -2290,7 +2640,7 @@ fn apply_system_control(mut ui: Ui, command: mpris::Command) -> bool {
         mpris::Command::Next => player_next(ui),
         mpris::Command::Previous => player_previous(ui),
         mpris::Command::SeekRelative(offset) => {
-            if ui.signed_in() && ui.prepared.peek().is_some() {
+            if ui.can_play() && ui.prepared.peek().is_some() {
                 let position = ui.snapshot.peek().position_ms;
                 let duration = ui.snapshot.peek().duration_ms;
                 let target = (i128::from(position) + i128::from(offset) / 1000)
@@ -2311,7 +2661,7 @@ fn apply_system_control(mut ui: Ui, command: mpris::Command) -> bool {
         }
         mpris::Command::SetVolume(value) => {
             if value.is_finite()
-                && ui.signed_in()
+                && ui.can_play()
                 && let Some(audio) = ui.audio.peek().clone()
             {
                 let volume = (value.clamp(0.0, 1.0)) as f32;
@@ -2324,7 +2674,7 @@ fn apply_system_control(mut ui: Ui, command: mpris::Command) -> bool {
             set_shuffle(ui, shuffle);
         }
         mpris::Command::SetRepeat(repeat) => {
-            if !ui.signed_in() {
+            if !ui.can_play() {
                 return false;
             }
             let repeat = match repeat {
@@ -2339,7 +2689,11 @@ fn apply_system_control(mut ui: Ui, command: mpris::Command) -> bool {
 }
 
 fn set_shuffle(mut ui: Ui, shuffle: bool) {
-    if !ui.signed_in() || *ui.offline_active.peek() || ui.remote_now.peek().is_some() {
+    if !ui.can_play()
+        || ui.offline_mode()
+        || *ui.offline_active.peek()
+        || ui.remote_now.peek().is_some()
+    {
         return;
     }
     if *ui.shuffle.peek() != shuffle {
@@ -2350,8 +2704,8 @@ fn set_shuffle(mut ui: Ui, shuffle: bool) {
 }
 
 fn set_repeat(mut ui: Ui, repeat: Repeat) {
-    let offline = *ui.offline_active.peek();
-    if !ui.signed_in() || ui.remote_now.peek().is_some() || (offline && repeat == Repeat::All) {
+    let offline = *ui.offline_active.peek() || ui.offline_mode();
+    if !ui.can_play() || ui.remote_now.peek().is_some() || (offline && repeat == Repeat::All) {
         return;
     }
     if *ui.repeat.peek() != repeat {
@@ -2362,7 +2716,7 @@ fn set_repeat(mut ui: Ui, repeat: Repeat) {
 }
 
 fn volume(mut ui: Ui, value: String) {
-    if !ui.signed_in() {
+    if !ui.can_play() {
         return;
     }
     let Ok(value) = value.parse::<f32>() else {
@@ -2386,7 +2740,7 @@ fn volume(mut ui: Ui, value: String) {
 /// remembered audible level); no second volume owner, element or output exists and
 /// the current source, queue and position are untouched.
 fn toggle_mute(mut ui: Ui) {
-    if !ui.signed_in() {
+    if !ui.can_play() {
         return;
     }
     let Some(audio) = ui.audio.peek().clone() else {
@@ -2598,6 +2952,124 @@ fn persist_device(mut ui: Ui) {
     });
 }
 
+/// AUD-05: the local-only offline library, rendered when no account is or can be
+/// adopted. It lists real saved copies of exactly the profile's canonical
+/// origin/account namespace, plays them through the existing `offline::prepare` path
+/// and the one native `AudioEngine`, and offers nothing that needs a server: no
+/// account, save, removal, favorite, search, playlist or library route, no queue
+/// upload and no listening event. Every deferred result is guarded by the same
+/// private offline gate as the signed-in list (AUD-03/AUD-08).
+fn offline_library(ui: Ui) -> Element {
+    let Some(session) = ui.offline_session.read().clone() else {
+        return rsx! {};
+    };
+    let tracks = ui.offline.read().clone();
+    let error = ui.offline_error.read().clone();
+    let problem = ui.login_error.read().clone();
+    let notice = ui.notice.read().clone();
+    let checking = ui.offline_checking.read().clone();
+    let corrupt = ui
+        .offline_corrupt
+        .read()
+        .iter()
+        .cloned()
+        .collect::<std::collections::HashSet<_>>();
+    let active = *ui.offline_active.read();
+    let wants_play = *ui.wants_play.read();
+    let current = ui.current_track().map(|track| track.id);
+    let output_error = ui.audio_error.read().clone();
+    let origin = session.origin.clone();
+    let count = tracks.len();
+    let copies = if count == 1 {
+        "1 private device copy".to_owned()
+    } else {
+        format!("{count} private device copies")
+    };
+    let refresh = ui.clone();
+    let sign_in = ui.clone();
+    let mut notice_signal = ui.notice;
+    rsx! {
+        aside { class: "native-sidebar", "aria-label": "Offline library",
+            div { class: "native-brand", Icon {name:"music"} span {"vela"} small {"OFFLINE"} }
+            div { class: "native-private-note",
+                Icon {name:"check"}
+                strong {"Read and play only"}
+                p {"{copies} saved for {origin}."}
+                p {"Saving, removing, favorites, search, playlists and your server library need a sign-in. Nothing here is uploaded."}
+            }
+            button { class: "button secondary small", "data-testid": "native-offline-refresh", onclick: move |_| refresh_offline_copies(refresh.clone()), "Check saved copies" }
+        }
+        main { class: "native-main", "data-testid": "native-offline-library", "data-offline-origin": "{origin}", "data-offline-count": "{count}",
+            header { class: "native-topbar",
+                div { class: "native-window-drag", onmousedown: move |event| { if event.trigger_button() == Some(dioxus::html::input_data::MouseButton::Primary) { dioxus::desktop::window().drag(); } }, ondoubleclick: move |_| dioxus::desktop::window().toggle_maximized(),
+                    span { class:"eyebrow", "OFFLINE LIBRARY" }
+                    strong { "Saved on this device" }
+                    small { "{origin}" }
+                }
+                div { class: "topbar-actions",
+                    button { class: "button secondary small", "data-testid": "native-offline-signin", onclick: move |_| { let mut ui = sign_in.clone(); leave_offline_mode(&mut ui); }, "Sign in to Vela" }
+                    WindowControls {}
+                }
+            }
+            div { class: "native-scroll", "data-testid": "native-scroll",
+                div { class: "native-scroll-inner",
+                    if !problem.is_empty() { div { class:"alert error", role:"alert", "{problem}" } }
+                    if !notice.is_empty() {
+                        div { class:"alert notice", role:"status",
+                            span { "{notice}" }
+                            button { class:"icon-button", "aria-label":"Dismiss notification", onclick: move |_| notice_signal.set(String::new()), Icon {name:"close"} }
+                        }
+                    }
+                    if !output_error.is_empty() { div { class:"alert error", role:"alert", "{output_error}" } }
+                    div { class:"library-intro",
+                        div {
+                            span { class:"eyebrow", "NO SERVER CONNECTION" }
+                            h1 { "Offline library" }
+                            p { "Your saved private copies, played by this device. No account is signed in and no request is made." }
+                        }
+                    }
+                    if !error.is_empty() { div { class:"alert error", role:"alert", "{error}" } }
+                    if tracks.is_empty() {
+                        div { class:"native-empty", Icon {name:"down"} h2 {"No saved offline copies"}
+                            p {"This device has no readable private copy for {origin}. Sign in to Vela to browse your library and save one for offline listening."}
+                        }
+                    } else {
+                        div { class:"catalog-caption", p {"Saved offline · {copies}"} span {"READ AND PLAY ONLY"} }
+                        div { class:"native-queue-list", for saved in tracks.iter().cloned() {
+                            {
+                                let id = saved.track.id.clone();
+                                let title = saved.track.title.clone();
+                                let artist = saved.track.artist.trim().to_owned();
+                                let device_note = format!("{} KiB on this device", saved.length_bytes / 1024);
+                                let damaged = corrupt.contains(&id);
+                                let checking_this = checking.as_ref().is_some_and(|entry| entry.track.id == id);
+                                let playing = active && current.as_deref() == Some(id.as_str()) && wants_play;
+                                let verb = if playing { "Pause" } else { "Play" };
+                                let play = ui.clone();
+                                let play_saved = saved.clone();
+                                rsx! { article { class: if playing { "native-queue-row current" } else { "native-queue-row" }, key: "{id}", "data-offline-track-id": "{id}",
+                                    ArtworkCover { ui: ui.clone(), artwork_id: saved.track.artwork_id.clone(), class: "neutral-cover", icon: "down" }
+                                    div { class: "native-queue-select",
+                                        div { strong { "{saved.track.title}" }
+                                            small { if artist.is_empty() { "{device_note}" } else { "{artist} · {device_note}" } }
+                                            small { if checking_this { "Checking this device copy…" } else if damaged { "Integrity check failed · save it again from the library" } else { "Private offline copy" } }
+                                        }
+                                    }
+                                    button { class: "button primary small", disabled: damaged || checking_this, "aria-label": "{verb} offline {title}", onclick: move |_| play_offline(play.clone(), play_saved.clone()),
+                                        if playing { Icon {name:"pause"} } else { Icon {name:"play"} } "{verb} offline"
+                                    }
+                                } }
+                            }
+                        } }
+                    }
+                    p { class:"native-preparation-note", "This screen is local-only. Your queue, favorites, playlists, search and history stay unavailable until you sign in to Vela; the saved copies and their private manifests are kept on this device either way." }
+                }
+            }
+        }
+        {player(ui.clone())}
+    }
+}
+
 fn sign_in(ui: Ui) -> Element {
     let origin = ui.origin.read().clone();
     let username = ui.username.read().clone();
@@ -2609,9 +3081,13 @@ fn sign_in(ui: Ui) -> Element {
     let notice = ui.notice.read().clone();
     let saved_session = ui.saved_session.read().clone();
     let resuming = *ui.resuming.read();
+    // AUD-05: a private offline profile with real saved copies is an explicit
+    // alternative to signing in. It is offered, never entered from here.
+    let offline_local = ui.offline_local.read().clone();
     let mut remember = ui.remember;
     let mut appearance_signal = ui.view;
     let resume = ui.clone();
+    let open_offline = ui.clone();
     let mut origin_signal = ui.origin;
     let mut username_signal = ui.username;
     let mut password_signal = ui.password;
@@ -2631,6 +3107,13 @@ fn sign_in(ui: Ui) -> Element {
                     p { "Saved session for {saved.origin}" }
                     button { class: "button secondary", disabled: connecting || resuming || output_pending, onclick: move |_| resume_saved(resume.clone()), if resuming { "Resuming…" } else { "Continue saved session" } }
                     small { "The keyring stores only this session token, not your password or CSRF token." }
+                }
+            }
+            if let Some(local) = offline_local {
+                div { class: "signin-notice", role: "group", "aria-label": "Offline library",
+                    p { "Saved offline copies for {local.origin} are on this device." }
+                    button { class: "button secondary", "data-testid": "native-offline-open", disabled: connecting || resuming, onclick: move |_| open_offline_library(open_offline.clone()), "Open offline library" }
+                    small { "Read and play only: saving, removing, favorites, search and your server library need a sign-in." }
                 }
             }
             if output_pending {p {class:"signin-notice",role:"status","data-testid":"native-output-status","Preparing native audio output…"}}
@@ -2653,10 +3136,21 @@ fn sign_in(ui: Ui) -> Element {
     } }
 }
 
-/// AUD-03/AUD-08: the account identity plus operation generation a deferred
-/// offline result belongs to. Every signal write after an `await` is re-checked
-/// against it, so a delayed delete, reload or verification from a replaced
-/// account can never overwrite the current list or playback state.
+/// Which local identity an offline operation belongs to. Both name a canonical
+/// origin plus account UUID, so the namespace and freshness rules are identical; only
+/// the live source differs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OfflineIdentity {
+    /// A real signed-in account.
+    Account,
+    /// The private offline profile (AUD-05): no account exists.
+    Profile,
+}
+
+/// AUD-03/AUD-08: the identity plus operation generation a deferred offline result
+/// belongs to. Every signal write after an `await` is re-checked against it, so a
+/// delayed delete, reload or verification from a replaced account *or* a replaced
+/// offline profile can never overwrite the current list or playback state.
 #[derive(Clone)]
 struct OfflineOwner {
     gate: Gate,
@@ -2664,6 +3158,7 @@ struct OfflineOwner {
     epoch: u64,
     user_id: String,
     origin: String,
+    identity: OfflineIdentity,
 }
 
 impl OfflineOwner {
@@ -2674,12 +3169,25 @@ impl OfflineOwner {
             epoch: account.epoch,
             user_id: account.user.id.clone(),
             origin: account.origin.clone(),
+            identity: OfflineIdentity::Account,
+        }
+    }
+    /// The same guard for the local-only offline screen, whose live identity is the
+    /// private profile rather than an account.
+    fn profile(gate: &Gate, ticket: &Ticket, epoch: u64, session: &OfflineSession) -> Self {
+        Self {
+            gate: gate.clone(),
+            generation: ticket.generation,
+            epoch,
+            user_id: session.account_id.clone(),
+            origin: session.origin.clone(),
+            identity: OfflineIdentity::Profile,
         }
     }
     /// The whole freshness rule as one pure predicate, so it is testable without
     /// a native window: the operation generation, the account epoch and the
-    /// exact account identity (user id *and* origin) must all still be the live
-    /// ones, the ticket must be uncancelled and the window still open.
+    /// exact identity (user id *and* origin) must all still be the live ones, the
+    /// ticket must be uncancelled and the window still open.
     fn matches(
         &self,
         alive: bool,
@@ -2696,15 +3204,25 @@ impl OfflineOwner {
                 .is_some_and(|(user_id, origin)| user_id == self.user_id && origin == self.origin)
     }
     fn current(&self, ui: &Ui, ticket: &Ticket) -> bool {
-        let account = ui.account.peek();
+        let live = match self.identity {
+            OfflineIdentity::Account => ui
+                .account
+                .peek()
+                .as_ref()
+                .map(|account| (account.user.id.clone(), account.origin.clone())),
+            OfflineIdentity::Profile => ui
+                .offline_session
+                .peek()
+                .as_ref()
+                .map(|session| (session.account_id.clone(), session.origin.clone())),
+        };
         self.matches(
             ui.alive.get(),
             ticket.cancel.is_cancelled(),
             self.gate.generation.get(),
             *ui.epoch.peek(),
-            account
-                .as_ref()
-                .map(|account| (account.user.id.as_str(), account.origin.as_str())),
+            live.as_ref()
+                .map(|(user_id, origin)| (user_id.as_str(), origin.as_str())),
         )
     }
 }
@@ -2937,36 +3455,54 @@ fn play_offline(ui: Ui, saved: crate::offline::OfflineTrack) {
 }
 
 fn start_offline_at(mut ui: Ui, index: usize) {
-    if !ui.signed_in() {
+    if !ui.can_play() {
         return;
     }
     let Some(saved) = ui.offline.peek().get(index).cloned() else {
         return;
     };
-    let Some(account) = ui.account.peek().clone() else {
-        return;
-    };
     let Some(audio) = ui.audio.peek().clone() else {
         return;
     };
+    // AUD-05: the private namespace a copy lives in is named either by the live
+    // account or by the local offline profile. The offline screen has no account at
+    // all, so the identity and its freshness guard are chosen here.
+    let epoch = *ui.epoch.peek();
+    let (session, owner, ticket) =
+        if let Some(account) = ui.account.peek().clone().filter(|_| ui.signed_in()) {
+            let ticket = ui.offline_play_gate.begin(account.epoch);
+            let owner = OfflineOwner::new(&ui.offline_play_gate, &ticket, &account);
+            (
+                OfflineSession {
+                    origin: account.origin,
+                    account_id: account.user.id,
+                },
+                owner,
+                ticket,
+            )
+        } else if let Some(session) = ui.offline_session.peek().clone() {
+            let ticket = ui.offline_play_gate.begin(epoch);
+            let owner = OfflineOwner::profile(&ui.offline_play_gate, &ticket, epoch, &session);
+            (session, owner, ticket)
+        } else {
+            return;
+        };
     // AUD-03: the manifest scan and the BLAKE3 hash of up to 250 MiB belong to a
     // blocking worker, never to this thread. The ticket exists before that
     // worker starts, so Cancel/Next/sign-out cannot be racing it, and nothing is
     // stopped or replaced until the copy has been verified.
-    let ticket = ui.offline_play_gate.begin(account.epoch);
-    let owner = OfflineOwner::new(&ui.offline_play_gate, &ticket, &account);
     ui.offline_checking.set(Some(saved.clone()));
     ui.offline_error.set(String::new());
     ui.source_error.set(String::new());
     let track_id = saved.track.id.clone();
     let title = saved.track.title.clone();
     spawn(async move {
-        let scope = OfflineScope::new(&owner);
         let prepared = tokio::task::spawn_blocking({
             let track_id = track_id.clone();
             let cancel = ticket.cancel.clone();
+            let session = session.clone();
             move || {
-                crate::offline::prepare(&scope.origin, &scope.account_id, &track_id, &|| {
+                crate::offline::prepare(&session.origin, &session.account_id, &track_id, &|| {
                     cancel.is_cancelled()
                 })
             }
@@ -3029,7 +3565,7 @@ fn start_offline_at(mut ui: Ui, index: usize) {
 }
 
 fn offline_step(ui: Ui, delta: i32) {
-    if !ui.signed_in() {
+    if !ui.can_play() {
         return;
     }
     let current = ui.order.read().current();
@@ -4516,7 +5052,13 @@ fn settings_view(ui: Ui) -> Element {
 fn player(ui: Ui) -> Element {
     let track = ui.current_track();
     let remote = ui.remote_now.read().clone();
+    // AUD-05: the local-only offline screen owns no server surface, so the player
+    // omits the favorite mutation and the server queue view there.
+    let local_only = ui.offline_mode();
     let offline_active = *ui.offline_active.read();
+    // The offline screen is an offline source before the first Play as well, so the
+    // transport never offers shuffle/repeat-all it would not execute.
+    let offline_source = offline_active || local_only;
     let offline_current = ui.order.read().current();
     let offline_len = ui.queue.read().len();
     let snapshot = ui.snapshot.read().clone();
@@ -4524,7 +5066,7 @@ fn player(ui: Ui) -> Element {
     let checking = ui.offline_checking.read().clone();
     let error = ui.source_error.read().clone();
     let (shuffle, repeat) = playback_modes(
-        offline_active,
+        offline_source,
         remote.is_some(),
         *ui.shuffle.read(),
         *ui.repeat.read(),
@@ -4558,14 +5100,14 @@ fn player(ui: Ui) -> Element {
     };
     let shuffle_help = if remote.is_some() {
         "Shuffle is unavailable for public sources"
-    } else if offline_active {
+    } else if offline_source {
         "Shuffle is unavailable for offline sources"
     } else {
         "Shuffle"
     };
     let repeat_help = if remote.is_some() {
         "Repeat is unavailable for public sources"
-    } else if offline_active {
+    } else if offline_source {
         "Offline repeat cycles between off and one track"
     } else {
         "Cycle repeat off, all and one"
@@ -4640,7 +5182,7 @@ fn player(ui: Ui) -> Element {
                     }
                 }
             }
-            if remote.is_none() && let Some(favorite_track)=track.clone() {
+            if !local_only && remote.is_none() && let Some(favorite_track)=track.clone() {
                 {
                     let favorite_ui=ui.clone();
                     rsx! { button {class:if favorite_track.favorite {"icon-button selected"}else{"icon-button"},"data-testid":"native-player-favorite","aria-pressed":favorite_track.favorite,disabled:favorite_disabled,"aria-label":if favorite_track.favorite {format!("Remove {} from favorites",favorite_track.title)} else {format!("Favorite {}",favorite_track.title)},title:if favorite_disabled {"Updating this favorite…"} else if favorite_track.favorite {"Remove from favorites"} else {"Add to favorites"},onclick:move |_|toggle_library_favorite(favorite_ui.clone(),favorite_track.clone()),Icon {name:"heart"}} }
@@ -4649,13 +5191,13 @@ fn player(ui: Ui) -> Element {
         }
         div {class:"player-controls",
             div {class:"transport",role:"group","aria-label":"Playback transport",
-                button {class:if shuffle{"icon-button selected"}else{"icon-button"},"aria-label":"Shuffle",title:shuffle_help,"aria-description":shuffle_help,"aria-pressed":shuffle,disabled:blocked||offline_active||remote.is_some(),onclick:move |_|{let ui=shuffle_ui.clone();let next=!*ui.shuffle.peek();set_shuffle(ui,next);},Icon {name:"shuffle"}}
-                button {class:"icon-button","aria-label":"Previous",disabled:blocked||(offline_active&&offline_current.is_none_or(|current|current==0))||(remote.is_some()&&*ui.remote_index.read()==0),onclick:move |_|player_previous(previous.clone()),Icon {name:"previous"}}
+                button {class:if shuffle{"icon-button selected"}else{"icon-button"},"aria-label":"Shuffle",title:shuffle_help,"aria-description":shuffle_help,"aria-pressed":shuffle,disabled:blocked||offline_source||remote.is_some(),onclick:move |_|{let ui=shuffle_ui.clone();let next=!*ui.shuffle.peek();set_shuffle(ui,next);},Icon {name:"shuffle"}}
+                button {class:"icon-button","aria-label":"Previous",disabled:blocked||(offline_source&&offline_current.is_none_or(|current|current==0))||(remote.is_some()&&*ui.remote_index.read()==0),onclick:move |_|player_previous(previous.clone()),Icon {name:"previous"}}
                 button {class:"native-play-toggle","data-testid":"native-player-play","aria-label":if playing{"Pause"}else{"Play"},disabled:blocked,onclick:move |_|toggle(toggle_ui.clone()),
                     span {class:"play-circle","aria-hidden":"true",if playing{Icon {name:"pause"}}else{Icon {name:"play"}}}
                 }
-                button {class:"icon-button","aria-label":"Next",disabled:blocked||(offline_active&&offline_current.is_none_or(|current|current+1>=offline_len))||(remote.is_some()&&*ui.remote_index.read()+1>=ui.remote_queue.read().len()),onclick:move |_|player_next(next.clone()),Icon {name:"next"}}
-                button {class:if repeat!=Repeat::Off{"icon-button selected"}else{"icon-button"},"aria-label":repeat_label,title:repeat_help,"aria-description":repeat_help,"aria-pressed":repeat!=Repeat::Off,disabled:blocked||remote.is_some(),onclick:move |_|{let next=match repeat{Repeat::Off if offline_active=>Repeat::One,Repeat::Off=>Repeat::All,Repeat::All=>Repeat::One,Repeat::One=>Repeat::Off};set_repeat(repeat_ui.clone(),next);},if repeat==Repeat::One{Icon {name:"repeat-one"}}else{Icon {name:"repeat"}}}
+                button {class:"icon-button","aria-label":"Next",disabled:blocked||(offline_source&&offline_current.is_none_or(|current|current+1>=offline_len))||(remote.is_some()&&*ui.remote_index.read()+1>=ui.remote_queue.read().len()),onclick:move |_|player_next(next.clone()),Icon {name:"next"}}
+                button {class:if repeat!=Repeat::Off{"icon-button selected"}else{"icon-button"},"aria-label":repeat_label,title:repeat_help,"aria-description":repeat_help,"aria-pressed":repeat!=Repeat::Off,disabled:blocked||remote.is_some(),onclick:move |_|{let next=match repeat{Repeat::Off if offline_source=>Repeat::One,Repeat::Off=>Repeat::All,Repeat::All=>Repeat::One,Repeat::One=>Repeat::Off};set_repeat(repeat_ui.clone(),next);},if repeat==Repeat::One{Icon {name:"repeat-one"}}else{Icon {name:"repeat"}}}
             }
             div {class:"native-seek",
                 span {class:"player-time","{time_label(snapshot.position_ms)}"}
@@ -4672,7 +5214,7 @@ fn player(ui: Ui) -> Element {
                 }
             }
             div {class:"player-actions",
-                button {class:"icon-button player-queue","data-testid":"native-player-queue","aria-label":"Open queue",title:"Queue",onclick:move |_|open_queue.view.set("queue"),Icon {name:"queue"}}
+                if !local_only { button {class:"icon-button player-queue","data-testid":"native-player-queue","aria-label":"Open queue",title:"Queue",onclick:move |_|open_queue.view.set("queue"),Icon {name:"queue"}} }
                 button {class:if muted{"icon-button player-mute selected"}else{"icon-button player-mute"},"data-testid":"native-player-mute","aria-label":if muted{"Unmute"}else{"Mute"},"aria-pressed":muted,title:if muted{"Restore the last audible level"}else{"Mute the native output"},disabled:!ui.audio_ready(),onclick:move |_|toggle_mute(mute_ui.clone()),Icon {name:"volume"}}
                 div {class:"player-volume",
                     label {class:"sr-only",r#for:"native-volume","Volume"}
@@ -4790,6 +5332,8 @@ pub fn App() -> Element {
         offline_error: use_signal(String::new),
         offline_corrupt: use_signal(Vec::new),
         offline_active: use_signal(|| false),
+        offline_local: use_signal(|| None),
+        offline_session: use_signal(|| None),
         offline_confirm: use_signal(String::new),
         cache_usage: use_signal(|| None),
         cache_busy: use_signal(|| false),
@@ -4883,7 +5427,7 @@ pub fn App() -> Element {
                 if *observer.mpris_note.peek() != note {
                     observer.mpris_note.set(note);
                 }
-                if !observer.signed_in() {
+                if !observer.can_play() {
                     observer.publish_system_controls();
                     continue;
                 }
@@ -4942,42 +5486,14 @@ pub fn App() -> Element {
     let compact_public = ui.clone();
     let theme_toggle = ui.clone();
     let css = include_str!("../style.css");
-    let saved_loader = ui.clone();
+    // AUD-05: one coordinated cold-start sequence. The private offline profile and
+    // its real saved copies are read locally first, then the opt-in saved session;
+    // a usable saved session is resumed once through the existing guarded path and
+    // anything other than a real sign-in falls through to the offline library.
+    let starting = ui.clone();
     use_future(move || {
-        let mut ui = saved_loader.clone();
-        async move {
-            let generation = ui.login_gate.generation.get();
-            // Claim the item for this read: a cleanup may only delete the record
-            // that was actually read, never one a newer login already saved.
-            let attempt = crate::session_store::begin_attempt();
-            let loaded = tokio::task::spawn_blocking(crate::session_store::load).await;
-            // AUD-01: a saved-item read may not overwrite a login that started
-            // while the keyring was being read.
-            if !ui.alive.get() || ui.signed_in() || ui.login_gate.generation.get() != generation {
-                return;
-            }
-            match loaded {
-                Ok(Ok(Some(saved))) => ui.saved_session.set(Some(saved)),
-                Ok(Ok(None)) => {}
-                Ok(Err(error)) => {
-                    ui.login_error.set(error.message().to_owned());
-                    // AUD-04/AUD-11: only a malformed record is cleaned up, and
-                    // only after the user-visible error is published. A timeout
-                    // or an unavailable helper must keep the stored item.
-                    if error.is_corrupt_record() {
-                        let _ = delete_saved_session(move || {
-                            crate::session_store::clear_attempt(attempt)
-                        })
-                        .await;
-                    }
-                }
-                Err(_) => ui.login_error.set(
-                    crate::session_store::KeyringError::Unavailable
-                        .message()
-                        .to_owned(),
-                ),
-            }
-        }
+        let starting = starting.clone();
+        async move { startup(starting).await }
     });
     rsx! {
         document::Style {"{css}"}
@@ -5001,6 +5517,10 @@ pub fn App() -> Element {
                     }
                 }
                 {player(ui.clone())}
+            }else if ui.offline_session.read().is_some(){
+                // AUD-05: a truthful local library, rendered before any `/api/me`
+                // success and without an account, token or request.
+                {offline_library(ui.clone())}
             }else{
                 div {class:"signin-window-controls",WindowControls {}}
                 if view=="settings"{
@@ -5298,6 +5818,7 @@ mod tests {
             epoch: 4,
             user_id: "account-a".into(),
             origin: "https://a.example".into(),
+            identity: OfflineIdentity::Account,
         };
         let same_account = Some(("account-a", "https://a.example"));
         assert!(owner.matches(true, false, 7, 4, same_account));
@@ -5329,5 +5850,48 @@ mod tests {
             !owner.matches(false, false, 7, 4, same_account),
             "a closed window publishes nothing"
         );
+    }
+
+    /// REG-AUD-05: the local-only offline screen runs the same freshness rule on a
+    /// private-profile identity. A delayed verification, reload or play may only
+    /// publish for the profile that is still on screen, and the account and profile
+    /// identities can never stand in for each other.
+    #[test]
+    fn a_delayed_offline_result_cannot_publish_for_a_replaced_offline_profile() {
+        let owner = OfflineOwner {
+            gate: Gate::default(),
+            generation: 3,
+            epoch: 2,
+            user_id: "account-a".into(),
+            origin: "https://a.example".into(),
+            identity: OfflineIdentity::Profile,
+        };
+        assert_eq!(owner.identity, OfflineIdentity::Profile);
+        let same = Some(("account-a", "https://a.example"));
+        assert!(owner.matches(true, false, 3, 2, same));
+        assert!(
+            !owner.matches(true, false, 3, 3, same),
+            "leaving or replacing the offline screen bumps the epoch"
+        );
+        assert!(
+            !owner.matches(true, false, 3, 2, Some(("account-a", "https://b.example"))),
+            "the same account UUID on another origin is another local library"
+        );
+        assert!(
+            !owner.matches(true, false, 3, 2, Some(("account-b", "https://a.example"))),
+            "a replaced profile may not publish this result"
+        );
+        assert!(
+            !owner.matches(true, false, 3, 2, None),
+            "leaving the offline screen publishes nothing"
+        );
+        assert!(!owner.matches(true, true, 3, 2, same), "canceled work");
+        assert!(!owner.matches(false, false, 3, 2, same), "closed window");
+        // A profile identity never equals an account identity with the same UUID.
+        let account = OfflineOwner {
+            identity: OfflineIdentity::Account,
+            ..owner
+        };
+        assert_ne!(account.identity, OfflineIdentity::Profile);
     }
 }

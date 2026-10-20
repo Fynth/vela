@@ -38,13 +38,14 @@ def main():
     parser.add_argument('--close-while-playing', action='store_true', help='Close the real window during active native playback and check original cleanup')
     parser.add_argument('--test-peer', action='store_true', help='Start a second isolated Vela server and exercise its explicit public catalog')
     parser.add_argument('--test-session', action='store_true', help='Also verify opt-in Secret Service session save/resume/delete across two native processes')
+    parser.add_argument('--test-offline-launch', action='store_true', help='After the saved-copy scenario stops the fixture server, cold-launch a second real window and verify the offline library, native playback and a clean close (AUD-05)')
     parser.add_argument('--backend', choices=['x11', 'wayland'], default='x11', help='Actual GTK backend for the isolated window')
     parser.add_argument('--window-only', action='store_true', help='Verify normal tiled geometry and transport without resizing or offline/peer scenarios')
     args = parser.parse_args()
     if args.backend == 'wayland' and not args.window_only:
         parser.error('Wayland currently requires --window-only; full resize/peer/offline QA uses --backend x11')
-    if args.window_only and (args.backend != 'wayland' or args.test_peer or args.test_session or args.close_while_playing):
-        parser.error('--window-only requires --backend wayland and cannot be combined with peer/session/close scenarios')
+    if args.window_only and (args.backend != 'wayland' or args.test_peer or args.test_session or args.close_while_playing or args.test_offline_launch):
+        parser.error('--window-only requires --backend wayland and cannot be combined with peer/session/close/offline-launch scenarios')
     evidence = args.evidence.resolve()
     if evidence.exists() and any(evidence.iterdir()):
         raise RuntimeError('Use a new/empty evidence directory; earlier evidence is preserved')
@@ -357,6 +358,59 @@ def main():
                     'digest': offline_manifest['digest'],
                 }
                 report.write_text(json.dumps(result, indent=2) + '\n')
+                profile_path = private / 'home' / 'vela' / 'offline' / 'profile.json'
+                profile_bytes = profile_path.read_bytes() if profile_path.is_file() else None
+                if args.test_offline_launch:
+                    # AUD-05/REG-AUD-05 cold offline launch. The real sign-in above wrote
+                    # the private, non-secret offline profile; the fixture server is
+                    # already stopped by the handshake, so this second real window starts
+                    # with no reachable server and no live session.
+                    if profile_bytes is None:
+                        raise RuntimeError('Sign-in did not write the private offline profile')
+                    if profile_path.stat().st_mode & 0o077:
+                        raise RuntimeError('Offline profile is not private0600')
+                    profile = json.loads(profile_bytes)
+                    if sorted(profile) != ['account_id', 'origin', 'version']:
+                        raise RuntimeError(f'Offline profile carries unexpected fields: {sorted(profile)}')
+                    if profile['version'] != 1 or profile['origin'] != origin + '/' or profile['account_id'] != auth['user']['id']:
+                        raise RuntimeError(f'Offline profile does not name this sign-in: {profile!r}')
+                    if server.poll() is None:
+                        raise RuntimeError('Fixture server must be stopped for the cold offline launch')
+                    offline_report = evidence / 'offline-report.json'
+                    offline_env = environment.copy()
+                    offline_env.update({'VELA_NATIVE_QA_SESSION_PHASE': 'offline', 'VELA_NATIVE_QA_REPORT': str(offline_report)})
+                    with (evidence / 'offline-window.log').open('wb') as offline_log:
+                        offline_driver = subprocess.Popen([str(args.driver.resolve())], env=offline_env, stdout=offline_log, stderr=subprocess.STDOUT)
+                        offline_driver.wait(timeout=240)
+                    if offline_driver.returncode or not offline_report.exists():
+                        raise RuntimeError('Cold offline native process failed')
+                    offline = json.loads(offline_report.read_text())
+                    if not offline['result']['ok']:
+                        raise RuntimeError(f"Cold offline launch failed: {offline['result'].get('failure')}")
+                    if not all(image['passed'] for image in offline['screenshots']):
+                        raise RuntimeError('Cold offline launch left a failed screenshot capture')
+                    if list((private / 'temporary').glob('vela-native-*')):
+                        raise RuntimeError('Cold offline launch left a completed temporary original after exit')
+                    if not profile_path.is_file() or profile_path.read_bytes() != profile_bytes:
+                        raise RuntimeError('Cold offline launch rewrote or removed the private offline profile')
+                    if server.poll() is None:
+                        raise RuntimeError('Cold offline launch did not stay offline: the fixture server answered')
+                    result['cold_offline_launch'] = {
+                        'server_stopped': True,
+                        'saved_session_configured': bool(args.test_session),
+                        'profile': {
+                            'path': str(profile_path),
+                            'mode': oct(profile_path.stat().st_mode & 0o777),
+                            'fields': sorted(profile),
+                            'origin': profile['origin'],
+                            'account_scoped': True,
+                            'unchanged_after_offline_launch': True,
+                        },
+                        'checks': offline['result']['checks'],
+                        'screenshots': [image['name'] for image in offline['screenshots']],
+                        'temporary_originals_after_exit': 0,
+                    }
+                    report.write_text(json.dumps(result, indent=2) + '\n')
                 if args.test_peer:
                     if not tls_connections:
                         raise RuntimeError('TLS-terminated peer received no native TLS connections')
@@ -418,12 +472,15 @@ def main():
                     cleared = secret_lookup()
                     if cleared.returncode == 0 and cleared.stdout.strip():
                         raise RuntimeError('Saved session survived explicit sign-out')
+                    if profile_path.exists():
+                        raise RuntimeError('Explicit sign-out did not withdraw the private offline profile')
                     result['session_resume'] = {
                         'stored_origin': envelope['origin'],
                         'token_stored': True,
                         'contains_password': False,
                         'resumed_checks': resumed['result']['checks'],
                         'cleared_after_signout': True,
+                        'offline_profile_withdrawn_on_signout': True,
                     }
                     report.write_text(json.dumps(result, indent=2) + '\n')
                 print(json.dumps(result, indent=2))
