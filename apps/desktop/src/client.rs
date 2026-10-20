@@ -1719,6 +1719,9 @@ impl VelaClient {
         }
     }
 
+    /// The private media cache directory. It is consulted on the platform that
+    /// keeps the cache, and in tests that point it at a temporary directory.
+    #[cfg(any(target_os = "linux", test))]
     fn cache_root(&self) -> Result<PathBuf, String> {
         #[cfg(test)]
         if let Some(directory) = &self.inner.cache_directory {

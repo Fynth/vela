@@ -87,6 +87,9 @@ pub(crate) struct Cached {
     /// cannot become a decoder lease and the verified GET is used instead.
     #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     pub(crate) file: fs::File,
+    /// The verified length of the cached original. It is read where the cached
+    /// bytes become a decoder lease; elsewhere the verified GET is used instead.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     pub(crate) length_bytes: u64,
 }
 

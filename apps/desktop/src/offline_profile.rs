@@ -251,6 +251,10 @@ fn private_file(path: &Path) -> std::io::Result<fs::File> {
     options.open(path)
 }
 
+/// Restricts a file to the owner. POSIX permissions exist on every target that
+/// Vela ships a desktop for today; the other platforms keep the private
+/// directory the file lives in as the boundary.
+#[cfg_attr(not(unix), allow(unused_variables))]
 fn private_mode(path: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {

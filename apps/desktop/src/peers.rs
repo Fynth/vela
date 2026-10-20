@@ -104,7 +104,7 @@ fn save_to(path: &Path, peers: &[String]) -> Result<(), String> {
             .open(&temporary)
     };
     #[cfg(not(unix))]
-    let mut file = fs::OpenOptions::new()
+    let file = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(&temporary);

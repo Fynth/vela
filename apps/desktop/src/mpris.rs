@@ -14,6 +14,7 @@ use std::sync::{
 };
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 
+#[cfg(target_os = "linux")]
 const STARTING: u8 = 0;
 const READY: u8 = 1;
 const FAILED: u8 = 2;
@@ -58,6 +59,10 @@ pub(crate) struct Update {
     pub seek_serial: u64,
 }
 
+/// A typed media-session command. The Linux bus creates these; every platform
+/// consumes them, so a target without a bus integration simply never produces
+/// one and the in-app controls remain the only path.
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Command {
     Play,
