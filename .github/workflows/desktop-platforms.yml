@@ -141,9 +141,30 @@ jobs:
           name: desktop-android
           path: target/aarch64-linux-android/release/vela-mobile
 
+  ios:
+    name: ios client (arm64)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.0
+          targets: aarch64-apple-ios
+      - uses: Swatinem/rust-cache@v2
+      - name: Build the iOS client
+        run: |
+          cargo build --locked --release -p vela-desktop --bin vela-mobile --features mobile --target aarch64-apple-ios
+      - name: Check the iOS binary
+        run: |
+          file target/aarch64-apple-ios/release/vela-mobile
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-ios
+          path: target/aarch64-apple-ios/release/vela-mobile
+
   report:
     name: platform readiness
-    needs: [linux, windows, macos, android]
+    needs: [linux, windows, macos, android, ios]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
