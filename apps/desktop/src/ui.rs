@@ -833,10 +833,10 @@ fn adopt_account(
     };
     let catalog_ui = ui.clone();
     spawn(async move {
-        let scope = owner.user_id.clone();
+        let scope = OfflineScope::new(&owner);
         let loaded = tokio::task::spawn_blocking({
-            let account_id = scope.clone();
-            move || crate::offline::load(&account_id)
+            let scope = scope.clone();
+            move || crate::offline::load(&scope.origin, &scope.account_id)
         })
         .await;
         if !owner.current(&ui, &ticket) {
@@ -850,9 +850,10 @@ fn adopt_account(
                 .set("Saved offline music could not be read.".into()),
         }
         let verified = tokio::task::spawn_blocking({
-            let account_id = scope;
             let cancel = ticket.cancel.clone();
-            move || crate::offline::verify(&account_id, &|| cancel.is_cancelled())
+            move || {
+                crate::offline::verify(&scope.origin, &scope.account_id, &|| cancel.is_cancelled())
+            }
         })
         .await;
         // AUD-08: the integrity sweep awaited the reload; an old account may not
@@ -2708,6 +2709,26 @@ impl OfflineOwner {
     }
 }
 
+/// AUD-06: the local namespace one offline operation may touch — the canonical
+/// origin plus the account UUID. It is derived from the same owner the freshness
+/// rule checks, so a superseded operation cannot even name a newer account's (or
+/// another origin's) directory, and the blocking worker carries only these two
+/// strings: never a media path, token or credential.
+#[derive(Clone)]
+struct OfflineScope {
+    origin: String,
+    account_id: String,
+}
+
+impl OfflineScope {
+    fn new(owner: &OfflineOwner) -> Self {
+        Self {
+            origin: owner.origin.clone(),
+            account_id: owner.user_id.clone(),
+        }
+    }
+}
+
 /// AUD-07: what removing one saved copy does to the live offline playback.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum OfflineRemoval {
@@ -2843,11 +2864,16 @@ fn download_offline(mut ui: Ui, track: Track) {
                 return;
             }
         };
+        let scope = OfflineScope::new(&owner);
         let saved = tokio::task::spawn_blocking({
-            let account_id = owner.user_id.clone();
+            let scope = scope.clone();
             let track = track.clone();
             let cancel = ticket.cancel.clone();
-            move || crate::offline::save(&account_id, &track, &prepared, &|| cancel.is_cancelled())
+            move || {
+                crate::offline::save(&scope.origin, &scope.account_id, &track, &prepared, &|| {
+                    cancel.is_cancelled()
+                })
+            }
         })
         .await;
         // AUD-08: the copy finished, but the account may have been replaced.
@@ -2858,8 +2884,8 @@ fn download_offline(mut ui: Ui, track: Track) {
         match saved {
             Ok(Ok(())) => {
                 let loaded = tokio::task::spawn_blocking({
-                    let account_id = owner.user_id.clone();
-                    move || crate::offline::load(&account_id)
+                    let scope = scope.clone();
+                    move || crate::offline::load(&scope.origin, &scope.account_id)
                 })
                 .await;
                 // AUD-08: this reload awaited as well; only this operation may
@@ -2935,11 +2961,15 @@ fn start_offline_at(mut ui: Ui, index: usize) {
     let track_id = saved.track.id.clone();
     let title = saved.track.title.clone();
     spawn(async move {
+        let scope = OfflineScope::new(&owner);
         let prepared = tokio::task::spawn_blocking({
-            let account_id = owner.user_id.clone();
             let track_id = track_id.clone();
             let cancel = ticket.cancel.clone();
-            move || crate::offline::prepare(&account_id, &track_id, &|| cancel.is_cancelled())
+            move || {
+                crate::offline::prepare(&scope.origin, &scope.account_id, &track_id, &|| {
+                    cancel.is_cancelled()
+                })
+            }
         })
         .await;
         // AUD-03/AUD-08: a late, canceled or superseded verification writes
@@ -3053,10 +3083,11 @@ fn remove_offline(mut ui: Ui, track_id: String) {
     ui.offline_removing.set(track_id.clone());
     ui.offline_error.set(String::new());
     spawn(async move {
+        let scope = OfflineScope::new(&owner);
         let removed = tokio::task::spawn_blocking({
-            let account_id = owner.user_id.clone();
+            let scope = scope.clone();
             let track_id = track_id.clone();
-            move || crate::offline::remove(&account_id, &track_id)
+            move || crate::offline::remove(&scope.origin, &scope.account_id, &track_id)
         })
         .await;
         // AUD-08: the delete ran while this operation could have been replaced
@@ -3102,8 +3133,7 @@ fn remove_offline(mut ui: Ui, track_id: String) {
             OfflineRemoval::Keep => {}
         }
         let reloaded = tokio::task::spawn_blocking({
-            let account_id = owner.user_id.clone();
-            move || crate::offline::load(&account_id)
+            move || crate::offline::load(&scope.origin, &scope.account_id)
         })
         .await;
         // AUD-08: the reload awaited again; a stale operation may not replace

@@ -1,9 +1,28 @@
-//! Explicit, private, account-scoped offline copies of owner-authorized originals.
+//! Explicit, private, origin- and account-scoped offline copies of owner-authorized
+//! originals.
 //!
 //! Only completed originals already validated by the native HTTP client are copied.
 //! The cache stores public catalog metadata and audio bytes, never credentials,
 //! session tokens or listening events. A manifest and its audio are published atomically
-//! under a private per-account directory; corrupt/incomplete entries are ignored.
+//! under a private directory named for the canonical origin *and* the account;
+//! corrupt/incomplete entries are ignored.
+//!
+//! AUD-06: the namespace is `$XDG_DATA_HOME/vela/offline/<blake3(canonical
+//! origin)>/<account-uuid>`. Account and track UUIDs are minted per server, so two
+//! distinct origins (a forked database, a restored backup, a renamed host) can
+//! legitimately hand out the same UUIDs. Hashing the canonical origin into the
+//! path, and repeating it inside every manifest, means such copies never share a
+//! directory, a quota or a lookup: a manifest whose recorded origin/account is not
+//! the requested namespace is never loaded and never played.
+//!
+//! Copies written by earlier builds under the old account-only
+//! `$XDG_DATA_HOME/vela/offline/<account-uuid>/` directory predate origin scoping.
+//! They cannot be attributed to any origin, so this module never derives, reads,
+//! rewrites, migrates or deletes that path: the bytes stay exactly as they are
+//! until the listener explicitly re-attaches or clears them (recoverable legacy
+//! collection, NAT03). A legacy-shaped manifest without an `origin` field is
+//! rejected even when it is found inside a new namespace, instead of being
+//! reinterpreted as a copy of the origin that happens to ask next.
 //!
 //! Every operation that touches audio bytes or manifests takes a cooperative
 //! cancellation probe and is meant to run in a blocking worker, never on the native
@@ -68,6 +87,12 @@ pub struct VerifyReport {
 #[serde(deny_unknown_fields)]
 struct Record {
     version: u8,
+    /// Canonical origin this copy belongs to. `serde(default)` keeps a manifest
+    /// written before origin scoping parseable, so the namespace comparison in
+    /// `load_from` can reject it explicitly instead of failing the whole parse
+    /// and instead of ever treating it as a copy of the current origin (AUD-06).
+    #[serde(default)]
+    origin: String,
     account_id: String,
     saved_at: u64,
     length_bytes: u64,
@@ -76,10 +101,53 @@ struct Record {
     digest: String,
 }
 
-fn data_root(account_id: &str) -> Result<PathBuf, String> {
-    if account_id.parse::<uuid::Uuid>().is_err() {
-        return Err("Offline copies require a valid account.".into());
+/// Identity of one private offline namespace: the canonical origin an account
+/// lives on plus that account's UUID. Both parts are required because neither
+/// alone identifies local bytes (AUD-06).
+struct Namespace {
+    /// Canonical origin (`<scheme>://<host>[:port]/`) as `canonical_origin`
+    /// produced it, never the spelling the listener typed.
+    origin: String,
+    /// Canonical lower-case account UUID.
+    account_id: String,
+}
+
+impl Namespace {
+    fn new(origin: &str, account_id: &str) -> Result<Self, String> {
+        // The same canonical-origin policy the native HTTP client and its caches
+        // use: HTTPS, or numeric loopback HTTP, with no credentials, query or
+        // path. Anything else is not an origin this device can name.
+        let origin = crate::client::canonical_origin(origin)?;
+        if !crate::client::canonical_uuid(account_id) {
+            return Err("Offline copies require a valid account.".into());
+        }
+        Ok(Self {
+            origin: origin.as_str().to_owned(),
+            account_id: account_id.to_owned(),
+        })
     }
+    /// `$XDG_DATA_HOME/vela/offline/<blake3(canonical origin)>/<account-uuid>`.
+    ///
+    /// The old account-only `<base>/<account-uuid>/` directory is deliberately
+    /// not derived here: it is the recoverable legacy collection described in the
+    /// module documentation and must be preserved byte-for-byte, not adopted by
+    /// whichever origin signs in next.
+    fn root(&self) -> Result<PathBuf, String> {
+        Ok(offline_base()?
+            .join(origin_hash(&self.origin))
+            .join(&self.account_id))
+    }
+}
+
+/// A one-way, fixed-length directory name for one canonical origin. It is derived
+/// only from the origin: no token, password, account name or media path enters it.
+fn origin_hash(origin: &str) -> String {
+    blake3::hash(origin.as_bytes()).to_hex().to_string()
+}
+
+/// `$XDG_DATA_HOME/vela/offline`, or `$HOME/.local/share/vela/offline`. A missing
+/// private data root means no offline copies, never a public temporary directory.
+fn offline_base() -> Result<PathBuf, String> {
     let base = std::env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
         .filter(|path| path.is_absolute())
@@ -89,26 +157,31 @@ fn data_root(account_id: &str) -> Result<PathBuf, String> {
                 .map(|home| home.join(".local").join("share"))
         })
         .ok_or_else(|| "No local data directory is available for offline copies.".to_owned())?;
-    Ok(base.join("vela").join("offline").join(account_id))
+    Ok(base.join("vela").join("offline"))
 }
 
-pub fn load(account_id: &str) -> Result<Vec<OfflineTrack>, String> {
-    load_from(&data_root(account_id)?, account_id)
+pub fn load(origin: &str, account_id: &str) -> Result<Vec<OfflineTrack>, String> {
+    let namespace = Namespace::new(origin, account_id)?;
+    load_from(&namespace.root()?, &namespace)
 }
 
-pub fn audio_path(account_id: &str, track_id: &str) -> Result<PathBuf, String> {
-    let root = data_root(account_id)?;
-    let path = audio_path_from(&root, track_id)?;
+pub fn audio_path(origin: &str, account_id: &str, track_id: &str) -> Result<PathBuf, String> {
+    let namespace = Namespace::new(origin, account_id)?;
+    let path = audio_path_from(&namespace.root()?, track_id)?;
     if !path.is_file() {
         return Err(MISSING_COPY.into());
     }
     Ok(path)
 }
 
-pub fn remove(account_id: &str, track_id: &str) -> Result<(), String> {
-    remove_from(&data_root(account_id)?, track_id)
+pub fn remove(origin: &str, account_id: &str, track_id: &str) -> Result<(), String> {
+    let namespace = Namespace::new(origin, account_id)?;
+    remove_from(&namespace.root()?, track_id)
 }
 
+/// `root` already *is* the origin/account namespace, so deletion is scoped by the
+/// directory it is handed: a legacy account-only copy, or another origin's copy of
+/// the same track UUID, is a different path and is never removed here.
 fn remove_from(root: &Path, track_id: &str) -> Result<(), String> {
     let audio = audio_path_from(root, track_id)?;
     let manifest = root.join(format!("{track_id}.json"));
@@ -125,21 +198,17 @@ fn remove_from(root: &Path, track_id: &str) -> Result<(), String> {
 /// One explicitly requested copy. The probe is consulted between blocks so the
 /// caller can stop the copy without losing an already healthy previous copy.
 pub fn save(
+    origin: &str,
     account_id: &str,
     track: &Track,
     prepared: &PreparedAudio,
     canceled: &dyn Fn() -> bool,
 ) -> Result<(), String> {
-    save_to(
-        &data_root(account_id)?,
-        account_id,
-        track,
-        prepared,
-        canceled,
-    )
+    let namespace = Namespace::new(origin, account_id)?;
+    save_to(&namespace.root()?, &namespace, track, prepared, canceled)
 }
 
-fn load_from(root: &Path, account_id: &str) -> Result<Vec<OfflineTrack>, String> {
+fn load_from(root: &Path, namespace: &Namespace) -> Result<Vec<OfflineTrack>, String> {
     let entries = match fs::read_dir(root) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -178,7 +247,12 @@ fn load_from(root: &Path, account_id: &str) -> Result<Vec<OfflineTrack>, String>
             _ => false,
         };
         if !digest_valid
-            || record.account_id != account_id
+            // AUD-06: the manifest must name exactly the origin and account whose
+            // directory it was found in. A copy of another origin, or a legacy
+            // manifest with no origin at all (empty by `serde(default)`), is never
+            // loaded, so no later step can play it.
+            || record.origin != namespace.origin
+            || record.account_id != namespace.account_id
             || record.track.id != stem
             || record.length_bytes == 0
             || record.length_bytes != record.track.size_bytes as u64
@@ -278,6 +352,27 @@ fn unique_suffix() -> String {
     format!("{}-{}", std::process::id(), uuid::Uuid::new_v4().simple())
 }
 
+/// Create the account namespace and the origin-hash directory above it as `0700`
+/// directories (AUD-06): another local user can neither read a copy nor even
+/// enumerate which origins/accounts this device holds music for.
+fn private_directory(path: &Path) -> Result<(), String> {
+    let mut builder = fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    builder.create(path).map_err(|_| WRITE_COPY.to_owned())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o700))
+            .map_err(|_| WRITE_COPY.to_owned())?;
+    }
+    Ok(())
+}
+
 fn private_file(path: &Path) -> std::io::Result<fs::File> {
     let mut options = fs::OpenOptions::new();
     options.write(true).create_new(true);
@@ -291,7 +386,7 @@ fn private_file(path: &Path) -> std::io::Result<fs::File> {
 
 fn save_to(
     root: &Path,
-    account_id: &str,
+    namespace: &Namespace,
     track: &Track,
     prepared: &PreparedAudio,
     canceled: &dyn Fn() -> bool,
@@ -299,22 +394,15 @@ fn save_to(
     if canceled() {
         return Err(CANCELED.into());
     }
-    if account_id.parse::<uuid::Uuid>().is_err()
-        || track.id.parse::<uuid::Uuid>().is_err()
+    if track.id.parse::<uuid::Uuid>().is_err()
         || prepared.length_bytes == 0
         || prepared.length_bytes > crate::client::MAX_MEDIA_BYTES
         || track.size_bytes as u64 != prepared.length_bytes
     {
         return Err(UNAVAILABLE.into());
     }
-    fs::create_dir_all(root).map_err(|_| WRITE_COPY.to_owned())?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(root, fs::Permissions::from_mode(0o700))
-            .map_err(|_| WRITE_COPY.to_owned())?;
-    }
-    let existing = load_from(root, account_id)?;
+    private_directory(root)?;
+    let existing = load_from(root, namespace)?;
     let replacing = existing.iter().any(|entry| entry.track.id == track.id);
     if !replacing && existing.len() >= MAX_TRACKS {
         return Err(FULL.into());
@@ -346,7 +434,8 @@ fn save_to(
     };
     let record = Record {
         version: 2,
-        account_id: account_id.to_owned(),
+        origin: namespace.origin.clone(),
+        account_id: namespace.account_id.clone(),
         saved_at: SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|duration| duration.as_secs())
@@ -475,16 +564,21 @@ fn publish(
     Ok(())
 }
 
-pub fn verify(account_id: &str, canceled: &dyn Fn() -> bool) -> Result<VerifyReport, String> {
-    verify_from(&data_root(account_id)?, account_id, canceled)
+pub fn verify(
+    origin: &str,
+    account_id: &str,
+    canceled: &dyn Fn() -> bool,
+) -> Result<VerifyReport, String> {
+    let namespace = Namespace::new(origin, account_id)?;
+    verify_from(&namespace.root()?, &namespace, canceled)
 }
 
 fn verify_from(
     root: &Path,
-    account_id: &str,
+    namespace: &Namespace,
     canceled: &dyn Fn() -> bool,
 ) -> Result<VerifyReport, String> {
-    let entries = load_from(root, account_id)?;
+    let entries = load_from(root, namespace)?;
     let mut report = VerifyReport::default();
     for entry in entries {
         if canceled() {
@@ -531,23 +625,25 @@ fn verify_from(
 /// the decoded bytes can never differ from the verified bytes (no TOCTOU). The
 /// caller owns the returned lease: dropping the result closes the descriptor.
 pub fn prepare(
+    origin: &str,
     account_id: &str,
     track_id: &str,
     canceled: &dyn Fn() -> bool,
 ) -> Result<std::sync::Arc<PreparedAudio>, String> {
-    prepare_from(&data_root(account_id)?, account_id, track_id, canceled)
+    let namespace = Namespace::new(origin, account_id)?;
+    prepare_from(&namespace.root()?, &namespace, track_id, canceled)
 }
 
 fn prepare_from(
     root: &Path,
-    account_id: &str,
+    namespace: &Namespace,
     track_id: &str,
     canceled: &dyn Fn() -> bool,
 ) -> Result<std::sync::Arc<PreparedAudio>, String> {
     if canceled() {
         return Err(CANCELED.into());
     }
-    let entry = load_from(root, account_id)?
+    let entry = load_from(root, namespace)?
         .into_iter()
         .find(|entry| entry.track.id == track_id)
         .ok_or_else(|| MISSING_COPY.to_owned())?;
@@ -605,6 +701,11 @@ mod tests {
     use super::*;
     use std::cell::Cell;
 
+    /// Two distinct, canonical origins. Nothing in the namespace may depend on
+    /// anything except the origin and the account UUID (AUD-06).
+    const ORIGIN: &str = "https://origin-a.example.org";
+    const OTHER_ORIGIN: &str = "https://origin-b.example.org";
+
     fn track(id: uuid::Uuid, length: u64) -> Track {
         Track {
             id: id.to_string(),
@@ -643,9 +744,26 @@ mod tests {
         PreparedAudio::new(original, length as u64)
     }
 
-    fn saved(root: &Path, account: &str, id: uuid::Uuid, bytes: usize) -> PreparedAudio {
+    /// The namespace directory `Namespace::root` derives under a temporary base
+    /// instead of `$XDG_DATA_HOME`, so tests never read or write real user data.
+    fn namespace_at(base: &Path, origin: &str, account: &str) -> (Namespace, PathBuf) {
+        let namespace = Namespace::new(origin, account).unwrap();
+        let root = base
+            .join(origin_hash(&namespace.origin))
+            .join(&namespace.account_id);
+        (namespace, root)
+    }
+
+    fn saved(root: &Path, namespace: &Namespace, id: uuid::Uuid, bytes: usize) -> PreparedAudio {
         let prepared = prepared(bytes);
-        save_to(root, account, &track(id, bytes as u64), &prepared, &never()).unwrap();
+        save_to(
+            root,
+            namespace,
+            &track(id, bytes as u64),
+            &prepared,
+            &never(),
+        )
+        .unwrap();
         prepared
     }
 
@@ -679,8 +797,9 @@ mod tests {
     #[test]
     fn offline_copy_round_trips_private_exact_bytes_and_ignores_tampering() {
         let directory = tempfile::tempdir().unwrap();
-        let root = directory.path().join("offline");
+        let base = directory.path().join("offline");
         let account = uuid::Uuid::new_v4().to_string();
+        let (namespace, root) = namespace_at(&base, ORIGIN, &account);
         let id = uuid::Uuid::new_v4();
         let bytes = b"offline-audio-fixture".to_vec();
         let mut original = tempfile::NamedTempFile::new().unwrap();
@@ -689,13 +808,13 @@ mod tests {
         let prepared = PreparedAudio::new(original, bytes.len() as u64);
         save_to(
             &root,
-            &account,
+            &namespace,
             &track(id, bytes.len() as u64),
             &prepared,
             &never(),
         )
         .unwrap();
-        let loaded = load_from(&root, &account).unwrap();
+        let loaded = load_from(&root, &namespace).unwrap();
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].track.id, id.to_string());
         assert!(
@@ -712,41 +831,43 @@ mod tests {
             assert_eq!(mode(root.join(format!("{id}.audio"))), 0o600);
             assert_eq!(mode(root.join(format!("{id}.json"))), 0o600);
             assert_eq!(mode(root.clone()), 0o700);
+            // The origin-hash directory above the account namespace is private too.
+            assert_eq!(mode(root.parent().unwrap().to_path_buf()), 0o700);
         }
-        assert!(
-            load_from(&root, &uuid::Uuid::new_v4().to_string())
-                .unwrap()
-                .is_empty()
-        );
+        // Another account on the same origin never sees this copy.
+        let (other_account, other_root) =
+            namespace_at(&base, ORIGIN, &uuid::Uuid::new_v4().to_string());
+        assert!(load_from(&other_root, &other_account).unwrap().is_empty());
         let mut tampered = bytes.clone();
         tampered[0] ^= 0x7f;
         fs::write(root.join(format!("{id}.audio")), &tampered).unwrap();
-        let report = verify_from(&root, &account, &never()).unwrap();
+        let report = verify_from(&root, &namespace, &never()).unwrap();
         assert_eq!(report.checked, 1);
         assert_eq!(report.corrupt, vec![id.to_string()]);
-        assert!(prepare_from(&root, &account, &id.to_string(), &never()).is_err());
+        assert!(prepare_from(&root, &namespace, &id.to_string(), &never()).is_err());
     }
 
     #[test]
     fn prepare_is_canceled_between_blocks_and_returns_no_lease() {
         const BLOCKS: usize = 8;
         let directory = tempfile::tempdir().unwrap();
-        let root = directory.path().join("offline");
+        let base = directory.path().join("offline");
         let account = uuid::Uuid::new_v4().to_string();
+        let (namespace, root) = namespace_at(&base, ORIGIN, &account);
         let id = uuid::Uuid::new_v4();
-        saved(&root, &account, id, BLOCKS * BLOCK_BYTES);
+        saved(&root, &namespace, id, BLOCKS * BLOCK_BYTES);
         let track_id = id.to_string();
 
         // An already-canceled probe stops before the copy is opened.
         assert_eq!(
-            prepare_from(&root, &account, &track_id, &|| true).unwrap_err(),
+            prepare_from(&root, &namespace, &track_id, &|| true).unwrap_err(),
             CANCELED
         );
 
         // Cancelling mid-file stops at a block boundary, not after the hash.
         let calls = Cell::new(0_usize);
         assert_eq!(
-            prepare_from(&root, &account, &track_id, &|| {
+            prepare_from(&root, &namespace, &track_id, &|| {
                 calls.set(calls.get() + 1);
                 calls.get() > 3
             })
@@ -757,7 +878,7 @@ mod tests {
 
         // The same copy still verifies: a canceled preparation left no state.
         let calls = Cell::new(0_usize);
-        let prepared = prepare_from(&root, &account, &track_id, &|| {
+        let prepared = prepare_from(&root, &namespace, &track_id, &|| {
             calls.set(calls.get() + 1);
             false
         })
@@ -773,15 +894,16 @@ mod tests {
     #[test]
     fn verify_is_canceled_without_reporting_corruption() {
         let directory = tempfile::tempdir().unwrap();
-        let root = directory.path().join("offline");
+        let base = directory.path().join("offline");
         let account = uuid::Uuid::new_v4().to_string();
+        let (namespace, root) = namespace_at(&base, ORIGIN, &account);
         let id = uuid::Uuid::new_v4();
-        saved(&root, &account, id, 3 * BLOCK_BYTES);
+        saved(&root, &namespace, id, 3 * BLOCK_BYTES);
         assert_eq!(
-            verify_from(&root, &account, &|| true).unwrap_err(),
+            verify_from(&root, &namespace, &|| true).unwrap_err(),
             CANCELED
         );
-        let report = verify_from(&root, &account, &never()).unwrap();
+        let report = verify_from(&root, &namespace, &never()).unwrap();
         assert_eq!(report.checked, 1);
         assert_eq!(report.healthy, 1);
         assert!(report.corrupt.is_empty());
@@ -803,15 +925,16 @@ mod tests {
             .clamp(1, 250);
         let size = size_mib * 1024 * 1024;
         let directory = tempfile::tempdir().unwrap();
-        let root = directory.path().join("offline");
+        let base = directory.path().join("offline");
         let account = uuid::Uuid::new_v4().to_string();
+        let (namespace, root) = namespace_at(&base, ORIGIN, &account);
         let id = uuid::Uuid::new_v4();
         let started = Instant::now();
-        saved(&root, &account, id, size);
+        saved(&root, &namespace, id, size);
         let copy = started.elapsed();
         let track_id = id.to_string();
         let started = Instant::now();
-        let prepared = prepare_from(&root, &account, &track_id, &never()).unwrap();
+        let prepared = prepare_from(&root, &namespace, &track_id, &never()).unwrap();
         let verify = started.elapsed();
         assert_eq!(prepared.length_bytes, size as u64);
         // A cancellation is observed at the fourth block: 0.25 MiB of the file.
@@ -819,7 +942,7 @@ mod tests {
         let calls = Cell::new(0_usize);
         let started = Instant::now();
         assert_eq!(
-            prepare_from(&root, &account, &track_id, &|| {
+            prepare_from(&root, &namespace, &track_id, &|| {
                 calls.set(calls.get() + 1);
                 if calls.get() == 4 {
                     cancels_at.set(Some(Instant::now()));
@@ -845,10 +968,11 @@ mod tests {
     #[test]
     fn oversized_manifest_is_ignored_before_it_is_read() {
         let directory = tempfile::tempdir().unwrap();
-        let root = directory.path().join("offline");
+        let base = directory.path().join("offline");
         let account = uuid::Uuid::new_v4().to_string();
+        let (namespace, root) = namespace_at(&base, ORIGIN, &account);
         let id = uuid::Uuid::new_v4();
-        saved(&root, &account, id, 1_024);
+        saved(&root, &namespace, id, 1_024);
         let manifest = root.join(format!("{id}.json"));
         let mut payload = fs::read(&manifest).unwrap();
         assert!(payload.len() < MAX_MANIFEST_BYTES);
@@ -858,7 +982,7 @@ mod tests {
         fs::write(&manifest, &payload).unwrap();
         assert!(fs::metadata(&manifest).unwrap().len() > MAX_MANIFEST_BYTES as u64);
         assert!(
-            load_from(&root, &account).unwrap().is_empty(),
+            load_from(&root, &namespace).unwrap().is_empty(),
             "a manifest above the cap is never parsed"
         );
     }
@@ -866,11 +990,12 @@ mod tests {
     #[test]
     fn quota_counts_staging_and_orphan_bytes_without_deleting_them() {
         let directory = tempfile::tempdir().unwrap();
-        let root = directory.path().join("offline");
+        let base = directory.path().join("offline");
         let account = uuid::Uuid::new_v4().to_string();
+        let (namespace, root) = namespace_at(&base, ORIGIN, &account);
         let id = uuid::Uuid::new_v4();
         let original = prepared(4_096);
-        save_to(&root, &account, &track(id, 4_096), &original, &never()).unwrap();
+        save_to(&root, &namespace, &track(id, 4_096), &original, &never()).unwrap();
         let healthy = directory_bytes(&root).unwrap();
         assert!(healthy > 4_096);
 
@@ -893,12 +1018,12 @@ mod tests {
         let second = prepared(4_096);
         let other = uuid::Uuid::new_v4();
         assert_eq!(
-            save_to(&root, &account, &track(other, 4_096), &second, &never()).unwrap_err(),
+            save_to(&root, &namespace, &track(other, 4_096), &second, &never()).unwrap_err(),
             FULL
         );
         // Nothing was deleted to make room: the healthy copy, the leftover
         // staging file and the orphan are all still there.
-        assert_eq!(load_from(&root, &account).unwrap().len(), 1);
+        assert_eq!(load_from(&root, &namespace).unwrap().len(), 1);
         assert!(staging.is_file());
         assert!(orphan.is_file());
         assert!(!root.join(format!("{other}.audio")).exists());
@@ -922,11 +1047,12 @@ mod tests {
     #[test]
     fn replacement_keeps_the_previous_healthy_copy_when_publication_fails() {
         let directory = tempfile::tempdir().unwrap();
-        let root = directory.path().join("offline");
+        let base = directory.path().join("offline");
         let account = uuid::Uuid::new_v4().to_string();
+        let (namespace, root) = namespace_at(&base, ORIGIN, &account);
         let id = uuid::Uuid::new_v4();
-        saved(&root, &account, id, 2_048);
-        let before = load_from(&root, &account).unwrap();
+        saved(&root, &namespace, id, 2_048);
+        let before = load_from(&root, &namespace).unwrap();
         let audio = fs::read(root.join(format!("{id}.audio"))).unwrap();
 
         // Publication fails after the previous pair was moved aside: the staged
@@ -947,10 +1073,10 @@ mod tests {
         );
         assert_eq!(fs::read(root.join(format!("{id}.audio"))).unwrap(), audio);
         assert_eq!(
-            summary(&load_from(&root, &account).unwrap()),
+            summary(&load_from(&root, &namespace).unwrap()),
             summary(&before)
         );
-        assert_eq!(verify_from(&root, &account, &never()).unwrap().healthy, 1);
+        assert_eq!(verify_from(&root, &namespace, &never()).unwrap().healthy, 1);
         // Only our own staging file was cleaned up, and no backup lingers.
         assert!(!staged_audio.exists());
         assert!(
@@ -963,18 +1089,19 @@ mod tests {
     #[test]
     fn replacement_publishes_new_bytes_and_cleans_its_own_staging() {
         let directory = tempfile::tempdir().unwrap();
-        let root = directory.path().join("offline");
+        let base = directory.path().join("offline");
         let account = uuid::Uuid::new_v4().to_string();
+        let (namespace, root) = namespace_at(&base, ORIGIN, &account);
         let id = uuid::Uuid::new_v4();
-        saved(&root, &account, id, 1_024);
-        let first = load_from(&root, &account).unwrap()[0].digest.clone();
+        saved(&root, &namespace, id, 1_024);
+        let first = load_from(&root, &namespace).unwrap()[0].digest.clone();
         let replacement = prepared(3_072);
-        save_to(&root, &account, &track(id, 3_072), &replacement, &never()).unwrap();
-        let second = load_from(&root, &account).unwrap();
+        save_to(&root, &namespace, &track(id, 3_072), &replacement, &never()).unwrap();
+        let second = load_from(&root, &namespace).unwrap();
         assert_eq!(second.len(), 1, "a replacement never duplicates the copy");
         assert_eq!(second[0].length_bytes, 3_072);
         assert_ne!(second[0].digest, first);
-        assert_eq!(verify_from(&root, &account, &never()).unwrap().healthy, 1);
+        assert_eq!(verify_from(&root, &namespace, &never()).unwrap().healthy, 1);
         assert_eq!(
             names(&root),
             vec![format!("{id}.audio"), format!("{id}.json")],
@@ -985,8 +1112,9 @@ mod tests {
     #[test]
     fn unique_staging_names_never_clobber_foreign_leftovers() {
         let directory = tempfile::tempdir().unwrap();
-        let root = directory.path().join("offline");
+        let base = directory.path().join("offline");
         let account = uuid::Uuid::new_v4().to_string();
+        let (namespace, root) = namespace_at(&base, ORIGIN, &account);
         let id = uuid::Uuid::new_v4();
         fs::create_dir_all(&root).unwrap();
         // The fixed staging names an older build used, left behind by a crash.
@@ -994,28 +1122,29 @@ mod tests {
         fs::write(&old_staging, b"interrupted-save").unwrap();
         let old_manifest_staging = root.join(format!(".{id}.json.tmp"));
         fs::write(&old_manifest_staging, b"{}").unwrap();
-        saved(&root, &account, id, 512);
+        saved(&root, &namespace, id, 512);
         assert_eq!(fs::read(&old_staging).unwrap(), b"interrupted-save");
         assert_eq!(fs::read(&old_manifest_staging).unwrap(), b"{}");
-        assert_eq!(load_from(&root, &account).unwrap().len(), 1);
+        assert_eq!(load_from(&root, &namespace).unwrap().len(), 1);
     }
 
     #[test]
     fn canceled_save_publishes_nothing() {
         let directory = tempfile::tempdir().unwrap();
-        let root = directory.path().join("offline");
+        let base = directory.path().join("offline");
         let account = uuid::Uuid::new_v4().to_string();
+        let (namespace, root) = namespace_at(&base, ORIGIN, &account);
         let id = uuid::Uuid::new_v4();
         let prepared = prepared(4 * BLOCK_BYTES);
         // A size that disagrees with the manifest is rejected before any work.
         assert_eq!(
-            save_to(&root, &account, &track(id, 0), &prepared, &never()).unwrap_err(),
+            save_to(&root, &namespace, &track(id, 0), &prepared, &never()).unwrap_err(),
             UNAVAILABLE
         );
         let calls = Cell::new(0_usize);
         let result = save_to(
             &root,
-            &account,
+            &namespace,
             &track(id, (4 * BLOCK_BYTES) as u64),
             &prepared,
             &|| {
@@ -1025,7 +1154,7 @@ mod tests {
         );
         assert_eq!(result.unwrap_err(), CANCELED);
         assert!(calls.get() > 2, "the copy is cancelled between blocks");
-        assert!(load_from(&root, &account).unwrap().is_empty());
+        assert!(load_from(&root, &namespace).unwrap().is_empty());
         assert_eq!(
             names(&root)
                 .iter()
@@ -1039,12 +1168,321 @@ mod tests {
         // The same prepared original can still be saved afterwards.
         save_to(
             &root,
-            &account,
+            &namespace,
             &track(id, (4 * BLOCK_BYTES) as u64),
             &prepared,
             &never(),
         )
         .unwrap();
-        assert_eq!(load_from(&root, &account).unwrap().len(), 1);
+        assert_eq!(load_from(&root, &namespace).unwrap().len(), 1);
+    }
+
+    /// The pre-AUD-06 layout, `<base>/<account-uuid>/`, which an earlier build
+    /// wrote. These are the listener's own bytes, not this crate's scratch data.
+    fn legacy_dir(base: &Path, account: &str) -> PathBuf {
+        base.join(account)
+    }
+
+    fn manifest_json(root: &Path, track_id: &str) -> serde_json::Value {
+        let bytes = fs::read(root.join(format!("{track_id}.json"))).unwrap();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    fn write_manifest(root: &Path, track_id: &str, value: &serde_json::Value) {
+        let bytes = serde_json::to_vec(value).unwrap();
+        fs::write(root.join(format!("{track_id}.json")), bytes).unwrap();
+    }
+
+    /// REG-AUD-06: two origins that mint the *same* account and track UUID (a
+    /// forked database, a restored backup) get different roots, and neither one
+    /// can list, play, verify or remove the other's copy.
+    #[test]
+    fn two_origins_with_the_same_account_and_track_never_share_a_copy() {
+        let directory = tempfile::tempdir().unwrap();
+        let base = directory.path().join("offline");
+        let account = uuid::Uuid::new_v4().to_string();
+        let id = uuid::Uuid::new_v4();
+        let (first, first_root) = namespace_at(&base, ORIGIN, &account);
+        let (second, second_root) = namespace_at(&base, OTHER_ORIGIN, &account);
+        assert_ne!(
+            first_root, second_root,
+            "the same account/track UUID on two origins must not share a directory"
+        );
+        assert!(first_root.starts_with(&base) && second_root.starts_with(&base));
+        // The directory name is one fixed-length origin hash, not a typed string.
+        assert_eq!(
+            first_root.strip_prefix(&base).unwrap().components().count(),
+            2
+        );
+        assert_eq!(origin_hash(&first.origin).len(), 64);
+        // A different spelling of the same origin is the same namespace.
+        assert_eq!(
+            namespace_at(&base, &format!("{ORIGIN}/"), &account).1,
+            first_root
+        );
+        assert_eq!(
+            namespace_at(&base, "http://127.0.0.1:8080", &account).1,
+            base.join(origin_hash("http://127.0.0.1:8080/"))
+                .join(&account)
+        );
+
+        saved(&first_root, &first, id, 1_024);
+        assert_eq!(load_from(&first_root, &first).unwrap().len(), 1);
+
+        // Origin B sees nothing at all: no entry, no audio path, no lease, and a
+        // verification sweep that cannot even count a copy.
+        assert!(
+            !audio_path_from(&second_root, &id.to_string())
+                .unwrap()
+                .is_file()
+        );
+        assert!(load_from(&second_root, &second).unwrap().is_empty());
+        assert_eq!(
+            prepare_from(&second_root, &second, &id.to_string(), &never()).unwrap_err(),
+            MISSING_COPY
+        );
+        assert_eq!(
+            verify_from(&second_root, &second, &never())
+                .unwrap()
+                .checked,
+            0
+        );
+
+        // The same track UUID may be saved for the other origin without replacing
+        // or consuming the first origin's copy.
+        let first_bytes = fs::read(first_root.join(format!("{id}.audio"))).unwrap();
+        saved(&second_root, &second, id, 3_072);
+        assert_eq!(
+            load_from(&second_root, &second).unwrap()[0].length_bytes,
+            3_072
+        );
+        assert_eq!(
+            load_from(&first_root, &first).unwrap()[0].length_bytes,
+            1_024
+        );
+        assert_eq!(
+            fs::read(first_root.join(format!("{id}.audio"))).unwrap(),
+            first_bytes
+        );
+        // Each manifest records the origin it belongs to.
+        assert_eq!(
+            manifest_json(&first_root, &id.to_string())["origin"].as_str(),
+            Some(first.origin.as_str())
+        );
+        assert_eq!(
+            manifest_json(&second_root, &id.to_string())["origin"].as_str(),
+            Some(second.origin.as_str())
+        );
+
+        // Removing on origin B leaves origin A's copy listable and healthy.
+        remove_from(&second_root, &id.to_string()).unwrap();
+        assert!(!second_root.join(format!("{id}.audio")).exists());
+        assert_eq!(load_from(&second_root, &second).unwrap().len(), 0);
+        let report = verify_from(&first_root, &first, &never()).unwrap();
+        assert_eq!((report.checked, report.healthy), (1, 1));
+        assert!(prepare_from(&first_root, &first, &id.to_string(), &never()).is_ok());
+    }
+
+    /// The origin half of the namespace follows the same canonical rules as the
+    /// native HTTP client and its caches; the account half must be a canonical
+    /// lower-case UUID.
+    #[test]
+    fn namespace_requires_a_canonical_origin_and_an_account_uuid() {
+        let account = uuid::Uuid::new_v4().to_string();
+        for origin in [
+            "",
+            "http://origin-a.example.org",
+            "ftp://origin-a.example.org",
+            "https://origin-a.example.org/library",
+            "https://origin-a.example.org/?page=2",
+            "https://user:secret@origin-a.example.org",
+            " https://origin-a.example.org",
+            "https://origin-a.example.org\n",
+        ] {
+            assert!(
+                Namespace::new(origin, &account).is_err(),
+                "{origin:?} must not name an offline namespace"
+            );
+        }
+        // Numeric loopback HTTP is the canonical local origin, and the trailing
+        // slash is normalized rather than becoming a second namespace.
+        assert!(Namespace::new("http://127.0.0.1:8080", &account).is_ok());
+        assert!(Namespace::new("http://[::1]:8080", &account).is_ok());
+        assert_eq!(
+            Namespace::new(ORIGIN, &account).unwrap().origin,
+            format!("{ORIGIN}/")
+        );
+        for account_id in ["", "not-a-uuid", "00000000-0000-0000-0000-00000000000"] {
+            assert!(
+                Namespace::new(ORIGIN, account_id).is_err(),
+                "{account_id:?} must not name an offline namespace"
+            );
+        }
+        // Only the canonical spelling is the same account.
+        assert!(Namespace::new(ORIGIN, &account.to_uppercase()).is_err());
+    }
+
+    /// A manifest that names another origin or another account is never loaded,
+    /// so no later step can play it; a pre-AUD-06 manifest with no `origin` field
+    /// is rejected as well instead of being adopted by the current origin.
+    #[test]
+    fn manifest_with_a_foreign_origin_or_account_is_never_loaded_or_played() {
+        let directory = tempfile::tempdir().unwrap();
+        let base = directory.path().join("offline");
+        let account = uuid::Uuid::new_v4().to_string();
+        let id = uuid::Uuid::new_v4();
+        let (namespace, root) = namespace_at(&base, ORIGIN, &account);
+        saved(&root, &namespace, id, 1_024);
+        let original = manifest_json(&root, &id.to_string());
+        assert_eq!(original["origin"].as_str(), Some(namespace.origin.as_str()));
+
+        // Same bytes, same account, an origin label that is not this namespace.
+        let mut foreign = original.clone();
+        foreign["origin"] = serde_json::Value::from(format!("{OTHER_ORIGIN}/"));
+        write_manifest(&root, &id.to_string(), &foreign);
+        assert!(load_from(&root, &namespace).unwrap().is_empty());
+        assert_eq!(
+            prepare_from(&root, &namespace, &id.to_string(), &never()).unwrap_err(),
+            MISSING_COPY,
+            "a foreign-origin manifest must never hand the copy to the decoder"
+        );
+        assert_eq!(verify_from(&root, &namespace, &never()).unwrap().checked, 0);
+
+        // Same origin label, another account UUID.
+        let mut foreign = original.clone();
+        foreign["account_id"] = serde_json::Value::from(uuid::Uuid::new_v4().to_string());
+        write_manifest(&root, &id.to_string(), &foreign);
+        assert!(load_from(&root, &namespace).unwrap().is_empty());
+        assert_eq!(
+            prepare_from(&root, &namespace, &id.to_string(), &never()).unwrap_err(),
+            MISSING_COPY
+        );
+
+        // A manifest from before origin scoping has no `origin` field at all. It
+        // still parses (`serde(default)`), and is still never treated as current.
+        let mut legacy_shaped = original.clone();
+        legacy_shaped.as_object_mut().unwrap().remove("origin");
+        write_manifest(&root, &id.to_string(), &legacy_shaped);
+        assert!(load_from(&root, &namespace).unwrap().is_empty());
+        assert_eq!(
+            prepare_from(&root, &namespace, &id.to_string(), &never()).unwrap_err(),
+            MISSING_COPY
+        );
+
+        // One rejected manifest never hides a healthy copy of the same namespace.
+        let healthy = uuid::Uuid::new_v4();
+        saved(&root, &namespace, healthy, 2_048);
+        let loaded = load_from(&root, &namespace).unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].track.id, healthy.to_string());
+        let report = verify_from(&root, &namespace, &never()).unwrap();
+        assert_eq!(
+            (report.checked, report.healthy, report.corrupt.len()),
+            (1, 1, 0)
+        );
+    }
+
+    /// Requirement of the fix: the old account-only copies are user data. They are
+    /// never loaded as this origin's copies, and no offline operation (save,
+    /// load, verify, remove) deletes, rewrites or reinterprets them.
+    #[test]
+    fn legacy_account_only_copies_survive_and_are_never_loaded() {
+        let directory = tempfile::tempdir().unwrap();
+        let base = directory.path().join("offline");
+        let account = uuid::Uuid::new_v4().to_string();
+        let id = uuid::Uuid::new_v4();
+        // A copy in the exact shape the previous build wrote: the account-only
+        // directory, a v2 manifest without any `origin` field.
+        let legacy = legacy_dir(&base, &account);
+        fs::create_dir_all(&legacy).unwrap();
+        let legacy_audio = legacy.join(format!("{id}.audio"));
+        let legacy_bytes = b"legacy-account-only-original".to_vec();
+        fs::write(&legacy_audio, &legacy_bytes).unwrap();
+        let legacy_manifest = legacy.join(format!("{id}.json"));
+        fs::write(
+            &legacy_manifest,
+            serde_json::to_vec(&serde_json::json!({
+                "version": 2,
+                "account_id": account,
+                "saved_at": 11,
+                "length_bytes": legacy_bytes.len(),
+                "track": track(id, legacy_bytes.len() as u64),
+                "digest": blake3::hash(&legacy_bytes).to_hex().to_string(),
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let before_audio = fs::read(&legacy_audio).unwrap();
+        let before_manifest = fs::read(&legacy_manifest).unwrap();
+
+        let (namespace, root) = namespace_at(&base, ORIGIN, &account);
+        assert_ne!(
+            root, legacy,
+            "a new copy never lands in the legacy directory"
+        );
+        // The legacy pair is invisible to this origin: not listed, not verified,
+        // and not playable.
+        assert!(load_from(&root, &namespace).unwrap().is_empty());
+        assert_eq!(verify_from(&root, &namespace, &never()).unwrap().checked, 0);
+        assert_eq!(
+            prepare_from(&root, &namespace, &id.to_string(), &never()).unwrap_err(),
+            MISSING_COPY
+        );
+
+        // Ordinary operations on the same account and the same track UUID happen
+        // entirely in the new namespace.
+        saved(&root, &namespace, id, 512);
+        assert_eq!(load_from(&root, &namespace).unwrap().len(), 1);
+        let report = verify_from(&root, &namespace, &never()).unwrap();
+        assert_eq!((report.checked, report.healthy), (1, 1));
+        remove_from(&root, &id.to_string()).unwrap();
+        assert!(load_from(&root, &namespace).unwrap().is_empty());
+
+        // …and the legacy collection is byte-for-byte what the old build left:
+        // no migration, no rewrite, no deletion, no silent reinterpretation.
+        assert_eq!(fs::read(&legacy_audio).unwrap(), before_audio);
+        assert_eq!(fs::read(&legacy_manifest).unwrap(), before_manifest);
+        assert_eq!(
+            names(&legacy),
+            vec![format!("{id}.audio"), format!("{id}.json")]
+        );
+        // Even scanning the legacy directory itself yields nothing for a current
+        // namespace: its manifest carries no origin, so the copy stays unattributed
+        // until the listener explicitly re-attaches it (NAT03).
+        assert!(load_from(&legacy, &namespace).unwrap().is_empty());
+    }
+
+    /// The ordinary lifecycle still works inside one namespace: save, list,
+    /// verify, remove (idempotently) and verify again.
+    #[test]
+    fn ordinary_save_load_verify_and_remove_stay_inside_the_namespace() {
+        let directory = tempfile::tempdir().unwrap();
+        let base = directory.path().join("offline");
+        let account = uuid::Uuid::new_v4().to_string();
+        let (namespace, root) = namespace_at(&base, ORIGIN, &account);
+        let (kept, removed) = (uuid::Uuid::new_v4(), uuid::Uuid::new_v4());
+        saved(&root, &namespace, kept, 1_024);
+        saved(&root, &namespace, removed, 2_048);
+        assert_eq!(load_from(&root, &namespace).unwrap().len(), 2);
+        let report = verify_from(&root, &namespace, &never()).unwrap();
+        assert_eq!((report.checked, report.healthy), (2, 2));
+        let manifest = manifest_json(&root, &kept.to_string());
+        assert_eq!(manifest["origin"].as_str(), Some(namespace.origin.as_str()));
+        assert_eq!(manifest["account_id"].as_str(), Some(account.as_str()));
+
+        remove_from(&root, &removed.to_string()).unwrap();
+        // A repeated removal is a no-op, not an error.
+        remove_from(&root, &removed.to_string()).unwrap();
+        assert!(!root.join(format!("{removed}.audio")).exists());
+        assert!(!root.join(format!("{removed}.json")).exists());
+        let remaining = load_from(&root, &namespace).unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].track.id, kept.to_string());
+        assert_eq!(verify_from(&root, &namespace, &never()).unwrap().healthy, 1);
+        // Cancellation still stops a sweep without reporting corruption.
+        assert_eq!(
+            verify_from(&root, &namespace, &|| true).unwrap_err(),
+            CANCELED
+        );
     }
 }

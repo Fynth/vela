@@ -341,8 +341,8 @@ def main():
                     report.write_text(json.dumps(result, indent=2) + '\n')
                     print(json.dumps(result, indent=2))
                     return
-                offline_audio = list((private / 'home' / 'vela' / 'offline').glob('*/*.audio'))
-                offline_json = list((private / 'home' / 'vela' / 'offline').glob('*/*.json'))
+                offline_audio = list((private / 'home' / 'vela' / 'offline').glob('*/*/*.audio'))
+                offline_json = list((private / 'home' / 'vela' / 'offline').glob('*/*/*.json'))
                 if len(offline_audio) != 1 or len(offline_json) != 1:
                     raise RuntimeError('Offline fixture did not persist exactly one audio+manifest pair')
                 if any(path.stat().st_mode & 0o077 for path in offline_audio + offline_json):
