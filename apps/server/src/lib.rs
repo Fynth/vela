@@ -3,6 +3,7 @@ mod listening;
 mod network;
 mod recommendations;
 mod upload_guard;
+pub mod web_assets;
 use axum::{
     Json, Router,
     body::Body,

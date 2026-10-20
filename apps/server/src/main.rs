@@ -10,6 +10,22 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
     let config = Config::from_env()?;
+    // Keep the served web client identical to the sources this binary was built
+    // from. Without this, `cargo run` starts a server whose UI is missing or
+    // stale and every page request answers 404.
+    match vela_server::web_assets::refresh(
+        &vela_server::web_assets::repository_root().unwrap_or_default(),
+        cfg!(debug_assertions),
+    ) {
+        vela_server::web_assets::Refresh::Rebuilt => {
+            tracing::info!("web assets rebuilt from the current sources")
+        }
+        vela_server::web_assets::Refresh::Current => {}
+        vela_server::web_assets::Refresh::Failed(error) => {
+            tracing::warn!(%error, "web assets could not be rebuilt")
+        }
+        vela_server::web_assets::Refresh::NotManaged => {}
+    }
     let state = AppState::initialize(config.clone()).await?;
     // Do not start jobs if this process cannot acquire its HTTP listener.
     let listener = tokio::net::TcpListener::bind(config.bind).await?;
