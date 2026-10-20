@@ -98,6 +98,11 @@ jobs:
         with:
           toolchain: 1.99.0
       - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the release tooling dependencies
+        run: python3 -m pip install --upgrade pyyaml
       - name: Build and package the macOS desktop client
         run: |
           cargo install wasm-bindgen-cli --version 0.2.129 --locked
@@ -130,6 +135,16 @@ jobs:
         run: |
           echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME" >> "$GITHUB_ENV"
           echo "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin" >> "$GITHUB_PATH"
+          # The NDK names its compilers after the API level. The crates that
+          # compile C code look for the plain target name, so both are provided.
+          for target in aarch64-linux-android armv7a-linux-androideabi x86_64-linux-android; do
+            level=26
+            case "$target" in
+              armv7a-linux-androideabi) prefix=armv7a-linux-androideabi ;;
+              *) prefix=$target ;;
+            esac
+            ln -sf "${prefix}${level}-clang" "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/${prefix}-clang"
+          done
           cargo build --locked --release -p vela-desktop --bin vela-mobile --features mobile --target aarch64-linux-android
       - name: Check the Android binary
         run: |
