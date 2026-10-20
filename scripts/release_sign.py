@@ -110,7 +110,7 @@ def main() -> int:
         if path.is_file()
         and (
             path.name.endswith(".tar.gz")
-            or path.suffix in {".deb", ".rpm", ".AppImage"}
+            or path.suffix in {".deb", ".rpm", ".AppImage", ".zip"}
         )
     )
     if not artifacts:

@@ -118,7 +118,7 @@ targets:
     publish: none
     requires: [desktop-linux-x86-64]
     credentials: []
-    status: blocked
+    status: buildable
 
   - id: desktop-macos-x86-64
     kind: desktop

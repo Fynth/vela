@@ -72,8 +72,11 @@ jobs:
         with:
           toolchain: 1.99.0
       - uses: Swatinem/rust-cache@v2
-      - name: Build the Windows desktop client
-        run: cargo build --locked --release -p vela-desktop
+      - name: Build and package the Windows desktop client
+        shell: bash
+        run: |
+          cargo install wasm-bindgen-cli --version 0.2.129 --locked
+          python3 scripts/release_build.py --output target/release-artifacts --only desktop-windows-x86-64
       - name: Check the Windows binary runs
         shell: pwsh
         run: |
@@ -82,7 +85,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-windows
-          path: target/release/vela-desktop.exe
+          path: |
+            target/release/vela-desktop.exe
+            target/release-artifacts/*
 
   macos:
     name: macos desktop (aarch64)
@@ -93,15 +98,19 @@ jobs:
         with:
           toolchain: 1.99.0
       - uses: Swatinem/rust-cache@v2
-      - name: Build the macOS desktop client
-        run: cargo build --locked --release -p vela-desktop
+      - name: Build and package the macOS desktop client
+        run: |
+          cargo install wasm-bindgen-cli --version 0.2.129 --locked
+          python3 scripts/release_build.py --output target/release-artifacts --only desktop-macos-aarch64
       - name: Check the macOS binary runs
         run: |
           ./target/release/vela-desktop --version
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-macos
-          path: target/release/vela-desktop
+          path: |
+            target/release/vela-desktop
+            target/release-artifacts/*
 
   report:
     name: platform readiness

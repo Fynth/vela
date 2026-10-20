@@ -192,8 +192,34 @@ def stage_server(
         shutil.rmtree(stage, ignore_errors=True)
 
 
+def build_desktop_for(target_triple: str, runner: str) -> Path:
+    """Builds the desktop client for a native platform.
+
+    The Windows and macOS builds run on their own runners: the TLS stack and
+    the platform windowing libraries cannot be cross compiled from Linux, and a
+    cross-built binary would not be the artifact the store receives.
+    """
+    host = run(["rustc", "-vV"]).stdout
+    host_triple = next(
+        (line.split(":", 1)[1].strip() for line in host.splitlines() if line.startswith("host:")),
+        "",
+    )
+    if host_triple != target_triple:
+        raise SystemExit(
+            f"the {target_triple} desktop client must be built on a {target_triple} runner "
+            f"(this host is {host_triple})"
+        )
+    run(["cargo", "build", "--locked", "--release", "-p", "vela-desktop"])
+    return REPO_ROOT / "target" / "release" / ("vela-desktop.exe" if runner == "windows" else "vela-desktop")
+
+
 def stage_desktop(
-    binary: Path, version: str, commit: str, output_root: Path, channel: str
+    binary: Path,
+    version: str,
+    commit: str,
+    output_root: Path,
+    channel: str,
+    platform: str = "linux",
 ) -> Path:
     """Packs the portable desktop archive the project already ships."""
     stage = Path(tempfile.mkdtemp(prefix="vela-release-desktop-"))
@@ -219,10 +245,22 @@ def stage_desktop(
             f"commit={commit}\nruntime=GTK3, WebKitGTK 4.1, ALSA, libxdo\n",
             encoding="utf-8",
         )
-        archive = output_root / f"vela-desktop-{version}-linux-x86_64-{channel}.tar.gz"
+        suffix = ".zip" if platform == "windows" else ".tar.gz"
+        target_name = "windows-x86_64" if platform == "windows" else (
+            "macos-aarch64" if platform == "macos" else "linux-x86_64"
+        )
+        archive = output_root / f"vela-desktop-{version}-{target_name}-{channel}{suffix}"
         archive.parent.mkdir(parents=True, exist_ok=True)
-        with tarfile.open(archive, "w:gz") as bundle:
-            bundle.add(stage, arcname=".")
+        if archive.suffix == ".zip":
+            import zipfile
+
+            with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
+                for path in sorted(stage.rglob("*")):
+                    if path.is_file():
+                        bundle.write(path, path.relative_to(stage).as_posix())
+        else:
+            with tarfile.open(archive, "w:gz") as bundle:
+                bundle.add(stage, arcname=".")
         return archive
     finally:
         shutil.rmtree(stage, ignore_errors=True)
@@ -231,8 +269,14 @@ def stage_desktop(
 def verify_archive(archive: Path, required: list[str]) -> None:
     """Reopens a produced archive and checks that it really contains what it
     claims. A tarball that silently lost a file never leaves the pipeline."""
-    with tarfile.open(archive, "r:gz") as bundle:
-        names = {name.lstrip("./") for name in bundle.getnames()}
+    if archive.suffix == ".zip":
+        import zipfile
+
+        with zipfile.ZipFile(archive) as bundle:
+            names = {name.lstrip("./") for name in bundle.namelist()}
+    else:
+        with tarfile.open(archive, "r:gz") as bundle:
+            names = {name.lstrip("./") for name in bundle.getnames()}
     missing = [name for name in required if name not in names]
     if missing:
         raise SystemExit(f"{archive.name} is missing {missing}")
@@ -332,8 +376,14 @@ def main() -> int:
                 )
             )
         elif target["kind"] == "desktop":
-            desktop = desktop or build_desktop(version, commit)
-            archive = stage_desktop(desktop, version, commit, output_root, target["channel"])
+            platform = target["platform"]
+            if platform == "windows":
+                desktop = build_desktop_for("x86_64-pc-windows-msvc", "windows")
+            elif platform == "macos":
+                desktop = build_desktop_for("aarch64-apple-darwin", "macos")
+            else:
+                desktop = desktop or build_desktop(version, commit)
+            archive = stage_desktop(desktop, version, commit, output_root, target["channel"], platform)
             verify_archive(
                 archive,
                 [

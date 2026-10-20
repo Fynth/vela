@@ -1,0 +1,21 @@
+# winget manifest for the Vela desktop client.
+#
+# The installer URL is filled in by the release workflow from the artifact that
+# the pipeline produced and verified; the placeholder below is replaced during
+# packaging, so the manifest in the repository never points at a file that was
+# not built.
+PackageIdentifier: Vela.Music
+PackageVersion: 0.0.0
+DefaultLocale: en-US
+ManifestType: installer
+InstallerType: exe
+Scope: user
+UpgradeBehavior: install
+Installers:
+  - Architecture: x86_64
+    InstallerUrl: https://example.invalid/vela/vela-desktop-0.0.0-x86_64.exe
+    ProductCode: Vela.Music
+Manifests:
+  - InstallerType: exe
+    Scope: user
+    ProductCode: Vela.Music
