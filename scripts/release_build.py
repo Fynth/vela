@@ -166,7 +166,9 @@ def build_desktop(version: str, commit: str) -> Path:
     return REPO_ROOT / "target" / "release" / "vela-desktop"
 
 
-def stage_server(binary: Path, version: str, commit: str, web: Path, output_root: Path) -> Path:
+def stage_server(
+    binary: Path, version: str, commit: str, web: Path, output_root: Path, channel: str
+) -> Path:
     """Packs the server with the web client into one reviewable archive."""
     stage = Path(tempfile.mkdtemp(prefix="vela-release-server-"))
     try:
@@ -190,7 +192,9 @@ def stage_server(binary: Path, version: str, commit: str, web: Path, output_root
         shutil.rmtree(stage, ignore_errors=True)
 
 
-def stage_desktop(binary: Path, version: str, commit: str, output_root: Path) -> Path:
+def stage_desktop(
+    binary: Path, version: str, commit: str, output_root: Path, channel: str
+) -> Path:
     """Packs the portable desktop archive the project already ships."""
     stage = Path(tempfile.mkdtemp(prefix="vela-release-desktop-"))
     try:
@@ -294,7 +298,7 @@ def main() -> int:
         print(f"build {identifier}")
         if target["kind"] == "web":
             web = web or build_web(version, commit)
-            archive = output_root / f"vela-web-{version}-linux-x86_64.tar.gz"
+            archive = output_root / f"vela-web-{version}-linux-x86_64-{target['channel']}.tar.gz"
             with tarfile.open(archive, "w:gz") as bundle:
                 bundle.add(web, arcname="dist")
             verify_archive(archive, ["dist/style.css", "dist/index.html"])
@@ -313,7 +317,7 @@ def main() -> int:
         elif target["kind"] == "server":
             server = server or build_server(version, commit)
             web = web or build_web(version, commit)
-            archive = stage_server(server, version, commit, web, output_root)
+            archive = stage_server(server, version, commit, web, output_root, target["channel"])
             verify_archive(archive, ["vela-server", "dist/index.html", "BUILD.txt"])
             produced.append(
                 Artifact(
@@ -329,7 +333,7 @@ def main() -> int:
             )
         elif target["kind"] == "desktop":
             desktop = desktop or build_desktop(version, commit)
-            archive = stage_desktop(desktop, version, commit, output_root)
+            archive = stage_desktop(desktop, version, commit, output_root, target["channel"])
             verify_archive(
                 archive,
                 [
