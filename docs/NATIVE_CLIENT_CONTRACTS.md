@@ -5,7 +5,7 @@ explicit offline device copies, opt-in Secret Service session resume and native
 playlist folders. It is not a system installer/auto-updater, not mobile/background
 audio and not completion of G18. The audit's keyring/offline lifecycle defects
 AUD-01/02/04/11 are fixed in source `3094754` (real two-process Secret Service QA);
-AUD-03/07/08/12 fixed in source `e225b63` (basic native offline QA passed); AUD-06 fixed in `a913574` (origin-scoped offline namespace); AUD-05 (cold offline launch) fixed in the working tree on top of `10e2a62` (private offline profile + read/play-only offline library, real X11 cold-launch QA); see [CURRENT_STATE.md](CURRENT_STATE.md).
+AUD-03/07/08/12 fixed in source `e225b63` (basic native offline QA passed); AUD-06 fixed in `a913574` (origin-scoped offline namespace); AUD-05 (cold offline launch) fixed in `3aeee09` (private offline profile + read/play-only offline library, real X11 cold-launch QA); see [CURRENT_STATE.md](CURRENT_STATE.md).
 Evidence is listed at the end; see ADR0017 for the decision record.
 
 TR10 (2026-10-20, source `4ceafdc`; typography/QA `47fb518`+`d314a2c`): the packaged

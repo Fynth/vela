@@ -6,6 +6,12 @@
 | --- | --- | --- | --- | --- | --- |
 | Release ledger | docs/RELEASE_LEDGER_2026-10-20.md; desktop tar; dist assets | SHA256 `58da18db…`, BUILD `4ceafdc` | Source-vs-artifact docs-only diff; package launch PASS; dist CSS/player byte-identical; release WASM and font/brand hashes; frozen runtime/data untouched; preserved `7fe1ca0` tar | PASS local artifact ledger | Public deploy/push, other platforms, hardware audio/SR/WebKit/full Wayland |
 
+## AUD-05 cold offline launch
+
+| Check | Paths | Commit | Evidence | Status | NOT_RUN |
+| --- | --- | --- | --- | --- | --- |
+| Cold offline launch | apps/desktop/src/{offline_profile,ui,offline,lib}.rs; native QA + harness | `3aeee09` | Non-secret0600 profile; startup falls through to read/play-only offline library on unreachable/expired/no session; real server off, Play advances one AudioEngine; desktop124/3 ignored; combined260 + offline23 + resume5 PASS | PASS native cold launch | Hardware/SR/full Wayland/other OS NOT_RUN |
+
 ## AUD-06 offline origin scoping
 
 | Check | Paths | Commit | Evidence | Status | NOT_RUN |

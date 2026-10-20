@@ -1,5 +1,19 @@
 # Verified progress
 
+## AUD-05 cold offline launch — fixed (2026-10-20)
+
+`3aeee09`: a private non-secret profile (canonical origin+account only,0600, atomic,
+generation-guarded, cleared on sign-out) lets a cold start open a read/play-only
+Offline library when the server is unreachable/expired or no session exists. Startup
+reads profile+copies locally, attempts the existing saved-session resume once when it
+names that origin, and otherwise/after failure shows real saved tracks with Play via
+offline::prepare and the single AudioEngine. A real sign-in wins; nothing autoplays or
+retries; saving/removing/favorites/search/playlists/server routes stay unavailable.
+Native QA `--test-offline-launch` (server stopped) asserts offline rows, one source and
+advancing position, no server controls, normal close,0 temp originals. Desktop124
+passed/3 ignored; combined X11 260 + offline23 + resume5 PASS. Hardware/SR/Wayland
+full/other OS remain NOT_RUN.
+
 ## Queue snapshot canonical origin — fixed (2026-10-20)
 
 The queue snapshot previously stored and compared the raw origin string, so a queue
