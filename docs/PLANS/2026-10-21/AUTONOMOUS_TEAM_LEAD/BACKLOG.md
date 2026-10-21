@@ -19,7 +19,7 @@ DR-03 → DR-08. Serious-находки DV-01/02/12 чинятся **до** glas
 | ID | Название | План | Приоритет | Пререквизиты | Ожидаемый исход | Размер | Статус |
 |---|---|---|---|---|---|---|---|
 | DR-05 | Читаемые состояния и feedback | [05](../DESIGN_REVIEW/05_EMPTY_ERROR_STATES.md) | P1 | нет | Home light читается, recovery/receipt не перекрываются, следующий шаг понятен | средний | DONE 2026-10-21, commit 6dcb3fa |
-| DR-07 | Различимое управление с клавиатуры | [07](../DESIGN_REVIEW/07_A11Y_MOTION_AUDIT.md) | P1 | нет | Видимый focus, понятные range controls, предсказуемый выход из overlay | средний | PROPOSED |
+| DR-07 | Различимое управление с клавиатуры | [07](../DESIGN_REVIEW/07_A11Y_MOTION_AUDIT.md) | P1 | нет | Видимый focus, понятные range controls, предсказуемый выход из overlay | средний | IN_PROGRESS 2026-10-21, ветка feat/vela-dr07-keyboard-queue |
 | DR-04 | Компактное управление с 44px targets | [04](../DESIGN_REVIEW/04_DENSITY_TYPOGRAPHY.md) | P1 | нет | В Next/Queue/navigation проще попасть без разрастания UI | средний | PROPOSED |
 | DR-06 | Музыка в первом mobile-экране | [06](../DESIGN_REVIEW/06_MOBILE_320_390.md) | P1 | нет | На 320 первый трек полностью виден, mobile controls и safe-area сохранены | средний | PROPOSED |
 | DR-01 | Один словарь glass/motion | [01](../DESIGN_REVIEW/01_TOKEN_LAYER.md) | P2 | нет | Темы и отклик следующих улучшений не расходятся | маленький | PROPOSED |
