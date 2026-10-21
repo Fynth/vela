@@ -52,10 +52,13 @@ the live DOM's own contrast for the empty cards in both themes, the three
 feedback signals in one column, their zero intersection and ≥8px gap at
 1284×856/390×844/360×800/320×700, the stack's zero intersection with the
 player and the mobile navigation, and the 44px height of every action in the
-stack. `cargo clippy --workspace` and `cargo test --workspace` cannot complete
-on this host: `apps/desktop` needs `pkg-config` and the GTK development
-packages, and `glib-sys` fails its build script before compiling — an
-environment limitation, not a code failure. Measured browser evidence and its
+stack. The GTK development packages and `pkg-config` are now installed on
+this host, so `cargo clippy --locked --workspace --all-targets -- -D warnings`
+and `cargo test --locked --workspace -- --test-threads=2` both complete for
+the whole workspace, `apps/desktop` included: clippy exit 0, and every test
+result `ok` with 0 failed. The native client's WebKitGTK rendering and its
+physical audio were not run — this host has no X server and no working
+PulseAudio server. Measured browser evidence and its
 exact numbers are in [QA_EVIDENCE](QA_EVIDENCE.md); the remaining limits are in
 [KNOWN_LIMITATIONS](KNOWN_LIMITATIONS.md).
 
@@ -91,9 +94,11 @@ for `vela-web` (host and `wasm32-unknown-unknown`, `--all-targets`) and for
 vela-web --target wasm32-unknown-unknown --release`; and the full web asset
 build via `scripts/build-web.sh` (wasm-bindgen 0.2.129) into `dist/`.
 Browser, native and Docker validation were NOT run for this change.
-`apps/desktop` could not be checked on this host: `pkg-config` and the GTK
-development packages are absent, so its `glib-sys` build script fails before
-compiling — an environment limitation unrelated to these files.
+`apps/desktop` could not be checked on this host at the time of that change:
+`pkg-config` and the GTK development packages were absent, so its `glib-sys`
+build script failed before compiling. The GTK development packages are
+installed now, and the workspace clippy and test commands complete for
+`apps/desktop` as well — see the DR-05 section above.
 
 ## Distribution CI/CD 0.12.8 — 2026-10-20
 

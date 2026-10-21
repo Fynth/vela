@@ -34,12 +34,13 @@ Firefox lays out the sheet's secondary column taller than Chromium does, so
 the dialog still scrolls 109px at 1284×856 there; the recovery row itself is
 fully inside the fold in both engines.
 
-`cargo clippy --workspace` and `cargo test --workspace` cannot complete on
-this host: `apps/desktop` requires `pkg-config` and the GTK development
-packages, and `glib-sys` fails its build script before compiling. The
-workspace was therefore checked crate by crate for every crate that does not
-need GTK. The native desktop client, WebKitGTK rendering, physical audio and
-the Docker runtime were not run.
+The GTK development packages and `pkg-config` are now installed on this
+host, so `cargo clippy --locked --workspace --all-targets -- -D warnings`
+and `cargo test --locked --workspace -- --test-threads=2` both complete for
+the whole workspace, `apps/desktop` included. The native desktop client was
+compiled and unit-tested, but its WebKitGTK rendering, its window and its
+physical audio were not run: this host has no X server and no working
+PulseAudio server. The Docker runtime was not run either.
 
 ## Empty library state — 2026-10-21
 
