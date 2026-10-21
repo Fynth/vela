@@ -1182,9 +1182,9 @@ test('TR04a Home composes bounded filter views from real DTOs and keeps one root
     await expect(page.locator('[data-image-blocked]')).toHaveCount(0);
     await expect(page.locator('.home-features')).toBeVisible();
     await expect(page.locator('.home-feature-empty')).toHaveCount(1);
-    await expect(page.locator('.home-feature-empty')).toContainText('Выберите музыку для этой подборки.');
+    await expect(page.locator('.home-feature-empty')).toContainText('Choose music for this space');
     await expect(page.locator('.home-feature-empty .home-feature-listen')).toHaveCount(0);
-    await expect(page.locator('.home-feature-empty')).toContainText('Открыть плейлисты');
+    await expect(page.locator('.home-feature-empty')).toContainText('Open playlists');
     await expect(page.locator('.home-wave')).toHaveCount(1);
     for (const asset of ['/assets/brand/vela-coast.png', '/assets/brand/vela-wave.png']) {
       const response = await page.request.get(runtime.origin + asset);
@@ -1415,7 +1415,7 @@ test('TR04a Home composes bounded filter views from real DTOs and keeps one root
     const indicators = feature.locator('.home-indicator');
     await expect(indicators).toHaveCount(1);
     await expect(indicators.first()).toHaveAttribute('aria-current', 'true');
-    await expect(indicators.first()).toHaveAttribute('aria-label', 'Показать Evening shelf');
+    await expect(indicators.first()).toHaveAttribute('aria-label', 'Show Evening shelf');
     // The Listen control is real: it plays the playlist's own tracks.
     await expect(feature.locator('.home-feature-listen')).toBeEnabled();
     await expect(feature.locator('.home-feature-arrow')).toBeEnabled();
@@ -1722,7 +1722,7 @@ test('TR07c keyboard row menu and the real searchable add-to-playlist picker', a
     const noPlayback = async () => {
       expect(await audio.evaluate(node => node.paused), 'menu interactions never start playback').toBe(true);
       await expect(page.locator('.player-title')).toHaveCount(0);
-      await expect(page.locator('.now-playing')).toContainText('Ready when you are');
+      await expect(page.locator('.now-playing')).toContainText('Nothing playing');
     };
 
     // --- Shift+F10 on a focused row control opens the anchored row menu.
@@ -1868,7 +1868,8 @@ test('TR07c keyboard row menu and the real searchable add-to-playlist picker', a
     // --- Undo is a real inverse of the acknowledged add.
     await receipt.getByRole('button', { name: 'Undo', exact: true }).click();
     await expect(receipt).toHaveCount(0);
-    await expect(page.getByRole('status').first()).toContainText('Removed the added track.');
+    // The ordinary receipt is the root's own notice in the feedback stack.
+    await expect(page.locator('.feedback-stack > .alert.success:not(.playlist-undo)')).toContainText('Removed the added track.');
     await expect.poll(async () => (await playlistItems(destination.id)).length).toBe(0);
 
     // --- Escape and the backdrop both close the picker and restore focus.
@@ -2410,7 +2411,7 @@ test('REVIEW03 queue states, next labels, mute reconciliation and reachable touc
     await expect(drawer.locator('.queue-row-next')).toHaveCount(0);
     await drawer.getByRole('button', { name: 'Shuffle', exact: true }).click();
     await expect(drawer.locator('.queue-row-next')).toHaveCount(0);
-    await expect(drawer.locator('.queue-note')).toContainText('порядок определяется');
+    await expect(drawer.locator('.queue-note')).toContainText('The order is decided when playback starts.');
 
     const capture = process.env.VELA_BD_CAPTURE_SCRIPT
       ? await readFile(resolve(root, process.env.VELA_BD_CAPTURE_SCRIPT), 'utf8') : null;

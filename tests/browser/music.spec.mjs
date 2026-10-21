@@ -1270,7 +1270,7 @@ test('private search replies cannot populate another account after logout', asyn
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   await expect(page.getByRole('heading', { name: 'No search results', exact: true })).toBeVisible();
   await expect(page.locator('.search-track-row')).toHaveCount(0);
-  await expect(page.locator('.now-playing strong')).toHaveText('Ready when you are');
+  await expect(page.locator('.now-playing strong')).toHaveText('Nothing playing');
   await expect(page.getByRole('button', { name: 'Shuffle', exact: true })).toHaveAttribute('aria-pressed', 'false');
   await expect(page.getByRole('button', { name: 'Repeat: off', exact: true })).toBeVisible();
 });
@@ -1540,7 +1540,7 @@ test('RES02 malformed foreign and oversized bookmarks do not fetch or expose que
   for(const invalid of ['{', JSON.stringify({...JSON.parse(raw),owner_id:randomUUID()}),JSON.stringify({...JSON.parse(raw),cursor:1001}), ' '.repeat(4*1024*1024+1)]){
     await page.evaluate(config=>localStorage.setItem('vela-fixture-bookmark-injection',JSON.stringify(config)),{key,invalid,id:account.user.id});
     await page.reload();
-    await expect(page.locator('.now-playing strong')).toHaveText('Ready when you are');
+    await expect(page.locator('.now-playing strong')).toHaveText('Nothing playing');
     await expect(page.getByRole('button',{name:'Play',exact:true})).toBeDisabled();
     await page.getByRole('button',{name:'Show playback queue',exact:true}).click();
     await expect(page.locator('.queue-row')).toHaveCount(0);

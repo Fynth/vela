@@ -140,7 +140,7 @@ pub fn QueueDrawer(
 
                 header { class: "queue-header",
                     div { class: "queue-heading",
-                        span { class: "eyebrow", "СЕЙЧАС ИГРАЕТ" }
+                        span { class: "eyebrow", "NOW PLAYING" }
                         p { class: "queue-context", title: "{context_label}", "Playing from {context_label}" }
                     }
                     button {
@@ -255,7 +255,7 @@ pub fn QueueDrawer(
                     p { class: "queue-note", "Next: {title}" }
                 }
                 if shuffle_pending {
-                    p { class: "queue-note", "Перемешивание: порядок определяется при воспроизведении." }
+                    p { class: "queue-note", "Shuffle is on. The order is decided when playback starts." }
                 }
                 if !status.is_empty() {
                     div { class: "queue-playback-error", role: "alert",
@@ -306,7 +306,7 @@ pub fn QueueDrawer(
                                     }
                                     span { class: "queue-duration", "{duration}" }
                                     if is_next && is_explicit {
-                                        span { class: "queue-row-badge", "По запросу" }
+                                        span { class: "queue-row-badge", "On request" }
                                     }
                                     div { class: "queue-row-actions",
                                         button {
@@ -348,13 +348,13 @@ pub fn QueueDrawer(
 
                 if queue.is_empty() {
                     div { class: "queue-empty",
-                        p { "Здесь пока тихо. Добавьте треки из медиатеки." }
+                        p { "No tracks queued. Add tracks from your library." }
                         button {
                             class: "button secondary",
                             r#type: "button",
-                            "aria-label": "Open the library",
+                            "aria-label": "Open library",
                             onclick: move |_| onchoose.call(()),
-                            "Открыть медиатеку"
+                            "Open library"
                         }
                     }
                 }

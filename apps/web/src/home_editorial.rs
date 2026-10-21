@@ -14,11 +14,11 @@ const EDITORIAL_TARGETS: usize = 3;
 /// One bounded page of real recommendation candidates.
 const WAVE_LIMIT: usize = 12;
 /// Supporting copy only: it never presents itself as a saved collection.
-const EDITORIAL_SUBTITLE: &str = "Музыка, чтобы замедлиться. И услышать что-то большее.";
-const EDITORIAL_EYEBROW: &str = "ПОДБОРКА";
-const WAVE_EYEBROW: &str = "ПЕРСОНАЛЬНЫЙ МИКС";
-const WAVE_TITLE: &str = "Моя волна";
-const WAVE_SUBTITLE: &str = "Ваша музыка. Новые сочетания.";
+const EDITORIAL_SUBTITLE: &str = "Music to slow down to. And to hear something more.";
+const EDITORIAL_EYEBROW: &str = "EDITORIAL";
+const WAVE_EYEBROW: &str = "PERSONAL MIX";
+const WAVE_TITLE: &str = "Your wave";
+const WAVE_SUBTITLE: &str = "Your music. New combinations.";
 
 /// The wave arrow opens the real personal mixes section rendered on this page.
 /// It is a scroll, not a second reader: the mixes keep their own request scope.
@@ -48,7 +48,7 @@ pub fn HomeFeatures(
     actions: Actions,
 ) -> Element {
     rsx! {
-        section { class: "home-features", "aria-label": "Подборки и персональный микс",
+        section { class: "home-features", "aria-label": "Editorial and personal mix",
             EditorialCard { auth, playlists, owner_id, actions }
             WaveCard { auth, revision, actions }
         }
@@ -92,13 +92,13 @@ fn EditorialCard(
             article { class: "home-feature home-feature-empty",
                 div { class: "home-feature-copy",
                     span { class: "eyebrow home-eyebrow", "{EDITORIAL_EYEBROW}" }
-                    h2 { class: "home-feature-title", "Выберите музыку для этой подборки." }
+                    h2 { class: "home-feature-title", "Choose music for this space" }
                     p { class: "home-feature-subtitle",
-                        "Подборка появляется, когда вы создаёте свой плейлист. Он остаётся приватным." }
+                        "Create a private playlist to choose what appears here." }
                     div { class: "home-feature-actions",
                         button { class: "button primary home-feature-open", r#type: "button",
-                            "aria-label": "Открыть плейлисты",
-                            onclick: move |_| actions.navigate.call("playlists".into()), "Открыть плейлисты" }
+                            "aria-label": "Open playlists",
+                            onclick: move |_| actions.navigate.call("playlists".into()), "Open playlists" }
                     }
                 }
             }
@@ -110,11 +110,7 @@ fn EditorialCard(
     let listen_id = current.id.clone();
     let open_id = current.id.clone();
     let pending = *busy.read();
-    let listen_label = if pending {
-        "Загружаем…"
-    } else {
-        "Слушать"
-    };
+    let listen_label = if pending { "Loading…" } else { "Play" };
     let error_text = error.read().clone();
 
     rsx! {
@@ -126,7 +122,7 @@ fn EditorialCard(
                 div { class: "home-feature-actions",
                     button { class: "button primary home-feature-listen", r#type: "button",
                         disabled: pending,
-                        "aria-label": "Слушать «{title}»",
+                        "aria-label": "Play «{title}»",
                         onclick: move |_| {
                             let session = token(auth);
                             if session.is_empty() {
@@ -173,7 +169,7 @@ fn EditorialCard(
                                             .collect();
                                         if tracks.is_empty() {
                                             error.set(
-                                                "В этой подборке пока нет треков, доступных для воспроизведения."
+                                                "This playlist has no tracks you can play yet."
                                                     .into(),
                                             );
                                             return;
@@ -195,7 +191,7 @@ fn EditorialCard(
                         "{listen_label}"
                     }
                     button { class: "home-feature-arrow", r#type: "button",
-                        "aria-label": "Открыть «{title}»",
+                        "aria-label": "Open «{title}»",
                         onclick: move |_| actions.playlist.call(open_id.clone()),
                         Icon { name: "up" }
                     }
@@ -204,13 +200,13 @@ fn EditorialCard(
                     p { class: "home-feature-error", role: "alert", "{error_text}" }
                 }
             }
-            div { class: "home-feature-indicators", role: "group", "aria-label": "Другие подборки",
+            div { class: "home-feature-indicators", role: "group", "aria-label": "Other playlists",
                 for (position, target) in targets.iter().enumerate() {
                     { let active = position == index; let name = target.name.clone(); rsx! {
                         button { key: "{target.id}",
                             class: if active { "home-indicator active" } else { "home-indicator" },
                             r#type: "button",
-                            "aria-label": "Показать {name}",
+                            "aria-label": "Show {name}",
                             "aria-current": if active { "true" } else { "false" },
                             onclick: move |_| selected.set(position)
                         }
@@ -318,9 +314,9 @@ fn WaveCard(
         .first()
         .is_some_and(|track| actions.is_playing(&track.id));
     let play_label = if wave_playing {
-        "Пауза «Моя волна»"
+        "Pause «Your wave»"
     } else {
-        "Слушать «Моя волна»"
+        "Play «Your wave»"
     };
     let play_icon = if wave_playing { "pause" } else { "play" };
 
@@ -330,7 +326,7 @@ fn WaveCard(
                 div { class: "home-wave-top",
                     span { class: "eyebrow home-eyebrow", Icon { name: "jobs" } "{WAVE_EYEBROW}" }
                     button { class: "home-wave-open", r#type: "button",
-                        "aria-label": "Показать персональные подборки",
+                        "aria-label": "Show personal mixes",
                         onclick: move |_| scroll_to_personal_mixes(),
                         Icon { name: "up" }
                     }
@@ -340,18 +336,18 @@ fn WaveCard(
                         h2 { class: "home-wave-title", "{WAVE_TITLE}" }
                         p { class: "home-wave-subtitle", "{WAVE_SUBTITLE}" }
                         if tuned {
-                            span { class: "home-wave-tuned", "Настроена на вас" }
+                            span { class: "home-wave-tuned", "Tuned to you" }
                         }
                         if pending && candidates.is_empty() {
-                            p { class: "home-wave-note", role: "status", "Загружаем ваш микс…" }
+                            p { class: "home-wave-note", role: "status", "Loading your mix…" }
                         } else if !error_text.is_empty() {
                             p { class: "home-wave-note home-wave-error", role: "alert", "{error_text}" }
                         } else if candidates.is_empty() {
                             div { class: "home-wave-note",
-                                p { "В медиатеке пока мало подходящих треков." }
+                                p { "No suitable tracks yet" }
                                 button { class: "button secondary small", r#type: "button",
-                                    "aria-label": "Открыть медиатеку",
-                                    onclick: move |_| actions.navigate.call("library".into()), "Открыть медиатеку" }
+                                    "aria-label": "Open library",
+                                    onclick: move |_| actions.navigate.call("library".into()), "Open library" }
                             }
                         }
                     }

@@ -1,5 +1,64 @@
 # Verified progress
 
+## DR-05 readable states and one feedback stack — 2026-10-21
+
+The Home editorial and My Wave cards, the queue drawer and the idle player now
+speak one English dictionary. The empty editorial card states «Choose music for
+this space», the settled wave states «No suitable tracks yet», a pending wave
+states «Loading your mix…», the idle player states «Nothing playing / Choose a
+track», and the queue states «NOW PLAYING», «Saved queue» and «No tracks
+queued. Add tracks from your library.». Real playlist, track and artist names
+are never translated; only the system's own labels are.
+
+The empty editorial and wave cards had almost white text on a white card in
+the light theme (measured 1.114:1 for the title and 1.622:1 for the subtitle
+before this change). Both empty variants now use the semantic text roles —
+`--vela-text` for the title and eyebrow, `--vela-muted-text` for the subtitle,
+note and wave copy, `--vela-danger` for the error — while the image-backed
+card keeps its own light-on-artwork colours and its shade.
+
+The root's three feedback signals — the recovery status, the Undo receipt and
+the ordinary receipt — are projected into one `.feedback-stack` next to the
+persistent player, outside the scrolling catalog. The DOM order is recovery,
+Undo receipt, ordinary receipt, so a real failure is never hidden under a
+receipt and the Undo is never lost when a general notice arrives. The stack is
+a projection, not a new store: every signal and every handler stayed where it
+was, and the old fixed `right/bottom` rules of the moved instances (including
+the specific `.content-inner > .alert.success`) are gone. The stack scrolls
+itself when it is taller than the space above the player, and it never takes
+focus on its own.
+
+The library toolbar and the sidebar account line now use the server's own
+counts with the English noun that follows the count: «2 tracks · 2 albums · 1
+artist» and «1 private track». An unknown statistics read states nothing at
+all; no count is derived from the number of visible rows and no zero is
+invented.
+
+The Now Playing recovery summary and its Retry became one compact wrap row
+(`flex-wrap`, 8px gap, 12px padding, `p` at `flex: 1 1 240px`, the action at a
+44px minimum). The artwork's height reserve was re-derived from the dialog's
+real height budget, so a normal track name with a genuine recovery status shows
+its Retry in full at 1284×856 without scrolling, while the transport, the
+volume and the artwork keep their own sizes.
+
+Executed on this change: `cargo fmt --all`; strict `cargo clippy -D warnings`
+for `vela-web`, `vela-server`, `vela-core`, `vela-domain`, `vela-media`,
+`vela-imports` and `vela-scanner` with `--all-targets`; the release WASM build
+for `vela-web`; `scripts/build-web.sh` (wasm-bindgen 0.2.129) into `dist/`;
+the workspace test run for the same crates; and the Chromium and Firefox
+Playwright suites. The package also adds a permanent browser journey,
+`tests/browser/dr05-states.spec.mjs`, that owns its server and data and asserts
+the live DOM's own contrast for the empty cards in both themes, the three
+feedback signals in one column, their zero intersection and ≥8px gap at
+1284×856/390×844/360×800/320×700, the stack's zero intersection with the
+player and the mobile navigation, and the 44px height of every action in the
+stack. `cargo clippy --workspace` and `cargo test --workspace` cannot complete
+on this host: `apps/desktop` needs `pkg-config` and the GTK development
+packages, and `glib-sys` fails its build script before compiling — an
+environment limitation, not a code failure. Measured browser evidence and its
+exact numbers are in [QA_EVIDENCE](QA_EVIDENCE.md); the remaining limits are in
+[KNOWN_LIMITATIONS](KNOWN_LIMITATIONS.md).
+
 ## Honest empty library state on Home — 2026-10-21
 
 The Home page no longer promises collections that do not exist. On a confirmed

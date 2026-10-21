@@ -604,10 +604,67 @@
 }
 @media(prefers-reduced-motion:reduce) {*,*::before,*::after {animation:none!important;transition:none!important;scroll-behavior:auto!important;}}
 
-.playback-status {position:fixed;z-index:45;bottom:104px;left:max(16px,calc(50% - 300px));right:max(16px,calc(50% - 300px));display:flex;align-items:center;gap:14px;padding:12px 16px;border:1px solid var(--line);border-radius:12px;background:var(--surface-raised);color:var(--text);box-shadow:var(--shadow);font-size:13px;}
-.playback-status .text-button {flex-shrink:0;min-height:44px;}
+/* DR05: one presentation stack for the root's own feedback.
+   The recovery status, the Undo receipt and the ordinary receipt are three
+   signals of the root, projected into one column beside the persistent
+   player. Nothing here is a new store: the DOM order is recovery, Undo
+   receipt, ordinary receipt, so a real failure is never hidden under a
+   receipt. The stack is a sibling of the player, never over the browser's
+   top layer, and it never takes focus. */
+.feedback-stack {
+  position: fixed;
+  z-index: 60;
+  bottom: calc(var(--vela-bottom-reserve) + 16px);
+  right: 24px;
+  width: min(600px, calc(100% - 32px));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: calc(100dvh / var(--app-zoom, 1) - var(--vela-topbar-height)
+    - var(--vela-safe-top) - var(--vela-bottom-reserve) - 32px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  pointer-events: none;
+}
+.feedback-stack > * { pointer-events: auto; }
+.feedback-stack .alert {
+  margin: 0;
+  width: 100%;
+  position: static;
+  inset: auto;
+  max-width: none;
+  background: var(--surface-raised);
+  border-color: var(--control-line);
+  box-shadow: var(--shadow);
+  color: var(--text);
+}
+.feedback-stack .alert.error { color: var(--danger); }
+.feedback-stack .alert.success { color: var(--accent); }
+.feedback-stack .alert > div { min-width: 0; }
+.feedback-stack .alert p { color: inherit; margin: 6px 0 0; overflow-wrap: anywhere; }
+/* DR05: the stack's dismiss and action targets keep a 44px rectangle on every
+   input type, not only on touch. The receipt is dismissed with a mouse as
+   often as with a finger, and a 32px target is a miss waiting to happen. */
+.feedback-stack .alert button[aria-label^="Dismiss"] {
+  min-width: 44px;
+  width: 44px;
+  min-height: 44px;
+  height: 44px;
+  flex-shrink: 0;
+}
+.feedback-stack .playback-status { display: flex; align-items: center; gap: 14px; font-size: 13px; }
+.feedback-stack .playback-status .text-button { flex-shrink: 0; min-height: 44px; }
+.feedback-stack .playlist-undo { flex-wrap: wrap; row-gap: 8px; }
+.feedback-stack .playlist-undo .button { flex-shrink: 0; }
+@media (max-width: 760px) {
+  .feedback-stack { left: 16px; right: 16px; width: auto; }
+}
+@media (max-width: 620px) {
+  .feedback-stack .playback-status { font-size: 12px; flex-wrap: wrap; gap: 5px; }
+}
 .queue-context {max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:12px;}
-@media(max-width:620px){.playback-status {bottom:calc(153px + var(--vela-safe-bottom));font-size:12px;flex-wrap:wrap;gap:5px;}.queue-context {max-width:190px;}}
+@media(max-width:620px){.queue-context {max-width:190px;}}
 
 /* Private history uses existing surfaces; it never owns the player. */
 .listening-privacy .checkbox-label{white-space:normal;display:flex;align-items:flex-start;gap:10px;font-size:13px;line-height:1.5;margin:18px 0}.listening-privacy .checkbox-label input{flex:0 0 18px;margin-top:2px}.listening-privacy select{width:100%;margin-bottom:15px}.listening-privacy-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:20px}.listening-privacy-actions .button,.history-delete-confirm .button{white-space:normal;text-align:center}.history-delete-confirm{border:1px solid var(--danger);border-radius:12px;padding:18px;margin-top:20px}.history-delete-confirm .button{margin:4px 8px 4px 0;max-width:100%}.history-track-list{display:grid;gap:8px}.history-track{display:flex;align-items:center;justify-content:space-between;gap:16px;border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:8px 16px 8px 8px;min-width:0}.history-play{display:flex;align-items:center;gap:13px;min-width:0;flex:1;text-align:left;color:var(--text);background:none;padding:4px;border-radius:8px}.history-play .artwork{width:48px;height:48px;min-width:48px}.history-play>div{min-width:0}.history-play strong,.history-play small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.history-play .vela-icon{margin-left:auto;flex-shrink:0}.history-track>small{white-space:nowrap}.listening-history .section-toolbar p{margin-bottom:0}.listening-history .pagination{gap:10px;flex-wrap:wrap}@media(max-width:500px){.history-track{gap:8px;padding-right:10px}.history-play{gap:10px}.history-play .artwork{width:40px;height:40px;min-width:40px}.history-play .vela-icon{display:none}.history-track>small{font-size:10px}.listening-privacy-actions{flex-direction:column}.listening-privacy-actions .button{width:100%}.listening-privacy .checkbox-label{font-size:13px}.listening-history .section-toolbar{align-items:flex-start;gap:10px;flex-wrap:wrap}}
@@ -798,11 +855,9 @@ input::placeholder { color:var(--quiet); opacity:1; }
 .page-heading .eyebrow,.home-hero .eyebrow,.section-toolbar .eyebrow { display:none; }
 .page-heading { display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; }
 .page-heading h1 { margin:0; }
-.content-inner>.alert.success {
-  position:fixed; right:24px; bottom:calc(var(--vela-player-height) + 16px); z-index:60;
-  max-width:min(420px,calc(100vw - 32px)); margin:0;
-  background:var(--surface-raised); border-color:var(--control-line); box-shadow:var(--shadow);
-}
+/* DR05: the root's receipts moved into `.feedback-stack`. The old fixed
+   `right/bottom` rule for `.content-inner>.alert.success` is removed, so a
+   receipt can never float over the recovery message again. */
 .section-toolbar p,.page-heading p,.home-toolbar p { font-size:14px; }
 .home-hero {
   min-height:240px; padding:32px; border-radius:12px;
@@ -873,7 +928,6 @@ input::placeholder { color:var(--quiet); opacity:1; }
 @media(max-width:620px) {
   :root { --vela-player-height:var(--vela-mobile-player-height); --vela-mobile-nav-height:70px; }
   .app-shell { padding:0; }
-  .content-inner>.alert.success { right:16px; bottom:calc(var(--vela-player-height) + var(--vela-mobile-nav-height) + 16px); }
   .home-hero { padding:24px; gap:16px; min-height:200px; }
   .home-hero h1 { font-size:28px; }
   .home-hero p { font-size:14px; }
@@ -1069,7 +1123,9 @@ input::placeholder { color:var(--quiet); opacity:1; }
   }
   .content-inner { padding-bottom:20px; }
   .queue-panel { bottom:var(--vela-bottom-reserve); }
-  .playback-status { bottom:calc(var(--vela-bottom-reserve) + 16px); }
+  /* DR05: the recovery status moved into `.feedback-stack`, which owns the
+     bottom offset itself. The old per-instance fixed `bottom` rule is gone,
+     so a mobile recovery message can never float away from its stack. */
 }
 /* The narrowest supported reference width uses the 16px gutter. */
 @media (max-width:360px) {
@@ -1226,13 +1282,6 @@ input::placeholder { color:var(--quiet); opacity:1; }
   .player-bar { grid-template-columns: minmax(0, 1fr) minmax(0, 430px) minmax(0, 1fr); gap: 14px; }
   .player-buttons { gap: 10px; }
   .player-buttons .mobile-queue { display: none; }
-}
-@media (max-width: 760px) {
-  /* Fixed status feedback clears the same player + navigation reservation, so a
-     real receipt never covers the transport or the volume/queue zone. */
-  .content-inner > .alert.success {
-    bottom: calc(var(--vela-bottom-reserve) + 16px);
-  }
 }
 /* TR09: <=760px is one mobile composition, not two. The two-zone mini-player
    (art/title, favorite, Play/Pause, Next and Queue above a full-width seek rail)

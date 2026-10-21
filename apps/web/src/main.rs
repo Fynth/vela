@@ -256,6 +256,16 @@ fn synchronize_order(mut ui: PlaybackUi) {
     }
     order.configure(*ui.shuffle.peek(), Repeat::from_label(&ui.repeat.peek()));
 }
+
+/// One count with its English noun. The count always comes from the server's
+/// own statistics; the noun is the only thing that changes with the number.
+fn counted(count: i64, singular: &str) -> String {
+    if count == 1 {
+        format!("{count} {singular}")
+    } else {
+        format!("{count} {singular}s")
+    }
+}
 fn enqueue_track(track: Track, next: bool, mut ui: PlaybackUi, mut notice: Signal<String>) {
     synchronize_order(ui);
     if ui.queue.peek().len() >= playback::MAX_QUEUE {
@@ -2293,6 +2303,20 @@ fn App() -> Element {
     let seek_text = format!("{} of {}", seconds(position()), seconds(duration()));
     let volume_value = if muted() { 0.0 } else { volume() };
     let quality = current.as_ref().and_then(quality_label);
+    // The library toolbar states the server's own counts. The noun follows the
+    // count; an unknown statistics read states nothing at all.
+    let library_stats_label = stats
+        .read()
+        .as_ref()
+        .map(|value| {
+            format!(
+                "{} · {} · {}",
+                counted(value.tracks, "track"),
+                counted(value.albums, "album"),
+                counted(value.artists, "artist"),
+            )
+        })
+        .unwrap_or_default();
     let heading = match page.read().as_str() {
         "albums" => "Albums",
         "artists" => "Artists",
@@ -2384,43 +2408,6 @@ fn App() -> Element {
                     div { class: "main-scroll", id: "main-scroll",
                         div { class: "content-inner",
                     if !error().is_empty() { div { class: "alert error", role: "alert", span { "{error}" } button { "aria-label": "Dismiss error", onclick: move |_| error.set(String::new()), Icon { name: "close" } } } }
-                    if !notice().is_empty() { div { class: "alert success", role: "status", span { "{notice}" } button { "aria-label": "Dismiss notification", onclick: move |_| notice.set(String::new()), Icon { name: "close" } } } }
-                    if let Some(undo) = playlist_undo() { div { class: "alert success playlist-undo", role: "status",
-                        div { span { "Added “{undo.title}” to {undo.name}." }
-                            if !playlist_undo_error().is_empty() { p { role: "alert", "{playlist_undo_error}" } }
-                        }
-                        button { class: "button secondary small", disabled: playlist_undo_pending.read().is_some(), onclick: { let surfaces = surfaces.clone(); move |_| {
-                            if playlist_undo_pending.peek().is_some() || playlist_undo.peek().as_ref() != Some(&undo) { return; }
-                            let undo = undo.clone();
-                            playlist_undo_error.set(String::new());
-                            playlist_undo_pending.set(Some(undo.mutation_id.clone()));
-                            let command = surfaces.next_command();
-                            let surfaces_done = surfaces.clone();
-                            spawn_authorized(auth, async move {
-                                // A lost DELETE response retries the same inverse. A late
-                                // receipt may acknowledge its own removal, never erase a
-                                // newer Add receipt or publish an error over its dialog.
-                                let path = format!("/api/playlists/{}/items/{}?revision={}&mutation_id={}", undo.playlist_id, undo.item_id, undo.revision, undo.mutation_id);
-                                let outcome = mutate("DELETE", &path, None, &token(auth)).await;
-                                if playlist_undo_pending.peek().as_ref() == Some(&undo.mutation_id) { playlist_undo_pending.set(None); }
-                                if playlist_undo.peek().as_ref() == Some(&undo) {
-                                    match outcome {
-                                        Ok(()) => {
-                                            playlist_undo.set(None);
-                                            playlist_undo_error.set(String::new());
-                                            if *surfaces_done.command.peek() == command { notice.set("Removed the added track.".into()); }
-                                        }
-                                        Err(message) => if *surfaces_done.command.peek() == command { playlist_undo_error.set(message); },
-                                    }
-                                }
-                                if let Ok(value) = api::<Vec<PlaylistSummary>>("GET", "/api/playlists", None, "").await
-                                    && *surfaces_done.command.peek() == command {
-                                    playlists.set(value);
-                                }
-                            });
-                        } }, if playlist_undo_pending.read().is_some() { "Undoing…" } else { "Undo" } }
-                        button { class: "icon-button", "aria-label": "Dismiss added-track receipt", onclick: move |_| playlist_undo.set(None), Icon { name: "close" } }
-                    } }
                     if page() != "home" {div { class: "page-heading", h1 { "{heading}" }
                         if page() == "library" {
                             if !tracks.read().is_empty() { button { class: "button primary", onclick: move |_| play_queue(tracks.peek().clone(), 0, view_context(page,catalog,selected_playlist), playback), Icon {name:"play"} "Play these tracks" } }
@@ -2435,7 +2422,7 @@ fn App() -> Element {
                     if page() == "library" || page() == "favorites" {
                         section { class: "library-section",
                             div { class: "section-toolbar", div { h2 { if page() == "favorites" { "Your favorites" } else { "In your collection" } }
-                                    if let Some(value) = stats.read().as_ref() { p { "{value.tracks} tracks · {value.albums} albums · {value.artists} artists" } }
+                                    if !library_stats_label.is_empty() { p { "{library_stats_label}" } }
                                 }
                                 form { class: "search-form", onsubmit: move |e| { e.prevent_default(); search_library(query(), library); },
                                     label { class: "sr-only", r#for: "library-search", "Search your library" }
@@ -2950,7 +2937,65 @@ fn App() -> Element {
                     onloadedmetadata: move |_|engine.peek().metadata(), onerror: move |_|engine.peek().failed(),
                     onended: move |_|if engine.peek().ended(){advance(Command::Ended,playback)}
                 }
-                if !playback_status().is_empty() {div {class:"playback-status",role:"status", "{playback_status}" button {class:"text-button",onclick:move |_|engine.peek().resume(),"Retry playback"} }}
+                /* DR05: one presentation stack for the root's own feedback.
+                   The recovery status, the Undo receipt and the ordinary
+                   receipt are three signals of the root, projected into one
+                   column next to the persistent player. It is a projection,
+                   not a new notification store: every signal and every handler
+                   stays exactly where it was. The order from top to bottom is
+                   recovery, Undo receipt, ordinary receipt, so a real failure
+                   is never hidden under a receipt and an Undo is never lost
+                   when a general notice arrives. */
+                div { class: "feedback-stack", role: "group", "aria-label": "Playback feedback",
+                    // The recovery row is the root's projection of the same
+                    // status that the open Now Playing and Queue dialogs show
+                    // in their own body. While either dialog is open the root
+                    // projection is withheld, so the message is stated once.
+                    // The root state itself is untouched: the recovery row
+                    // returns when the dialog closes.
+                    if !playback_status().is_empty() && !*now.open.read() && !show_queue() { div { class: "alert error playback-status", role: "status",
+                        span { "{playback_status}" }
+                        button { class: "text-button", onclick: move |_| engine.peek().resume(), "Retry playback" } } }
+                    if let Some(undo) = playlist_undo() { div { class: "alert success playlist-undo", role: "status",
+                        div { span { "Added “{undo.title}” to {undo.name}." }
+                            if !playlist_undo_error().is_empty() { p { role: "alert", "{playlist_undo_error}" } }
+                        }
+                        button { class: "button secondary small", disabled: playlist_undo_pending.read().is_some(), onclick: { let surfaces = surfaces.clone(); move |_| {
+                            if playlist_undo_pending.peek().is_some() || playlist_undo.peek().as_ref() != Some(&undo) { return; }
+                            let undo = undo.clone();
+                            playlist_undo_error.set(String::new());
+                            playlist_undo_pending.set(Some(undo.mutation_id.clone()));
+                            let command = surfaces.next_command();
+                            let surfaces_done = surfaces.clone();
+                            spawn_authorized(auth, async move {
+                                // A lost DELETE response retries the same inverse. A late
+                                // receipt may acknowledge its own removal, never erase a
+                                // newer Add receipt or publish an error over its dialog.
+                                let path = format!("/api/playlists/{}/items/{}?revision={}&mutation_id={}", undo.playlist_id, undo.item_id, undo.revision, undo.mutation_id);
+                                let outcome = mutate("DELETE", &path, None, &token(auth)).await;
+                                if playlist_undo_pending.peek().as_ref() == Some(&undo.mutation_id) { playlist_undo_pending.set(None); }
+                                if playlist_undo.peek().as_ref() == Some(&undo) {
+                                    match outcome {
+                                        Ok(()) => {
+                                            playlist_undo.set(None);
+                                            playlist_undo_error.set(String::new());
+                                            if *surfaces_done.command.peek() == command { notice.set("Removed the added track.".into()); }
+                                        }
+                                        Err(message) => if *surfaces_done.command.peek() == command { playlist_undo_error.set(message); },
+                                    }
+                                }
+                                if let Ok(value) = api::<Vec<PlaylistSummary>>("GET", "/api/playlists", None, "").await
+                                    && *surfaces_done.command.peek() == command {
+                                    playlists.set(value);
+                                }
+                            });
+                        } }, if playlist_undo_pending.read().is_some() { "Undoing…" } else { "Undo" } }
+                        button { class: "icon-button", "aria-label": "Dismiss added-track receipt", onclick: move |_| playlist_undo.set(None), Icon { name: "close" } }
+                    } }
+                    if !notice().is_empty() { div { class: "alert success", role: "status",
+                        span { "{notice}" }
+                        button { "aria-label": "Dismiss notification", onclick: move |_| notice.set(String::new()), Icon { name: "close" } } } }
+                }
 
                 div { class: "player-bar", "aria-label": "Music player",
                     div { class: "player-now",
@@ -2978,7 +3023,7 @@ fn App() -> Element {
                                 },Icon {name:"heart"}}
                             span {class:"sr-only player-state-text","data-state":player_state,"{player_state_label}"}
                         } else {
-                            div {class:"now-playing",div {class:"artwork",Icon{name:"music"}}span {class:"now-playing-meta",strong {"Ready when you are"}small {"Choose something you love"}}}
+                            div {class:"now-playing",div {class:"artwork",Icon{name:"music"}}span {class:"now-playing-meta",strong {"Nothing playing"}small {"Choose a track"}}}
                             span {class:"sr-only player-state-text","data-state":player_state,"{player_state_label}"}
                         }
                     }

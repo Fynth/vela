@@ -1,5 +1,46 @@
 # Unsupported and unverified functionality
 
+## DR-05 readable states and feedback stack — 2026-10-21
+
+The English dictionary covers the system's own labels in the editorial card,
+the wave card, the queue drawer, the idle player and the library/sidebar
+counts. It is not a localization framework: real playlist, track and artist
+names stay in the script their owner gave them, and the rest of the interface
+still carries English strings that were outside this package's scope. A
+Russian-speaking account therefore sees a mixed-language shell, exactly as
+before this change, only with the touched states consistent.
+
+The contrast fix is scoped to the two empty card variants. The image-backed
+card keeps its light-on-artwork colours and its shade, and its contrast
+against the artwork image was not re-measured: the measurement walks opaque
+ancestors and cannot composite text over artwork.
+
+The feedback stack was measured in Chromium and Firefox with a genuine
+aborted stream, a real add-to-playlist and a real add-to-queue. A screen
+reader was not run, so the announcement order of the three live regions is a
+source-level guarantee, not a measured one. The layer's own bounded overflow
+was proven with a deliberately tall message — it capped itself, scrolled
+internally by wheel and by keyboard focus, and never reached the player or
+the navigation — but a real recovery message at a 150% app scale was not
+exercised.
+
+The Now Playing recovery row was verified at 1284×856, 1440×900 and 1728×1000
+with a normal track title. At a 720px dialog height the Retry is still below
+the fold and the dialog keeps its own scroll; that is the documented fallback
+for long titles and large text, not a measured regression. The artwork's height
+reserve was re-derived from the dialog's real height budget, so a very tall
+title or a large app scale can still push the recovery row into that scroll.
+Firefox lays out the sheet's secondary column taller than Chromium does, so
+the dialog still scrolls 109px at 1284×856 there; the recovery row itself is
+fully inside the fold in both engines.
+
+`cargo clippy --workspace` and `cargo test --workspace` cannot complete on
+this host: `apps/desktop` requires `pkg-config` and the GTK development
+packages, and `glib-sys` fails its build script before compiling. The
+workspace was therefore checked crate by crate for every crate that does not
+need GTK. The native desktop client, WebKitGTK rendering, physical audio and
+the Docker runtime were not run.
+
 ## Empty library state — 2026-10-21
 
 The empty-library Home state is verified by source, unit tests, strict Clippy

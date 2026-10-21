@@ -174,6 +174,19 @@
 .home-feature-empty::after {
   display: none;
 }
+/* The empty card has no artwork behind it, so there is no shade to read
+   against: its copy uses the semantic text roles instead of the
+   light-on-image colours. The image-backed card keeps its own colours. */
+.home-feature-empty .home-eyebrow,
+.home-feature-empty .home-feature-title {
+  color: var(--vela-text);
+}
+.home-feature-empty .home-feature-subtitle {
+  color: var(--vela-muted-text);
+}
+.home-feature-empty .home-feature-error {
+  color: var(--vela-danger);
+}
 .home-feature-empty .home-feature-title {
   font-size: clamp(24px, 2.4vw, 32px);
   max-width: 18ch;
@@ -322,6 +335,20 @@
 }
 .home-wave-empty::after {
   display: none;
+}
+/* Without artwork there is no shade to read against, so the empty wave uses
+   the semantic text roles. The image-backed wave keeps its own colours. */
+.home-wave-empty .home-eyebrow,
+.home-wave-empty .home-wave-title {
+  color: var(--vela-text);
+}
+.home-wave-empty .home-wave-subtitle,
+.home-wave-empty .home-wave-note,
+.home-wave-empty .home-wave-note p {
+  color: var(--vela-muted-text);
+}
+.home-wave-empty .home-wave-error {
+  color: var(--vela-danger);
 }
 
 @media (max-width: 1100px) {

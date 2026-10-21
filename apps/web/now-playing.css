@@ -111,8 +111,14 @@
   gap: 20px;
 }
 
+/* DR05: the artwork keeps its space inside the dialog's real height budget.
+   The reserve covers the header, the title row, the seek rail, the transport,
+   the volume row and the compact recovery row, so a normal track name with a
+   real recovery status shows its Retry in full without scrolling. The
+   artwork is the only elastic part: the transport and the action keep their
+   own sizes. */
 .np-artwork {
-  width: min(100%, 440px, clamp(140px, calc(100dvh / var(--app-zoom, 1) - 580px), 480px));
+  width: min(100%, 440px, clamp(140px, calc(100dvh / var(--app-zoom, 1) - 644px), 480px));
   margin: 0 auto 4px;
   min-width: 0;
 }
@@ -529,6 +535,30 @@
   white-space: normal;
 }
 
+/* DR05: the recovery summary and its Retry are one compact wrap row. The
+   reason keeps the space it needs, the action keeps its 44px target, and a
+   narrow or long-text dialog wraps the action onto the next line instead of
+   pushing it below the dialog edge. */
+.np-connection {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+}
+
+.np-connection p {
+  flex: 1 1 240px;
+  min-width: 0;
+  margin: 0;
+}
+
+.np-connection .button {
+  flex-shrink: 0;
+  min-height: 44px;
+  margin-top: 0;
+}
+
 .now-playing-dialog :is(button, input):focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 3px;
@@ -542,7 +572,8 @@
 @media (min-width: 1600px) {
   .now-playing-dialog { width: min(1240px, calc(100% - 96px)); }
   .np-layout { column-gap: 64px; padding: 32px 48px 44px; }
-  .np-artwork { width: min(100%, 480px, clamp(140px, calc(100dvh / var(--app-zoom, 1) - 580px), 480px)); }
+  /* The wider sheet carries taller padding, so the reserve grows with it. */
+  .np-artwork { width: min(100%, 480px, clamp(140px, calc(100dvh / var(--app-zoom, 1) - 668px), 480px)); }
 }
 
 @media (max-width: 900px) {

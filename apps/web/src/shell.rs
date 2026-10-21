@@ -74,7 +74,7 @@ pub fn Sidebar(
             if user.is_admin {button {class:if page=="jobs" {"nav-item active"} else {"nav-item"}, "aria-label":"Jobs", "data-destination":"jobs", "aria-current":if page=="jobs" {"page"} else {"false"}, onclick: move |_| onnav.call("jobs".into()), Icon {name:"jobs"} "Jobs"}}
             button {class:if page=="network" {"nav-item active"} else {"nav-item"}, "aria-label":"Network", "data-destination":"network", "aria-current":if page=="network" {"page"} else {"false"}, onclick: move |_| onnav.call("network".into()), Icon {name:"network"} "Network"}
             button {class:if page=="settings" {"nav-item active"} else {"nav-item"}, "aria-label":"Settings", "data-destination":"settings", "aria-current":if page=="settings" {"page"} else {"false"}, onclick: move |_| onnav.call("settings".into()), Icon {name:"settings"} "Settings"}
-            div {class:"account", div {class:"avatar", "{user.username.chars().next().unwrap_or('V').to_ascii_uppercase()}"} div {strong {"{user.username}"} small { if let Some(stats)=stats {"{stats.tracks} private tracks"} else {"Private library"} }} }
+            div {class:"account", div {class:"avatar", "{user.username.chars().next().unwrap_or('V').to_ascii_uppercase()}"} div {strong {"{user.username}"} small { if let Some(stats)=stats { if stats.tracks == 1 { "1 private track" } else { "{stats.tracks} private tracks" } } else {"Private library"} }} }
         }
     } }
 }

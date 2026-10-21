@@ -1,5 +1,42 @@
 # Verified0.12.0 package and preserved runtime checkpoint
 
+## DR-05 readable states and feedback stack — 2026-10-21
+
+| Check | Paths | Evidence | Status | NOT_RUN |
+| --- | --- | --- | --- | --- |
+| Empty editorial/wave card contrast (light+dark, 1284×856 and 320×700) | apps/web/home-editorial.css; apps/web/src/home_editorial.rs | Live DOM contrast, two real scenes: 2 tracks/0 playlists (empty editorial) and 2 tracks/favorited/1 playlist (empty wave). Light title 15.71:1, eyebrow 15.71:1, subtitle 7.65:1, wave note 7.65:1. Dark title 15.11:1, eyebrow 15.11:1, subtitle 6.40:1, wave note 6.40:1. All ordinary text ≥4.5:1, all titles ≥3:1 | PASS measured | Screen-reader pass NOT_RUN |
+| Feedback stack: recovery, Undo and ordinary receipt in one column | apps/web/src/main.rs; apps/web/style.css | Real aborted stream (root recovery budget exhausted: «Connection interrupted. Press Play to retry from your saved position.»), a real add-to-playlist (Undo receipt) and a real add-to-queue (ordinary receipt). DOM order recovery → Undo → ordinary. Chromium: pairwise intersection area 0px² at 1284×856, 390×844, 360×800 and 320×700; recovery↔Undo gap 8px, Undo↔ordinary gap 8px. Firefox: the same 0px² intersections and the same 8px gaps at the same four viewports. Stack↔player intersection 0px², stack↔mobile nav 0px², document overflow 0px, in both engines | PASS measured | Screen-reader announcement order NOT_RUN |
+| Stack action targets | apps/web/style.css | Retry playback 143×48, Undo 63×44, dismiss 44×44 at every measured width | PASS measured | — |
+| Stack bounded overflow | apps/web/style.css | A deliberately tall message injected into the live stack: at 320×700 the layer capped itself at 415px and at 390×844 at 559px, scrolled internally (`scrollTop` 40 after a wheel over a message, 132 after focusing the last action), kept a 0px² intersection with the player and the mobile navigation, and left the document overflow at 0px | PASS measured | Very long recovery text with a 150% app scale NOT_RUN |
+| Now Playing recovery row | apps/web/now-playing.css; apps/web/src/now_playing.rs | `.np-connection` measured `display:flex`, `flex-wrap:wrap`, `gap:8px`, `padding:12px`, `p` `flex:1 1 240px`, button `min-height:44px`, `margin-top:0`. Chromium: the Retry is fully visible with 0px dialog overflow at 1284×856, 1440×900 and 1728×1000; the transport and the volume are visible at all three. Firefox: the Retry is fully visible at the same three viewports; the dialog itself still scrolls 109px/65px there because Firefox's taller secondary column does not fit the sheet — the recovery row itself is fully inside the fold | PASS measured | 720px height keeps the dialog's own scroll in both engines (by design) |
+| EN system labels and count grammar | apps/web/src/{main,home_editorial,queue_drawer,shell}.rs | Live render: «2 tracks · 2 albums · 1 artist» and «1 private track»; queue «NOW PLAYING», «Saved queue», «No tracks queued. Add tracks from your library.»; idle player «Nothing playing / Choose a track»; editorial «Choose music for this space»; wave «No suitable tracks yet» / «Loading your mix…» | PASS measured | Full localization NOT_RUN (system labels only; real user names untouched) |
+| Rust quality and web build | workspace | `cargo fmt --all`; strict `cargo clippy -D warnings` for vela-web/server/core/domain/media/imports/scanner with `--all-targets` PASS; release WASM build PASS; `scripts/build-web.sh` PASS; workspace tests PASS for the same crates | PASS | `cargo clippy/test --workspace` NOT_RUN: `apps/desktop` needs pkg-config and the GTK development packages, so `glib-sys` fails its build script |
+| Browser suites | tests/browser | Chromium and Firefox Playwright suites PASS, including the new permanent `tests/browser/dr05-states.spec.mjs` (DR05) | PASS | Native GUI/WebKitGTK, physical audio, Docker runtime NOT_RUN |
+
+Permanent coverage: `tests/browser/dr05-states.spec.mjs` owns its server, data
+and sessions and asserts the live DOM's own contrast for the empty editorial
+and wave cards in both themes, the three real feedback signals in one column,
+their zero intersection and ≥8px gap at 1284×856, 390×844, 360×800 and 320×700,
+the stack's zero intersection with the player and the mobile navigation, and the
+44px height of every action in the stack. Its screenshots and `stack-state.json`
+land in `tests/browser/test-results/dr05-states/`.
+
+Ad-hoc stand artifacts from the same run: `/tmp/vela-dr05/artifacts/` —
+`home-A-1284x856-{light,dark}.png`, `home-A-320x700-{light,dark}.png` (empty
+editorial), `home-B-1284x856-{light,dark}.png`, `home-B-320x700-{light,dark}.png`
+(empty wave), `stack-chromium-{1284x856,390x844,360x800,320x700}.png`,
+`stack-firefox-{1284x856,390x844,360x800,320x700}.png`,
+`np-chromium-{1284x856,1440x900,1728x1000,1284x720}.png`,
+`stack-overflow-{320x700,390x844,1284x856}.png`, plus `report.json`,
+`stack-chromium.json`, `stack-firefox.json` and `np-chromium.json` with the raw
+measurements. The stand was an isolated `vela-server` on 127.0.0.1:52315/52316
+with its own data directory and the real `crates/media/tests/fixtures` files,
+not the 3219 audit stand. The bounded overflow was proven by injecting a
+deliberately tall message into the live stack: at 320×700 the layer capped
+itself at 415px and scrolled internally (`scrollTop` 40 after a scroll) with a
+0px² intersection with the player and the navigation; at 390×844 it capped at
+559px the same way.
+
 ## Distribution CI/CD 2026-10-20
 
 Tagged source `eb0fb8cd059e2da03ef94abe9265d4a4d3505c63`, workspace0.12.8.
