@@ -18,7 +18,7 @@ DR-03 → DR-08. Serious-находки DV-01/02/12 чинятся **до** glas
 
 | ID | Название | План | Приоритет | Пререквизиты | Ожидаемый исход | Размер | Статус |
 |---|---|---|---|---|---|---|---|
-| DR-05 | Читаемые состояния и feedback | [05](../DESIGN_REVIEW/05_EMPTY_ERROR_STATES.md) | P1 | нет | Home light читается, recovery/receipt не перекрываются, следующий шаг понятен | средний | PROPOSED |
+| DR-05 | Читаемые состояния и feedback | [05](../DESIGN_REVIEW/05_EMPTY_ERROR_STATES.md) | P1 | нет | Home light читается, recovery/receipt не перекрываются, следующий шаг понятен | средний | DONE 2026-10-21, commit 6dcb3fa |
 | DR-07 | Различимое управление с клавиатуры | [07](../DESIGN_REVIEW/07_A11Y_MOTION_AUDIT.md) | P1 | нет | Видимый focus, понятные range controls, предсказуемый выход из overlay | средний | PROPOSED |
 | DR-04 | Компактное управление с 44px targets | [04](../DESIGN_REVIEW/04_DENSITY_TYPOGRAPHY.md) | P1 | нет | В Next/Queue/navigation проще попасть без разрастания UI | средний | PROPOSED |
 | DR-06 | Музыка в первом mobile-экране | [06](../DESIGN_REVIEW/06_MOBILE_320_390.md) | P1 | нет | На 320 первый трек полностью виден, mobile controls и safe-area сохранены | средний | PROPOSED |
@@ -60,3 +60,4 @@ DR-03 → DR-08. Serious-находки DV-01/02/12 чинятся **до** glas
 | Дата | Пакет | Коммит | Проверки | Итог |
 |---|---|---|---|---|
 | 2026-10-21 | — | — | — | Реестр создан из аудита Codex (gpt-6.1-sol xhigh), 15 находок, 8 пакетов |
+| 2026-10-21 | DR-05 | 6dcb3fa | fmt exit 0; строгий clippy чисто; 380 Rust-тестов; wasm+build-web; Playwright Chromium 61 passed / 0 failed / 1 skipped; новый dr05-states spec passed | Контраст пустых карточек в light/dark ≥ 4.5:1; перекрытие трёх feedback-сигналов 0px, gap 8px, кнопки ≥ 44px на 320/360/390/1284. NOT_RUN: полный Firefox (на хосте нет PulseAudio — те же аудио-ассерты падают и на неизменённом baseline), native GUI, screen reader, safe-area hardware |
