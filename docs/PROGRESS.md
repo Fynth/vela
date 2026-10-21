@@ -2085,3 +2085,42 @@ of the user data with the rebuilt assets; screenshots in
 `target/checks/ui-audit/`. Wide-window NATIVE visual verification is
 NOT_RUN (the existing native QA window is 1280×840 and no credentials were used
 to open the signed-in screen).
+
+## Browser gate restored: wasm-bindgen CLI on PATH (2026-10-21)
+
+The web build and the real-browser suite could not run because no
+`wasm-bindgen` CLI was reachable: `scripts/build-web.sh` exits when
+`$VELA_WASM_BINDGEN` / `wasm-bindgen` is missing, and the pinned copy the
+docs referenced (`target/tools/wasm-bindgen-0.2.129-x86_64-unknown-linux-musl/`)
+was absent — only the project's `target/tools/wasm-bindgen-0.2.129/bin/`
+(built for the host) existed.
+
+Installed `wasm-bindgen-cli 0.2.129` with `cargo install
+wasm-bindgen-cli --version 0.2.129 --locked`, matching `Cargo.lock` exactly
+(the version is load-bearing: a mismatched CLI refuses the generated wasm).
+`/root/.cargo/bin/wasm-bindgen --version` reports `0.2.129`, identical to the
+project-pinned binary.
+
+Executed, not claimed:
+
+- `VELA_WEB_PROFILE=dev scripts/build-web.sh` → `dist/` populated.
+- `VELA_WEB_PROFILE=release scripts/build-web.sh` → release wasm
+  3,632,887 B in `dist/pkg/`.
+- `cd tests/browser && npx playwright test` → **60 passed, 1 skipped, 0 failed
+  in 5.7m** on the release build. The single skip is the opt-in
+  `VELA_LIVE_IMPORT_TEST` network case; the coarse-pointer skip is
+  engine-dependent, not a failure.
+
+The earlier debug-build run showed one real failure
+(`music.spec.mjs` "first-run setup, real FLAC upload, …"): after
+"Clear upcoming tracks" the drawer kept 2 rows instead of 1. It is a
+flake, not a queue-contract regression: the browser fixture
+`crates/media/tests/fixtures/signal.flac` is 1.0 s long, so the
+occurrence can reach its end and auto-advance while the test is still
+asserting, moving the cursor past the row the assertion assumes. The
+same test passes on the release build (60/61) and on a debug build when
+run on its own, which is the expected signature of a timing race rather
+than a deterministic defect. The 1-second fixture stays a latent flake
+source for queue assertions and is worth replacing with a longer fixture.
+
+`dist/` is git-ignored, so this change adds no tracked artifacts.
