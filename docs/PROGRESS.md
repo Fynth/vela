@@ -2124,3 +2124,30 @@ than a deterministic defect. The 1-second fixture stays a latent flake
 source for queue assertions and is worth replacing with a longer fixture.
 
 `dist/` is git-ignored, so this change adds no tracked artifacts.
+
+## The stall guard no longer mistakes a clock jump for a dead stream (2026-10-21)
+
+`music.spec.mjs` "sleep timer pauses the shared player and can be canceled"
+failed consistently: after the sleep timer advanced the fake clock by four
+minutes the player was paused while the test still expected it to play.
+
+Cause: the browser stall guard measured the stall with the wall clock
+(`Date::now() - progress_at >= 7900`). Playwright's `page.clock` replaces
+both `setTimeout` and `Date.now()` **and** `performance.now()`, so advancing
+the clock by four minutes fired the 8-second guard immediately and the
+guard's own age test passed — the guard called `recover()` and paused a
+stream that was perfectly alive.
+
+A wall-clock jump is not evidence of a stall. The same is true for a device
+that was suspended, a corrected system clock, or a resumed tab. The guard now
+reads the media element instead: the element must have no error, must not be
+at `HAVE_NOTHING`, and must have no buffered data past the current position.
+A live element that still holds media is never "stalled", whatever the clock
+says. This also matches the project rule that real playback progress is
+corroborated by the media element, not by a self-reported timer.
+
+`web-sys` gained the `TimeRanges` feature for `HTMLMediaElement.buffered`.
+
+Executed, not claimed: `cargo fmt --check`; strict `cargo clippy -p vela-web
+--all-targets -- -D warnings`; strict wasm32 clippy; `cargo test -p vela-web`
+(45 passed); release web build; full Chromium Playwright suite.

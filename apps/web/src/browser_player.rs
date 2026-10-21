@@ -43,7 +43,42 @@ struct State {
 }
 #[derive(Clone)]
 pub struct BrowserPlayer(Rc<RefCell<State>>);
+
 impl BrowserPlayer {
+    /// True when the media element looks genuinely stuck.
+    ///
+    /// The evidence is the element itself, not the clock: the element must
+    /// have no error, must not have data to play (`HAVE_NOTHING`) and must
+    /// not have buffered anything past the current position. A wall-clock
+    /// jump — a sleep timer, a resumed tab, a frozen test clock — leaves all
+    /// of that untouched, so it can never be mistaken for a dead stream.
+    fn stalled_now(&self) -> bool {
+        let Some(element) = audio() else {
+            return false;
+        };
+        if element.error().is_some() {
+            return true;
+        }
+        // HAVE_NOTHING (0) means the element has no media data at all: the
+        // source never loaded, so playback cannot progress.
+        if element.ready_state() == 0 {
+            return true;
+        }
+        // Buffered past the current position means the stream still has media
+        // to hand, even if the position has not moved yet.
+        let position = element.current_time();
+        let media: web_sys::HtmlMediaElement = element.clone().into();
+        let buffered = media.buffered();
+        for index in 0..buffered.length() {
+            if let Ok(end) = buffered.end(index)
+                && end > position + 0.5
+            {
+                return false;
+            }
+        }
+        true
+    }
+
     pub fn new(view: View) -> Self {
         let player = Self(Rc::new(RefCell::new(State {
             view,
@@ -621,7 +656,16 @@ impl BrowserPlayer {
                 if player.valid(generation).is_none() || !player.0.borrow().intent {
                     return;
                 }
-                if js_sys::Date::now() - player.0.borrow().progress_at >= 7900.0 {
+                // A stall is "the audio position stopped advancing", never "the
+                // wall clock moved". The wall clock jumps when a sleep timer
+                // expires, when a tab is resumed and when a test harness
+                // freezes time, and such a jump must not be mistaken for a
+                // dead stream. The element's own state is the evidence: an
+                // element that still has media data (a usable ready state and
+                // no error) and a position that has not moved is stalled, and
+                // one that still holds buffered data is not.
+                let stalled = player.stalled_now();
+                if stalled {
                     player.recover();
                 } else {
                     player.arm_stall();

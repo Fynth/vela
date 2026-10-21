@@ -16,4 +16,4 @@ gloo-timers = { version = "0.3", features = ["futures"] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
-web-sys = { version = "0.3", features = ["Performance", "Url", "AbortController", "AbortSignal", "Window", "Document", "Location", "HtmlElement", "HtmlAudioElement", "HtmlMediaElement", "MediaError", "HtmlInputElement", "HtmlDialogElement", "File", "FileList", "Blob", "FormData", "Request", "RequestInit", "RequestCredentials", "Response", "Headers", "Storage", "Event", "EventTarget", "CustomEvent", "CustomEventInit", "KeyboardEvent", "Navigator", "MediaSession"] }
+web-sys = { version = "0.3", features = ["Performance", "Url", "AbortController", "AbortSignal", "Window", "Document", "Location", "HtmlElement", "HtmlAudioElement", "HtmlMediaElement", "MediaError", "HtmlInputElement", "HtmlDialogElement", "File", "FileList", "Blob", "FormData", "Request", "RequestInit", "RequestCredentials", "Response", "Headers", "Storage", "Event", "EventTarget", "CustomEvent", "CustomEventInit", "KeyboardEvent", "Navigator", "MediaSession", "TimeRanges"] }
