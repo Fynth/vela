@@ -2,7 +2,7 @@
 use crate::home_editorial::HomeFeatures;
 use crate::session::{ContextKind, PlaybackContext};
 use crate::{
-    Art, CatalogCover,
+    Art, CatalogCover, bytes,
     client::{RequestScope, get},
     filters::append_query,
     icons::Icon,
@@ -284,8 +284,119 @@ fn home_playlists_view(
     } }
 }
 
+/// The empty library state.
+///
+/// It states plainly what is missing, offers the single real action that fixes
+/// it, and reports an import only when the server says one is really running.
+/// It never promises mixes, recommendations, track counts or percentages that
+/// the server did not report.
+#[component]
+fn HomeEmptyState(auth: Signal<Option<AuthResponse>>, actions: Actions) -> Element {
+    let alive = use_hook(|| Rc::new(Cell::new(true)));
+    let dropped = alive.clone();
+    let requests = use_hook(RequestScope::default);
+    let cleanup = requests.clone();
+    use_drop(move || {
+        dropped.set(false);
+        cleanup.cancel();
+    });
+    let mut activity = use_signal(Vec::<crate::jobs::ImportActivity>::new);
+    let mut loading = use_signal(|| true);
+    // The last read failure, kept apart from the activity itself: an unknown
+    // import state is not the same as an idle account.
+    let mut error = use_signal(String::new);
+    use_effect(move || {
+        requests.cancel();
+        let session = token(auth);
+        let _auth = auth.read();
+        if session.is_empty() {
+            activity.set(Vec::new());
+            loading.set(false);
+            return;
+        }
+        loading.set(true);
+        let alive = alive.clone();
+        let requests = requests.clone();
+        spawn_authorized(auth, async move {
+            // One owned read loop. It asks again only while the server still
+            // reports a running import, and stops as soon as none is left.
+            loop {
+                let signal = match requests.begin() {
+                    Ok(signal) => signal,
+                    Err(_) => break,
+                };
+                let result = crate::jobs::read_import_activity(auth, Some(&signal)).await;
+                if !alive.get() || token(auth) != session {
+                    return;
+                }
+                // A failed read is not "no imports". Keep the last confirmed
+                // activity and surface the failure, so a network blip never
+                // silently erases a running import.
+                let items = match result {
+                    Ok(items) => items,
+                    Err(message) => {
+                        error.set(message);
+                        loading.set(false);
+                        return;
+                    }
+                };
+                error.set(String::new());
+                activity.set(items.clone());
+                loading.set(false);
+                if items.is_empty() {
+                    return;
+                }
+                TimeoutFuture::new(2_000).await;
+                if !alive.get() || token(auth) != session {
+                    return;
+                }
+            }
+        });
+    });
+    let items = activity.read().clone();
+    let running = items.len();
+    let failure = error.read().clone();
+    rsx! { div { class: "empty-state home-empty",
+        span { class: "empty-icon", Icon { name: "music" } }
+        h2 { "Make room for your first listen" }
+        p { "Add music you own. Your library stays private to your account." }
+        button { class: "button primary home-empty-action", r#type: "button",
+            "aria-label": "Add music to your library",
+            onclick: move |_| actions.add.call(()), "Add music" }
+        if !failure.is_empty() {
+            p { class: "home-empty-error", role: "status",
+                "Import status is unavailable right now: {failure}" }
+        }
+        if running > 0 {
+            div { class: "home-empty-progress", role: "status",
+                p { class: "home-empty-progress-title",
+                    if running == 1 { "1 import is running" } else { "{running} imports are running" } }
+                for item in items.iter() {
+                    div { class: "home-empty-progress-row",
+                        span { class: "home-empty-progress-status", "{item.status}" }
+                        span { class: "home-empty-progress-bytes",
+                            "{bytes(item.downloaded_bytes)}"
+                            if let Some(total) = item.total_bytes { " of {bytes(total)}" } }
+                        if let Some(total) = item.total_bytes {
+                            progress { class: "home-empty-progress-bar", max: total.to_string(),
+                                value: item.downloaded_bytes.clamp(0, total).to_string(),
+                                "aria-label": "Import download progress" }
+                        }
+                    }
+                }
+            }
+        } else if (loading)() {
+            p { class: "home-empty-progress", role: "status", "Checking for running imports…" }
+        }
+    } }
+}
+
+/// The honest first-listen hint for a library that has music but no albums.
+///
+/// It stays out of the way: it explains the album view without inventing
+/// records.
 fn home_first_listen(actions: Actions) -> Element {
-    rsx! { div { class: "empty-state", Icon { name: "music" }
+    rsx! { div { class: "empty-state",
         h2 { "Make room for your first listen" }
         p { "Upload music you own or import an authorized audio download. Your library stays private." }
         button { class: "button primary", onclick: move |_| actions.add.call(()), "Add music" }
@@ -307,6 +418,7 @@ pub fn Home(
     auth: Signal<Option<AuthResponse>>,
     revision: Signal<u64>,
     actions: Actions,
+    library_state: Memo<Option<bool>>,
     children: Element,
 ) -> Element {
     let alive = use_hook(|| Rc::new(Cell::new(true)));
@@ -402,6 +514,17 @@ pub fn Home(
         .as_ref()
         .map(|value| value.user.id.clone())
         .unwrap_or_default();
+    // The empty library state needs a real answer before it may be shown.
+    // Home's own settled reads are the freshest evidence: when they found
+    // something, the server's older count must not hide it. Only when Home
+    // itself settled on nothing does the server's count confirm the emptiness;
+    // an unknown state keeps the skeleton and never promises a collection that
+    // may exist.
+    let home_settled_empty = settled && snapshot.is_empty();
+    let empty_library = match library_state() {
+        Some(empty) => empty && home_settled_empty,
+        None => home_settled_empty,
+    };
     let body = if pending && snapshot.is_empty() && error_text.is_empty() {
         match current {
             HomeView::Playlists => {
@@ -414,35 +537,46 @@ pub fn Home(
     } else {
         match current {
             HomeView::ForYou => rsx! {
-                HomeFeatures { auth, revision, playlists: snapshot.playlists.clone(), owner_id: owner_id.clone(), actions }
-                if snapshot.recent.is_empty() {
-                    if settled {
-                        {home_first_listen(actions)}
-                    }
+                // A fully empty library gets one honest state instead of the
+                // editorial feature pair, which would promise mixes, picks and
+                // discoveries that cannot exist yet.
+                if !pending && empty_library {
+                    HomeEmptyState { auth, actions }
                 } else {
-                    {home_additions(snapshot.recent.clone(), actions)}
-                }
-                if !snapshot.albums.is_empty() {
-                    {home_album_shelf("From your albums", "Familiar records from your own collection.", snapshot.albums.clone(), actions)}
-                }
-                if !snapshot.playlists.is_empty() {
-                    {home_playlist_preview(snapshot.playlists.clone(), &owner_id, actions)}
+                    HomeFeatures { auth, revision, playlists: snapshot.playlists.clone(), owner_id: owner_id.clone(), actions }
+                    if snapshot.recent.is_empty() {
+                        if settled {
+                            {home_first_listen(actions)}
+                        }
+                    } else {
+                        {home_additions(snapshot.recent.clone(), actions)}
+                    }
+                    if !snapshot.albums.is_empty() {
+                        {home_album_shelf("From your albums", "Familiar records from your own collection.", snapshot.albums.clone(), actions)}
+                    }
+                    if !snapshot.playlists.is_empty() {
+                        {home_playlist_preview(snapshot.playlists.clone(), &owner_id, actions)}
+                    }
                 }
             },
             HomeView::Albums => rsx! {
-                if snapshot.albums.is_empty() {
-                    if settled && !snapshot.recent.is_empty() {
-                        {home_albums_note(actions)}
-                    }
+                if !pending && empty_library {
+                    HomeEmptyState { auth, actions }
                 } else {
-                    {home_album_shelf("Your albums", "Every album in your library.", snapshot.albums.clone(), actions)}
-                }
-                if snapshot.recent.is_empty() {
-                    if settled && snapshot.albums.is_empty() {
-                        {home_first_listen(actions)}
+                    if snapshot.albums.is_empty() {
+                        if settled && !snapshot.recent.is_empty() {
+                            {home_albums_note(actions)}
+                        }
+                    } else {
+                        {home_album_shelf("Your albums", "Every album in your library.", snapshot.albums.clone(), actions)}
                     }
-                } else {
-                    {home_additions(snapshot.recent.clone(), actions)}
+                    if snapshot.recent.is_empty() {
+                        if settled && snapshot.albums.is_empty() {
+                            {home_first_listen(actions)}
+                        }
+                    } else {
+                        {home_additions(snapshot.recent.clone(), actions)}
+                    }
                 }
             },
             HomeView::Playlists => {

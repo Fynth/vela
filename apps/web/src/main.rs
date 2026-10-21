@@ -1560,6 +1560,20 @@ fn App() -> Element {
         error,
     };
     let mut stats = use_signal(|| None::<LibraryStats>);
+    // The library state is only known once the server's own count arrives.
+    // `None` means unknown, which is not the same as empty: nothing may claim
+    // an empty library before the server confirmed it, and nothing may show
+    // mixes before the server confirmed there is music.
+    //
+    // The count is a hint, never an authority on its own: a stale `/api/stats`
+    // must not hide content the caller already holds. Consumers therefore
+    // combine this with their own settled reads (see `experience::Home`).
+    let library_state = use_memo(move || {
+        stats
+            .read()
+            .as_ref()
+            .map(|value| value.tracks == 0 && value.albums == 0)
+    });
     let mut add_music = use_signal(|| false);
     let mut editing_track = use_signal(|| None::<Track>);
     let mut uploading = use_signal(|| false);
@@ -2413,7 +2427,7 @@ fn App() -> Element {
                             else { button { class: "button primary", onclick: move |_| add_music.set(true), "+ Add your first album" } }
                         }
                     }}
-                    if page() == "home" {experience::Home {auth,revision:facets_revision,actions, personal_mixes::PersonalMixes {auth,revision:facets_revision,view:listening_view,actions} listening::History {auth,view:listening_view,actions,compact:true}}}
+                    if page() == "home" {experience::Home {auth,revision:facets_revision,actions,library_state, personal_mixes::PersonalMixes {auth,revision:facets_revision,view:listening_view,actions,library_state} listening::History {auth,view:listening_view,actions,compact:true}}}
                     if page() == "search" {experience::Search {auth,revision:facets_revision,actions}}
                     if page() == "history" {listening::History {auth,view:listening_view,actions,compact:false}}
                     if page() == "radio" {radio::Radio {auth,seed:radio_seed,actions}}

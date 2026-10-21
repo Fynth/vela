@@ -403,6 +403,7 @@ pub fn PersonalMixes(
     revision: Signal<u64>,
     view: Signal<ListeningView>,
     actions: Actions,
+    library_state: Memo<Option<bool>>,
 ) -> Element {
     let alive = use_hook(|| Rc::new(Cell::new(true)));
     let reads = use_hook(RequestScope::default);
@@ -442,6 +443,19 @@ pub fn PersonalMixes(
         let _auth = auth.read();
         let _view = view.read();
         let _revision = revision.read();
+        // An empty library has nothing to recommend. Skip the read entirely
+        // instead of asking for candidates that cannot exist. An unknown
+        // library state is not an empty one, so the read still runs.
+        if library_state() == Some(true) {
+            ui.reads.cancel();
+            ui.writes.cancel();
+            ui.context.set(None);
+            ui.data.set(None);
+            ui.loading.set(false);
+            ui.busy.set(false);
+            ui.exporting.set(false);
+            return;
+        }
         let refresh = *ui.refresh.read();
         let pending_write = *ui.busy.read() || *ui.exporting.read();
         let context = ui.current();
@@ -489,6 +503,14 @@ pub fn PersonalMixes(
     let _auth = auth.read();
     let _view = view.read();
     let _revision = revision.read();
+    // An empty library has no recommendations to gather. The section stays
+    // unmounted so it cannot promise mixes, anchors or discoveries that do not
+    // exist, and so it issues no recommendation read at all. Only a confirmed
+    // empty state hides the section: an unknown count (a failed or stale
+    // `/api/stats`) must not silently drop real content.
+    if library_state() == Some(true) {
+        return rsx! {};
+    }
     let current = ui.current();
     // Render independently checks privacy, before an effect can run, so a held
     // mix cannot remain clickable for the frame in which deletion starts.

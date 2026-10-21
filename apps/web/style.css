@@ -1370,6 +1370,29 @@ input::placeholder { color:var(--quiet); opacity:1; }
 .home-note p { margin: 4px 0 0; font-size: 12px; }
 .home-note .text-button { margin-left: auto; }
 .home-empty { min-height: 220px; }
+/* The empty library state carries one action and, at most, the real import
+   progress the server reported. It reuses the semantic roles above and adds
+   no new tokens. */
+.home-empty h2 { font-size: 20px; letter-spacing: -.5px; margin-bottom: 8px; }
+.home-empty p { max-width: 420px; }
+.home-empty .home-empty-action { margin-top: 4px; }
+/* A failed import read is not an empty library: it says so in the danger role
+   and keeps the confirmed progress above it visible. */
+.home-empty .home-empty-error { color: var(--danger); font-size: 12px; margin: 14px 0 0; }
+.home-empty-progress {
+  width: 100%; max-width: 420px; margin-top: 20px; padding-top: 16px;
+  border-top: 1px solid var(--line); text-align: left;
+}
+.home-empty-progress-title { font-size: 12px; color: var(--text); margin-bottom: 10px; }
+.home-empty-progress-row {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px;
+  font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums;
+}
+.home-empty-progress-status { color: var(--accent); font-weight: 600; }
+.home-empty-progress-bar {
+  flex: 1 0 100%; width: 100%; height: 4px; margin-top: 8px;
+  accent-color: var(--accent); display: block;
+}
 .home-playlists-view .home-playlist-grid { margin-top: 4px; }
 .home-extra[hidden] { display: none !important; }
 @media (prefers-reduced-motion: reduce) {
@@ -1385,11 +1408,19 @@ input::placeholder { color:var(--quiet); opacity:1; }
   .home-album-shelf { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
   .home-album-card strong { font-size: 12px; margin-top: 9px; }
   .home-album-card small { font-size: 10px; margin-top: 3px; }
+  .home-empty { min-height: 0; padding: 28px 18px; }
+  .home-empty h2 { font-size: 18px; }
+  .home-empty p { font-size: 12px; max-width: none; }
+  .home-empty .home-empty-action { width: 100%; }
+  .home-empty-progress { max-width: none; }
 }
 @media (max-width: 380px) {
   .home-header h1 { font-size: 26px; letter-spacing: -1.1px; }
   .home-filter { padding: 0 11px; }
   .home-absent { padding: 15px 17px; }
+  .home-empty { padding: 24px 14px; }
+  .home-empty h2 { font-size: 17px; }
+  .home-empty-progress-row { font-size: 10px; }
 }
 /* Range sliders keep a visible focus ring across engines/modalities. */
 input[type="range"]:focus { outline:2px solid var(--accent); outline-offset:3px; }

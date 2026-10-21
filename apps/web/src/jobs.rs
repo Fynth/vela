@@ -1,5 +1,7 @@
 //! Bounded, private task history backed by the real import and scanner services.
-use crate::{api, bytes, filters::append_query, mutate, spawn_authorized, token};
+use crate::{
+    api, bytes, client::api_abortable, filters::append_query, mutate, spawn_authorized, token,
+};
 use dioxus::prelude::*;
 use gloo_timers::future::TimeoutFuture;
 use std::{cell::Cell, rc::Rc};
@@ -12,6 +14,80 @@ struct Selection {
     kind: Option<JobKind>,
     state: JobStateFilter,
     cursor: Option<String>,
+}
+
+/// A real import task that the server is still working on.
+///
+/// Every field is read from the server's own job rows: the empty state never
+/// invents a percentage, a track count or a title. A task that the server no
+/// longer reports is simply absent.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ImportActivity {
+    /// The real status word shown to the listener.
+    pub status: &'static str,
+    /// Bytes already downloaded, exactly as the server counted them.
+    pub downloaded_bytes: i64,
+    /// The total size, when the server knows one. `None` means unknown.
+    pub total_bytes: Option<i64>,
+    /// Whether the server can still cancel this task.
+    pub can_cancel: bool,
+}
+
+/// The bounded set of imports that are still running for this account.
+///
+/// The read is owner-scoped on the server and limited to a handful of rows, so
+/// the empty state can report real work without duplicating job state.
+pub const IMPORT_ACTIVITY_LIMIT: usize = 5;
+
+/// Project the server's job rows into the real import activity.
+///
+/// Only running imports of this owner are kept, and every number comes from
+/// the row itself. A task with an unknown total keeps `None`, so the caller
+/// never renders a made-up percentage.
+fn import_activity(page: &JobPage) -> Vec<ImportActivity> {
+    page.items
+        .iter()
+        .filter(|job| job.kind == JobKind::Import && active(job.status))
+        .map(|job| ImportActivity {
+            status: status_name(job.status),
+            downloaded_bytes: match job.progress {
+                JobProgress::Import {
+                    downloaded_bytes, ..
+                } => downloaded_bytes,
+                JobProgress::Scan { .. } => 0,
+            },
+            total_bytes: match job.progress {
+                JobProgress::Import { total_bytes, .. } => total_bytes.filter(|total| *total > 0),
+                JobProgress::Scan { .. } => None,
+            },
+            can_cancel: job.can_cancel,
+        })
+        .collect()
+}
+
+/// Read the owner's real active imports from the existing task endpoint.
+///
+/// The caller owns the request lifetime: pass the page's abort signal so an
+/// unmounted page physically cancels the read, and keep the session check on
+/// the caller side. This helper performs no scheduling and no polling, so it
+/// cannot outlive the page that asked for it.
+pub async fn read_import_activity(
+    auth: Signal<Option<AuthResponse>>,
+    signal: Option<&web_sys::AbortSignal>,
+) -> Result<Vec<ImportActivity>, String> {
+    let session = token(auth);
+    if session.is_empty() {
+        return Ok(Vec::new());
+    }
+    let page = api_abortable::<JobPage>(
+        "GET",
+        &format!("/api/jobs?kind=import&state=active&limit={IMPORT_ACTIVITY_LIMIT}"),
+        None,
+        "",
+        signal,
+    )
+    .await?;
+    Ok(import_activity(&page))
 }
 
 #[derive(Clone)]
@@ -445,5 +521,126 @@ pub fn JobCenter(
             }
             div { class: "job-center-links", button { class: "button secondary small", onclick: move |_| onopen.call("imports".into()), "Add music" } if administrator { button { class: "button secondary small", onclick: move |_| onopen.call("settings".into()), "Music folder settings" } } button { class: "button secondary small", onclick: move |_| onopen.call("library".into()), "Open library" } }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ImportActivity, import_activity};
+    use vela_domain::{BackgroundJob, JobKind, JobPage, JobProgress, JobStatus};
+
+    fn import(status: JobStatus, downloaded: i64, total: Option<i64>) -> BackgroundJob {
+        BackgroundJob {
+            id: "11111111-1111-1111-1111-111111111111".into(),
+            kind: JobKind::Import,
+            title: "Audio import".into(),
+            status,
+            progress: JobProgress::Import {
+                downloaded_bytes: downloaded,
+                total_bytes: total,
+            },
+            created_at: 1,
+            updated_at: 1,
+            error: None,
+            source_id: None,
+            track_id: None,
+            can_cancel: false,
+            can_retry: false,
+            can_rescan: false,
+        }
+    }
+
+    fn scan(status: JobStatus) -> BackgroundJob {
+        BackgroundJob {
+            id: "22222222-2222-2222-2222-222222222222".into(),
+            kind: JobKind::Scan,
+            title: "Folder scan".into(),
+            status,
+            progress: JobProgress::Scan {
+                visited: 0,
+                imported: 0,
+                duplicates: 0,
+                unchanged: 0,
+                skipped: 0,
+                failed_files: 0,
+            },
+            created_at: 1,
+            updated_at: 1,
+            error: None,
+            source_id: None,
+            track_id: None,
+            can_cancel: false,
+            can_retry: false,
+            can_rescan: false,
+        }
+    }
+
+    fn page(items: Vec<BackgroundJob>) -> JobPage {
+        JobPage {
+            items,
+            next_cursor: None,
+            has_active: false,
+        }
+    }
+
+    #[test]
+    fn only_running_imports_become_activity() {
+        let activity = import_activity(&page(vec![
+            import(JobStatus::Queued, 0, Some(10)),
+            import(JobStatus::Downloading, 4, Some(10)),
+            import(JobStatus::Processing, 10, Some(10)),
+        ]));
+        assert_eq!(activity.len(), 3);
+        assert_eq!(activity[0].status, "Queued");
+        assert_eq!(activity[1].status, "Downloading");
+        assert_eq!(activity[2].status, "Processing audio");
+    }
+
+    #[test]
+    fn finished_imports_are_not_reported_as_running() {
+        let activity = import_activity(&page(vec![
+            import(JobStatus::Completed, 10, Some(10)),
+            import(JobStatus::Failed, 0, None),
+            import(JobStatus::Cancelled, 0, None),
+        ]));
+        assert!(activity.is_empty());
+    }
+
+    #[test]
+    fn folder_scans_never_appear_as_import_activity() {
+        let activity = import_activity(&page(vec![scan(JobStatus::Scanning)]));
+        assert!(activity.is_empty());
+    }
+
+    #[test]
+    fn an_unknown_total_stays_unknown_instead_of_becoming_a_percentage() {
+        let activity = import_activity(&page(vec![import(JobStatus::Downloading, 512, None)]));
+        assert_eq!(activity.len(), 1);
+        assert_eq!(activity[0].downloaded_bytes, 512);
+        assert_eq!(activity[0].total_bytes, None);
+    }
+
+    #[test]
+    fn a_zero_total_is_treated_as_unknown() {
+        let activity = import_activity(&page(vec![import(JobStatus::Downloading, 512, Some(0))]));
+        assert_eq!(activity[0].total_bytes, None);
+    }
+
+    #[test]
+    fn the_reported_bytes_are_the_servers_own_count() {
+        let activity = import_activity(&page(vec![import(
+            JobStatus::Downloading,
+            2_097_152,
+            Some(10_485_760),
+        )]));
+        assert_eq!(
+            activity[0],
+            ImportActivity {
+                status: "Downloading",
+                downloaded_bytes: 2_097_152,
+                total_bytes: Some(10_485_760),
+                can_cancel: false,
+            }
+        );
     }
 }

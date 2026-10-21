@@ -1,5 +1,29 @@
 # Unsupported and unverified functionality
 
+## Empty library state — 2026-10-21
+
+The empty-library Home state is verified by source, unit tests, strict Clippy
+and a release WASM build only. No browser session, screenshot or screen-reader
+pass was run, so the 320/360/390 px and desktop layouts, the keyboard focus
+order and the 44 px target are source-level guarantees (the reused
+`.button` rule already carries `min-height:44px` and the global
+`button:focus-visible` outline), not measured evidence. A real import in
+flight was exercised through the projection unit tests, not through a live
+download: the byte counters come from the server's own job rows and a task
+with an unknown total renders no progress bar at all.
+
+The empty state only appears once the server confirmed the library is empty
+(`/api/stats` reports zero tracks and zero albums). Until that count arrives
+Home shows its bounded placeholders and the personal-mixes section keeps its
+normal read, so the first paint never claims an empty collection nor hides a
+real one. Uploads and completed imports refresh `/api/stats`, so the state
+clears as soon as real music exists; a browser session was not run to confirm
+that transition live.
+
+The «Your next listening chapter» section is suppressed for an empty library.
+It is a browser-web feature only and remains absent from the native client, as
+recorded below.
+
 ## Distribution pipeline 2026-10-20
 
 Distribution 0.12.8 is public with EXE/tar.gz/DEB/AppImage, a durably signed arm64 APK and AUR `vela-music-bin` 0.12.8-1 (resolved through yay). Windows EXE/ZIP is portable, unsigned by Authenticode and requires WebView2. Ubuntu 24.04+ DEB/tar/AppImage uses host GTK3/WebKitGTK4.1/ALSA/libudev/libxdo.so.3; AppImage does not bundle these libraries. AUR carries a private compatible libxdo.so.3 because current Arch uses libxdo.so.4. Native packaging/CLI smoke is not GUI/device/audio/background certification. Docker image build passed; runtime was not run. APKs built without repository signing secrets remain explicit ephemeral previews. See [DISTRIBUTION](DISTRIBUTION.md) and [release evidence](RELEASE_LEDGER_0.12.8.md); dated platform rows below retain their historical scope.

@@ -1,5 +1,41 @@
 # Verified progress
 
+## Honest empty library state on Home — 2026-10-21
+
+The Home page no longer promises collections that do not exist. On a confirmed
+empty library the «ПОДБОРКА» / «ПЕРСОНАЛЬНЫЙ МИКС» editorial pair and the
+«Your next listening chapter» personal-mixes section are not rendered at all,
+and the page shows one state instead: a heading, one explanation line, and the
+single existing «Add music» action (the root's real upload/import dialog). No
+mixes, track counts, recommendation promises or invented percentages remain
+on an empty library.
+
+Real import progress comes from the existing owner-scoped `/api/jobs` endpoint
+(`kind=import&state=active`, bounded to 5 rows) through
+`jobs::read_import_activity`. Only `queued` / `downloading` / `processing`
+rows are projected, and the byte counters are the server's own numbers: a task
+whose total is unknown or zero keeps `None`, so the page never renders a
+made-up percentage. The read polls every 2 s only while the server still
+reports a running import and stops as soon as none is left; the page's abort
+signal cancels it physically on unmount.
+
+The library state is tri-state (`None` = unknown, `Some(true)` = empty,
+`Some(false)` = has music) and is derived from the server's `/api/stats`
+count. `None` never paints an empty library and never hides a real
+collection: Home falls back to its own settled bounded reads, and personal
+mixes keep their normal read until the server confirmed an empty library.
+
+Executed on this change: `cargo fmt --all`; strict `cargo clippy -D warnings`
+for `vela-web` (host and `wasm32-unknown-unknown`, `--all-targets`) and for
+`vela-server`/`vela-domain`; `cargo test -p vela-web` → 45 passed, 0 failed
+(39 pre-existing + 6 new job-projection tests); `cargo build --locked -p
+vela-web --target wasm32-unknown-unknown --release`; and the full web asset
+build via `scripts/build-web.sh` (wasm-bindgen 0.2.129) into `dist/`.
+Browser, native and Docker validation were NOT run for this change.
+`apps/desktop` could not be checked on this host: `pkg-config` and the GTK
+development packages are absent, so its `glib-sys` build script fails before
+compiling — an environment limitation unrelated to these files.
+
 ## Distribution CI/CD 0.12.8 — 2026-10-20
 
 Published [v0.12.8](https://github.com/Fynth/vela/releases/tag/v0.12.8) from tagged source
