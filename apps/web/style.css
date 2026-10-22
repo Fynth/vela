@@ -210,6 +210,18 @@
    really has. The shell's inline size is its own content box, so the
    container threshold is the layout width itself. */
 .app-shell { container-type:inline-size; container-name:vela-shell; }
+/* DR04: `container-type` also makes the shell a containment context, and in
+   that context the mobile navigation lost its `:focus-visible` ring in
+   Chromium. The ring is restored explicitly on the shell's own controls, so
+   the keyboard journey keeps a visible ring with the container in place. */
+.app-shell button:focus-visible,
+.app-shell a:focus-visible,
+.app-shell input:focus-visible,
+.app-shell select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+  outline-style: solid;
+}
 .main-scroll {
   flex:1 1 auto; min-width:0; min-height:0;
   overflow-x:hidden; overflow-y:auto; overscroll-behavior:contain;
@@ -1677,7 +1689,7 @@ input[type="range"]:focus { outline:2px solid var(--accent); outline-offset:3px;
    instead of a fixed centre band that would starve them. The mobile
    composition is unaffected. */
 @media (min-width:761px) {
-  @media (max-width:1100px) {
+  @container vela-shell (max-width:1100px) {
     .player-bar { grid-template-columns:minmax(0,1fr) auto minmax(0,1fr); }
     .player-center { max-width:none; }
   }
@@ -1685,7 +1697,7 @@ input[type="range"]:focus { outline:2px solid var(--accent); outline-offset:3px;
      do not fit side by side. The volume yields first: the queue and the mute
      stay, and the volume remains reachable in the queue drawer and in the
      Now Playing sheet. */
-  @media (max-width:600px) {
+  @container vela-shell (max-width:600px) {
     .player-right input[type=range] { display:none; }
   }
 }
