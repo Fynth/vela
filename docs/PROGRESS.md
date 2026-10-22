@@ -2922,3 +2922,113 @@ corroborated by the media element, not by a self-reported timer.
 Executed, not claimed: `cargo fmt --check`; strict `cargo clippy -p vela-web
 --all-targets -- -D warnings`; strict wasm32 clippy; `cargo test -p vela-web`
 (45 passed); release web build; full Chromium Playwright suite.
+
+## DR-01 one glass and motion vocabulary (2026-10-22)
+
+The token layer, and nothing else. `apps/web/style.css` now declares one
+vocabulary of depth and response for the floating web layers, so the
+packages that apply glass and motion to surfaces cannot drift apart by
+theme or by reduced-motion handling. **No surface consumes it yet**: there
+is no `backdrop-filter`, no new transition and no changed layout in this
+package, and the visible result is exactly nothing — that is the point of
+the package.
+
+What changed in the source:
+
+- `apps/web/style.css:86–106` — the dark roles in the canonical `:root`,
+  right after `--vela-avatar-text` and before the layout authority: the
+  four glass colours (`--vela-glass-bg`, `--vela-glass-border`,
+  `--vela-glass-highlight`, `--vela-glass-shadow`), the three blur radii
+  (`--vela-glass-blur`, `--vela-glass-blur-mobile`,
+  `--vela-glass-blur-topbar`), the text alias `--vela-glass-text`
+  (`var(--vela-text)`, not a new foreground), the eight duration roles
+  (`--vela-motion-instant` 80ms … `--vela-motion-artwork` 140ms) and the
+  two easing curves (`--vela-ease-enter: ease-out`,
+  `--vela-ease-state: ease-in-out`).
+- `apps/web/style.css:214–220` — the light theme re-points **only** the
+  four glass colours. The blur radii, the durations, the easing curves and
+  the text alias are inherited, because repeating them there would create
+  a second definition that could drift.
+- `apps/web/style.css:1889–1900` — one `prefers-reduced-motion: reduce`
+  block that zeroes the eight duration roles. The easing curves are not
+  durations and are untouched. The existing global
+  `animation:none`/`transition:none !important` overrides (`:284`, `:668`,
+  `:1127`, `:1147`, `:1442`, `:1557`) and the component files' own reduce
+  blocks stay exactly as they were: a zero token cannot stop a JS or Web
+  Animations driver, so DR-03 still has to exercise the media query
+  itself.
+
+No Rust source, manifest, migration, asset, allowlist entry or native file
+was touched. `--sidebar` stays a length, `--muted` stays a text role and
+`--accent` stays the action colour.
+
+Executed, not claimed:
+
+- `cargo fmt --all -- --check` — exit 0.
+- `cargo clippy --locked --workspace --all-targets -- -D warnings` — exit 0
+  (no Rust source changed, so the workspace was already built).
+- `cargo test --locked --workspace -- --test-threads=2` — 380 passed, 0
+  failed, 3 ignored.
+- `cargo build --locked -p vela-web --target wasm32-unknown-unknown
+  --release` — exit 0; `scripts/build-web.sh` — exit 0;
+  `cmp apps/web/style.css dist/style.css` — identical.
+- The permanent spec `tests/browser/dr01-tokens.spec.mjs` — 4 journeys,
+  PASS in Chromium and in Firefox. It owns its server, its account and its
+  real uploaded tracks, and it never launches a browser of its own: the
+  engine that runs the spec is the engine it measures.
+- The full Playwright suites on the packaged release build, run by the team
+  lead after the package's own attempts ran out of disk: Chromium
+  **82 passed, 1 skipped** (the opt-in live import, 5.1m, exit 0) and
+  Firefox **82 passed, 1 skipped** (6.5m), both including the four new
+  DR-01 journeys. The worker's own attempt at the full Chromium suite died
+  with `ENOSPC` on the trace write and a retry lost its connection mid-run;
+  those attempts are **not** the evidence, the re-run above is.
+
+The measured values are in `target/checks/dr01-tokens/`:
+`<engine>/tokens.json` (every role in both themes, read back from the live
+document with `getComputedStyle`), `<engine>/geometry.json` (the body
+size, the sidebar/topbar/player roles and the overflow at 1284×856 and
+390×844) and `shots/<engine>/*.png`.
+
+The alpha of the declared glass background is 0.851 in dark (`#131513d9`,
+217/255) and 0.902 in light (`#f4f7f3e6`,230/255), both above the
+directive's 0.82. That is arithmetic on the declaration. It is **not** a
+contrast claim over artwork; DR-02 owns that measurement, and it is not
+claimed here.
+
+The rendered result is unchanged, and that was measured rather than
+assumed:
+
+- The geometry is identical to the pre-edit baseline in both engines: 14px
+  body, 216px sidebar, 75px topbar, 88px player band (88±1 measured), and
+  120px mini-player plus 70px navigation band at 390×844, with zero
+  horizontal overflow.
+- The frames were compared before and after with the stylesheet as the
+  only variable. The pre-edit capture is a real one: `dist/style.css` was
+  temporarily replaced with `git show origin/main:apps/web/style.css`
+  (SHA-256 `58d4be42…`), a capture was taken, and every DR-01 role then
+  resolved to the empty string — `target/checks/dr01-tokens/pre-edit-baseline.json`
+  records that `dr01RolesResolved = 0` and the served CSS hash, which is
+  what makes it a baseline and not a reconstruction. The after-capture
+  (`after-edit.json`) served the shipped stylesheet (SHA-256 `48a5a011…`)
+  and resolved all 18 roles. The raw frames still differ by 116–148 pixels
+  in a narrow strip, and that difference is **sort order, not styling**: the
+  default order is `ORDER BY t.id ASC` over random UUIDs, and the strip is
+  the row-number column where `…01` and `…03` exchanged places.
+- The controlled A/B removes that variable. One live document, one account,
+  one dataset, the shipped stylesheet first, then the origin/main
+  stylesheet injected as the last `<style>` in the same document, then the
+  shipped stylesheet again twice — the control. The probe was run twice
+  independently and gave the same numbers. Result
+  (`target/checks/dr01-tokens/ab/diffs.json`): the shipped-vs-original diff
+  is **23 pixels in the same bounding box** as the control's own
+  shipped-vs-shipped diff, and one pair of frames is **byte-identical (0
+  pixels)**. The stylesheet contributes nothing to the rendering; the 23
+  pixels are the repaint of the swap, because the same 23 pixels appear
+  when the identical text is swapped.
+
+What is **not** claimed: the glass is not applied, so no surface has been
+seen over artwork, no `backdrop-filter` has been rendered, and no contrast
+over an image exists. A screen reader, `forced-colors: active`, the native
+WebKitGTK client, physical audio and Docker were not run on this host
+(no X server).

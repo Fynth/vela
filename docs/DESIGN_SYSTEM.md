@@ -222,6 +222,86 @@ The empty editorial card and the empty wave take the height their own text
 needs on a phone; the image-backed feature keeps its 288px and the
 image-backed wave its 160px.
 
+## DR-01 the glass and motion vocabulary — 2026-10-22
+
+DR-01 is the **token layer only**. It declares one vocabulary of depth and
+response for the floating web layers and applies none of it: there is no
+`backdrop-filter`, no new transition and no changed surface in this
+package. The visible glass and the motion that consumes these roles belong
+to DR-02 and DR-03. Nothing below may be read as "glass is implemented".
+
+The roles live in the existing canonical `:root` of `apps/web/style.css`,
+next to the roles they belong with, and the light theme re-points only the
+colours:
+
+| Role | Value | Declared at | Consumer |
+| --- | --- | --- | --- |
+| `--vela-glass-bg` | `#131513d9` (dark) / `#f4f7f3e6` (light) | `apps/web/style.css:89` / `:217` | none yet — DR-02 owns the surfaces |
+| `--vela-glass-blur` | `16px` | `apps/web/style.css:90` | none yet — DR-02 |
+| `--vela-glass-blur-mobile` | `12px` | `apps/web/style.css:91` | none yet — DR-02 |
+| `--vela-glass-blur-topbar` | `12px` | `apps/web/style.css:92` | none yet — DR-02 |
+| `--vela-glass-border` | `#ffffff14` (dark) / `#14271c14` (light) | `apps/web/style.css:93` / `:218` | none yet — DR-02 |
+| `--vela-glass-highlight` | `#ffffff0f` (dark) / `#ffffffb3` (light) | `apps/web/style.css:94` / `:219` | none yet — DR-02 |
+| `--vela-glass-shadow` | `0 18px 50px #00000059` (dark) / `0 18px 50px #21372924` (light) | `apps/web/style.css:95` / `:220` | none yet — DR-02 |
+| `--vela-glass-text` | `var(--vela-text)` | `apps/web/style.css:96` | none yet — DR-02 |
+| `--vela-motion-instant` | `80ms` | `apps/web/style.css:97` | none yet — DR-03 |
+| `--vela-motion-quick` | `120ms` | `apps/web/style.css:98` | none yet — DR-03 |
+| `--vela-motion-overlay` | `140ms` | `apps/web/style.css:99` | none yet — DR-03 |
+| `--vela-motion-exit` | `100ms` | `apps/web/style.css:100` | none yet — DR-03 |
+| `--vela-motion-panel` | `180ms` | `apps/web/style.css:101` | none yet — DR-03 |
+| `--vela-motion-skeleton` | `1800ms` | `apps/web/style.css:102` | none yet — DR-03 |
+| `--vela-motion-reorder` | `150ms` | `apps/web/style.css:103` | none yet — DR-03 |
+| `--vela-motion-artwork` | `140ms` | `apps/web/style.css:104` | none yet — DR-03 |
+| `--vela-ease-enter` | `ease-out` | `apps/web/style.css:105` | none yet — DR-03 |
+| `--vela-ease-state` | `ease-in-out` | `apps/web/style.css:106` | none yet — DR-03 |
+
+The eight durations are zeroed for `prefers-reduced-motion: reduce` in one
+block at the end of the same file (`apps/web/style.css:1889–1900`): the
+easing curves are not durations and are not touched there. That block does
+not replace the existing global `animation:none` / `transition:none
+!important` overrides (`apps/web/style.css:284`, `:668`, `:1127`, `:1147`,
+`:1442`, `:1557`) or the component files' own reduce blocks: a zero token
+cannot stop a JS or Web Animations driver, so DR-03 still has to exercise
+the media query itself.
+
+**The source of the colours is the current stylesheet, not this document.**
+The palette primitives and the semantic dark roles are
+`apps/web/style.css:42–85`; the light theme is the separate validated
+adaptation `:root[data-theme="light"]` at `apps/web/style.css:176–224`.
+The historical mint/sage table further up this file, the 2026-10-19
+prototype transfer and the system-font paragraph below are history: they
+are **not** a source of hex values for new roles, and the mint table in
+particular does not match the shipped palette. The DR-01 colours are the
+shipped charcoal/pistachio roles and their light adaptation, and the
+`--vela-glass-text` alias points at the existing `--vela-text` role
+instead of introducing a new foreground.
+
+**The type is the current self-hosted Manrope** (latin and cyrillic
+subsets, `font-display: swap`, `apps/web/style.css:9–26`); DR-01
+introduces no new font stack and no new asset.
+
+**Alpha 0.851 (dark) and 0.902 (light) is a property of the declaration,
+not a contrast claim.** The declared background is `#131513d9` and
+`#f4f7f3e6`; 217/255 and 230/255 are the alphas those two hex values
+state. This says nothing about legibility over artwork, and the contrast
+over an image is DR-02's work — it is not claimed here.
+
+**Nothing consumes the roles yet.** A grep over `apps/web/*.css` and
+`apps/web/src/**/*.rs` finds no reader of `--vela-glass-*`, `--vela-motion-*`
+or `--vela-ease-*`; the only occurrences are the declarations themselves
+and the permanent spec that reads them back. The package's result is the
+vocabulary, not a surface.
+
+The [ADR0023](DECISIONS/0023-contrast-and-listening-layout.md) decisions
+stay in force and are not revisited here: the contrast-qualified roles are
+unchanged, the web application still has exactly one audio authority and
+one scroll owner, and the shell's layout roles are untouched.
+
+The measured evidence (real account, real uploaded tracks, Chromium and
+Firefox, 1284×856 and 390×844, both themes) is in
+[QA_EVIDENCE](QA_EVIDENCE.md); the permanent gate is
+`tests/browser/dr01-tokens.spec.mjs`.
+
 
 Web sidebar scrolls as one region on short windows. Native shell is one two-column
 grid with one content scroll owner and one bottom player row; count sidebar width

@@ -1,5 +1,59 @@
 # Unsupported and unverified functionality
 
+## DR-01 the glass and motion token layer — 2026-10-22
+
+DR-01 declares the vocabulary and applies none of it. The measurements are
+in [QA_EVIDENCE](QA_EVIDENCE.md); what was **not** measured is here.
+
+- **The glass does not exist yet.** No surface reads `--vela-glass-*`: no
+  `backdrop-filter` was applied, no floating layer was rendered, and no
+  pixel of the product has ever been seen with these colours over
+  artwork. The package's result is a dictionary, and the word "glass" in
+  this section names a role, not a feature.
+- **The alpha is arithmetic, not contrast.** 0.851 (dark) and 0.902 (light)
+  are the alphas the two declared hex values state. No contrast ratio was
+  measured against any image, and none is claimed: the quiet 10px
+  secondary text over a 0.851 background is exactly the case DR-02 has to
+  measure with primary text on the composited surface.
+- **The durations are not used by any component.** `--vela-motion-*` and
+  `--vela-ease-*` have no reader, so the reduced-motion block that zeroes
+  them changes no rendered transition today. The block is there for the
+  packages that will read them, and it does not replace the existing
+  global `animation:none` / `transition:none !important` overrides: a zero
+  token cannot stop a JS or Web Animations driver, so DR-03 still has to
+  exercise the media query itself.
+- **The pixel comparison has a noise floor, and one raw frame pair differs
+  by more than it.** The default library order is `ORDER BY t.id ASC` over
+  random UUIDs, so two runs of the same flow show the same rows in a
+  different order; the frames are therefore not bit-reproducible between
+  independent runs. The pre-edit and after-edit captures differ by 116–148
+  pixels in one narrow strip, and that strip is the row-number column where
+  `…01` and `…03` exchanged places: it is sort order, not styling. The only
+  clean comparison is the controlled A/B in one live document, where the
+  stylesheet is swapped in place and the rows cannot move; there the
+  shipped-vs-origin/main diff is 23 pixels in the same bounding box as the
+  control's own shipped-vs-shipped diff, and one pair of frames is
+  byte-identical. That is what "the change renders nothing" means here — it
+  is not a claim of byte-identical screenshots between two independent runs.
+- **The full browser gate was closed by the team lead, not by the package.**
+  The worker's own full Chromium run died with `ENOSPC` while Playwright
+  wrote a trace (the host had ~6.7 GB free), and its retry lost the server
+  connection mid-suite with 43 scenarios unrun; the worker's full Firefox
+  run never finished. Both suites were then re-run by the team lead with
+  the Playwright output redirected away from the full disk, and both
+  passed; the failed attempts are recorded as failures, not folded into
+  the passing count.
+- **The native client is not covered.** The native tokens are DR-08's
+  scope: `apps/desktop/style.css` keeps its own `--vela-*` vocabulary and
+  was not touched, and nothing here says a native window renders a glass
+  layer.
+- **A screen reader, `forced-colors: active`, physical audio and Docker
+  were not run** on this host: there is no X server, and the DR-01 roles
+  have no consumer to announce.
+- The design system's historical mint/sage table and the prototype
+  transfer remain history. They are not the source of the DR-01 hex
+  values; the source is the current `apps/web/style.css`.
+
 ## DR-06 the mobile composition — 2026-10-22
 
 The package moves the music into the first phone screen. The measurements are

@@ -83,6 +83,27 @@
   --vela-scrollbar: #3b4335;
   --vela-avatar-bg: #32392b;
   --vela-avatar-text: #d0d9be;
+  /* DR01: one depth/response vocabulary for the floating web layers. These
+     are the only glass and motion roles; a consumer reads them, never
+     re-declares them. Nothing here is applied yet: DR02 owns the surfaces. */
+  --vela-glass-bg: #131513d9;
+  --vela-glass-blur: 16px;
+  --vela-glass-blur-mobile: 12px;
+  --vela-glass-blur-topbar: 12px;
+  --vela-glass-border: #ffffff14;
+  --vela-glass-highlight: #ffffff0f;
+  --vela-glass-shadow: 0 18px 50px #00000059;
+  --vela-glass-text: var(--vela-text);
+  --vela-motion-instant: 80ms;
+  --vela-motion-quick: 120ms;
+  --vela-motion-overlay: 140ms;
+  --vela-motion-exit: 100ms;
+  --vela-motion-panel: 180ms;
+  --vela-motion-skeleton: 1800ms;
+  --vela-motion-reorder: 150ms;
+  --vela-motion-artwork: 140ms;
+  --vela-ease-enter: ease-out;
+  --vela-ease-state: ease-in-out;
   /* One shell layout authority: sidebar offset, topbar band and player reserve
      are declared once and consumed once by the shell grid. */
   --vela-sidebar-width: 216px;
@@ -190,6 +211,13 @@
   --vela-scrollbar: #8fa89a;
   --vela-avatar-bg: #dbe7dd;
   --vela-avatar-text: #1d3a2b;
+  /* DR01: light re-points only the themed glass colours. Blur, timing and
+     easing are inherited from the canonical root: repeating them here would
+     create a second definition that could drift. */
+  --vela-glass-bg: #f4f7f3e6;
+  --vela-glass-border: #14271c14;
+  --vela-glass-highlight: #ffffffb3;
+  --vela-glass-shadow: 0 18px 50px #21372924;
   --shadow: 0 24px 80px #21372920;
   --image-outline: oklch(1 0 0 / .1);
   color-scheme: light;
@@ -1849,4 +1877,24 @@ input[type="range"]:focus { outline:2px solid var(--accent); outline-offset:3px;
   .now-playing-idle .now-playing-meta strong { font-size:12px; font-weight:600; white-space:normal; }
   .now-playing-idle .now-playing-meta small { font-size:10px; font-weight:400; }
   .player-buttons { gap:4px; }
+}
+
+/* DR01: reduce zeroes the eight duration roles, so a component that reads a
+   role in DR02/DR03 inherits an instant state instead of remembering its own
+   media query. This does not replace the global animation:none /
+   transition:none !important overrides above (style.css:284, :668, :1127,
+   :1147, :1442, :1557) or the component files' own reduces: a zero token
+   cannot stop a JS/Web Animations driver, so DR03 must still test the media
+   query itself. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --vela-motion-instant: 0ms;
+    --vela-motion-quick: 0ms;
+    --vela-motion-overlay: 0ms;
+    --vela-motion-exit: 0ms;
+    --vela-motion-panel: 0ms;
+    --vela-motion-skeleton: 0ms;
+    --vela-motion-reorder: 0ms;
+    --vela-motion-artwork: 0ms;
+  }
 }
