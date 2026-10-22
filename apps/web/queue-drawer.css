@@ -136,15 +136,41 @@ dialog.queue-drawer[open] {
   background: var(--surface-hover);
 }
 
-.queue-volume {
+/* DR-07: the two range controls carry visible labels, so each control owns
+   its own column. The column is the accessible one: the label stays above
+   the rail and the rail keeps the full width of the drawer. */
+.queue-volume,
+.queue-seek {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  min-width: 0;
 }
 
-.queue-volume input {
+/* DR-07: a real 44px target for both rails. The native range control keeps
+   its own appearance; only the box grows, so the thumb stays reachable with
+   a finger and the ring is never clipped. */
+.queue-volume input[type="range"],
+.queue-seek input[type="range"] {
+  display: block;
   width: 100%;
-  max-width: none;
+  min-width: 0;
+  height: 44px;
+  min-height: 44px;
+  padding: 0;
+  margin: 0;
+}
+
+/* DR-07: the visible name of a range control. It is a real label bound to
+   the input by id, so the control is named in the accessibility tree and the
+   name is on screen at the same time. */
+.queue-field-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+  margin: 0 0 4px;
 }
 
 .queue-divider {
@@ -177,6 +203,27 @@ dialog.queue-drawer[open] {
   color: var(--muted);
 }
 
+/* DR-07: the sleep timer's own announcement inside the drawer. It is one
+   quiet line that changes only when the timer starts, is cancelled or
+   expires; the countdown itself keeps its own `timer` role. The live region
+   is always in the DOM, so the line is present before the first transition
+   and only its text changes. The line and the sleep row share one wrapper,
+   so the drawer's own gap is counted once and the empty line adds no
+   space. */
+.queue-sleep-status {
+  margin: 14px 0 0;
+  font-size: 12px;
+  color: var(--vela-muted-text);
+}
+
+/* An empty live region is silent and takes no room: it stays in the
+   accessibility tree, but it is not a line of the drawer. */
+.queue-sleep-status.is-empty {
+  margin: 0;
+  height: 0;
+  overflow: hidden;
+}
+
 .queue-list {
   display: flex;
   flex-direction: column;
@@ -191,12 +238,15 @@ dialog.queue-drawer[open] {
   border-radius: 8px;
 }
 
+/* DR-07: the current row and the next occurrence are marked with the
+   project's semantic roles, not with a hardcoded pistachio that only reads
+   on the dark panel. Each role has its own value per theme. */
 .queue-row.current {
-  background: #d3e9a505;
+  background: var(--vela-track-current);
 }
 
 .queue-row-next {
-  outline: 1px solid #d3e9a533;
+  outline: 1px solid var(--vela-track-next);
 }
 
 .queue-track {
@@ -204,6 +254,8 @@ dialog.queue-drawer[open] {
   align-items: center;
   gap: 11px;
   min-width: 0;
+  /* DR-07: the row is a real 44px target. The 38px cover is unchanged. */
+  min-height: 44px;
   flex: 1;
   background: none;
   color: inherit;
@@ -292,7 +344,19 @@ dialog.queue-drawer[open] {
   }
 }
 
+/* DR-07: the focus ring is the semantic accent role, not a hardcoded
+   pistachio that only reads on the dark panel. Two pixels wide with a 3px
+   offset keeps the ring clear of the control it belongs to. */
 dialog.queue-drawer :focus-visible {
-  outline: 2px solid #d3e9a5;
-  outline-offset: 2px;
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+/* DR-07: forced colors keep the ring. The system Highlight role is used
+   instead of the project accent, and the ring is never removed. */
+@media (forced-colors: active) {
+  dialog.queue-drawer :focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: 3px;
+  }
 }

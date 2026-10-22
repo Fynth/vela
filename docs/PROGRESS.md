@@ -1,5 +1,266 @@
 # Verified progress
 
+## DR-07 review fixes, round three: a permanent live region and the drawer's own trigger — 2026-10-22
+
+The second review of the DR-07 slice left five code remarks and three
+documentation ones. The drawer's announcement line existed only after the
+first transition, the drawer shared one frozen trigger with the row menu, the
+account change closed the drawer outside the common path, one time format was
+written twice, and two hardcoded pistachio values were left in the drawer's
+own stylesheet. All five are closed in this round. The two documentation
+inaccuracies — the root seek's `aria-valuetext` in this file and the row
+reference in QA_EVIDENCE — are corrected there, and the team-lead backlog
+now says that the review verdict was received.
+
+**The live region is a permanent node.** The drawer's `role="status"` line is
+now in the DOM before the first transition and only its text changes, so an
+announcement depends on a change of the text and never on the insertion of
+the region together with its content. The line and the sleep row share one
+wrapper, and the empty line is collapsed to zero height without a margin, so
+it is silent and takes no space: the drawer keeps the geometry it had
+without it. Measured in the live drawer in Chromium and in Firefox: the
+region is in the DOM with an empty text before the transition, it holds
+exactly one text after the start, the cancel and the expiry, and the empty
+line measures 0px of height and 0px of margin while the sleep row and the
+line share one wrapper of the same height as the row alone — at 1284×856,
+1440×900, 1728×1080, 390×844, 360×800 and 320×700.
+
+**The drawer freezes its own trigger.** The drawer and the row menu are two
+surfaces, and they now keep two different frozen triggers. A row menu that
+is open behind the drawer keeps the row's More button for itself, and the
+drawer hands the focus back to the control that opened it: the player bar's
+queue control, the Now Playing sheet's own trigger, or whatever control
+owned the focus when the drawer opened. The root's guarded restore path is
+unchanged: the trigger is restored only when the surface generation still
+matches and the trigger is still connected. Measured in both engines, in
+four scenes: with the row menu open, Escape hands the focus to
+`Show playback queue` and not to the row's More button; the ordinary exit
+still hands it to `Show playback queue`; `Now Playing` → `View full queue` →
+Escape still hands it to the `Open now playing` trigger; and closing the
+row menu or the playlist picker still hands it back to the row's More
+button.
+
+**The account change uses the same closer.** It closed the drawer by setting
+the flag, so the native dialog was removed while it was open and the
+browser's removing steps ran. It now goes through the same closer as Escape,
+the close button and `Open library`: the dialog leaves the top layer before
+the drawer leaves the DOM. The player's own now-playing buttons keep their
+own line: the drawer is a modal, so the background is inert while it is open
+and those buttons cannot reach the drawer in that state.
+
+**One time format.** The drawer's own `m:ss` helper was a copy of the root's
+`seconds()`; the drawer now uses the root's helper, the same one the Now
+Playing sheet already uses. There is no cycle: the root's helper is a plain
+function in the crate root.
+
+**Two semantic roles instead of two hardcoded pistachios.** The current row's
+tint and the next occurrence's outline now use the project's own roles,
+`--vela-track-current` and the new `--vela-track-next`, and each role has a
+value per theme. The dark theme is unchanged; the light theme now paints its
+own green tint instead of a pistachio that reads 1.005:1 on the white panel.
+Measured over the panel the rows sit on: the light theme's current row is
+1.07:1 and its next-occurrence outline 1.34:1 (was 1.005:1 and 1.055:1), the
+dark theme's 1.05:1 and 1.74:1, and the row really paints the role in both
+themes. The two marks are decorative tints, not the focus ring: they stay
+below the 3:1 of a non-text indicator, which is recorded in
+[KNOWN_LIMITATIONS](KNOWN_LIMITATIONS.md).
+
+Executed on this change: `cargo fmt --all -- --check` (exit 0); `cargo
+clippy --locked --workspace --all-targets -- -D warnings` (exit 0); `cargo
+test --locked --workspace -- --test-threads=2` (380 passed, 0 failed, 3
+ignored); `cargo build --locked -p vela-web --target
+wasm32-unknown-unknown --release` (exit 0); `scripts/build-web.sh`
+(wasm-bindgen 0.2.129) into `dist/` (exit 0); and the Playwright suite in
+Chromium (62 passed, 1 skipped — the opt-in live import, 4.7m) and in
+Firefox (62 passed, 1 skipped, 5.8m), both including the extended
+`tests/browser/dr07-a11y.spec.mjs`. A screen reader was not run, and neither
+were the native client's WebKitGTK rendering, its physical audio and the
+Docker runtime: this host has no X server.
+
+## DR-07 review fixes, round two: one announcement, one focus exit — 2026-10-22
+
+The second review of the DR-07 slice found three things. The sleep timer had
+lost its start announcement together with the clock spam, the «Open library»
+exit dropped the focus on the document body, and the drawer kept its own
+copy of the focus convention instead of the root's guarded one. All three
+are closed in this round.
+
+**The sleep timer announces once, from inside the drawer.** The countdown
+stays a `timer` with an explicit `aria-live="off"`, so a tick is never read.
+The start, the cancel and the expiry are one meaningful message each, and
+the root writes that message into one `role="status"` line inside the
+drawer. The root also decides where the message goes: the line inside the
+modal while the drawer is open, the root's receipt while the drawer is
+closed. The message is never in two surfaces at once, so it is never
+announced twice, and the drawer carries exactly one live region. The
+messages are the product's own words: «Sleep timer set for 5 minutes.»,
+«Sleep timer canceled.» and «Sleep timer reached zero and paused
+playback.». Measured in the live drawer in Chromium and in Firefox: the
+drawer holds one `role="status"` line and it is empty before a transition;
+the start, the cancel and the expiry write the three messages above into
+it; a tick changes the countdown and not the line; and the background
+behind the open modal is out of reach — the queue trigger behind it cannot
+take the focus — so the root's receipt is not in the accessible surface
+while the drawer is open. The line is the drawer's own quiet text: 12px,
+`rgb(64, 89, 74)` on the light panel = 7.65:1, the same semantic muted role
+as the countdown's own text.
+
+**The «Open library» exit hands the focus back.** It goes through the same
+closer as Escape and the close button: the native dialog leaves the top
+layer before the drawer leaves the DOM, and the focus goes back to the
+control that opened the drawer. The navigation to the library does not
+strand the focus: the trigger is still connected after the page changed, and
+the focus is on it, not on the document body. Measured in both engines from
+the Home page with an empty queue.
+
+**The focus round trip belongs to the root.** The drawer no longer captures
+or restores a trigger of its own — its own copy of the convention is gone.
+The root freezes the control that opened the drawer
+(`Surfaces::capture_queue_trigger`) and restores it through the root's own
+guarded path (`Surfaces::restore_queue_focus`: the surface generation must
+still match and the trigger must still be connected). The drawer and the row
+menu hold two independent frozen triggers. The capture happens in the root's open
+path, not in a drawer effect, so no later render can replace the frozen
+trigger with a control that happens to be focused inside the drawer, and a
+trigger that is already frozen is not replaced at all. The permanent journey
+now also covers the path that was only measured by hand: a drawer that
+re-renders under the keyboard — the countdown ticks every second — still
+hands the focus back after a real Escape.
+
+Executed on this change: `cargo fmt --all -- --check` (exit 0); `cargo
+clippy --locked --workspace --all-targets -- -D warnings` (exit 0); `cargo
+test --locked --workspace -- --test-threads=2` (380 passed, 0 failed, 3
+ignored); `cargo build --locked -p vela-web --target
+wasm32-unknown-unknown --release` (exit 0); `scripts/build-web.sh`
+(wasm-bindgen 0.2.129) into `dist/` (exit 0); and the Playwright suite in
+Chromium (62 passed, 1 skipped — the opt-in live import, 4m30s) and in
+Firefox (62 passed, 1 skipped, 5m36s), both including the extended
+`tests/browser/dr07-a11y.spec.mjs`. A screen reader was not run, and neither
+were the native client's WebKitGTK rendering, its physical audio and the
+Docker runtime: this host has no X server.
+
+## DR-07 review fixes: the ticking countdown and the honest exit list — 2026-10-21
+
+The reviewer's one blocking remark was the sleep timer. The countdown in the
+queue drawer carried `role="status"`, which is an implicit polite live
+region, and the root updates `sleep_remaining` every second — a screen
+reader would have read «Pauses in 4:58», «4:57», «4:56» without a pause.
+The countdown is now a `timer` with an explicit `aria-live="off"`, and its
+accessible name carries the remaining time, so the value is still there for
+the person who navigates to it. Measured in the live drawer against a real
+5-minute timer: `role="timer"`, `aria-live="off"`, the name `Pauses in 5:00`
+and the same string as visible text; the name then counts down from
+`Pauses in 5:00` (`Pauses in 4:58` in the Chromium run, `Pauses in 4:59` in
+the Firefox run), so the countdown really ticks, and no ancestor of it is a
+live region. The start, the cancel and the expiry are announced once each
+by the root, on one status line inside the drawer — that line was added in
+the round-two review below, which also replaced the earlier claim that «the
+start is announced by the timer's own select»: the select announces its own
+value, not the start of the timer. The other `role="status"` messages in
+`main.rs` are static or rare and were left alone.
+
+The two documentation inaccuracies are corrected. The drawer's exits were
+described as «Open library» and a player-bar now-playing trigger; that second
+path does not exist in a reachable form, because the native modal makes the
+background inert. The list now names the exits that hand the focus back —
+Escape, the close button, the Now Playing sheet's «View full queue», which
+was verified in both engines, and «Open library», which was measured as the
+one that did not and was fixed in the round-two review below. The evidence
+path in QA_EVIDENCE described an engine-separated directory that the spec did
+not produce; the spec now writes `target/checks/dr07-a11y-<engine>/` by
+default, and `VELA_DR07_EVIDENCE` overrides it and is documented in the
+browser README.
+
+The permanent journey grew with the two paths that were only measured by
+hand: the sleep countdown's live-region role and the Now Playing →
+«View full queue» → Escape route, which closes the drawer and hands the
+focus back to the connected `Open now playing` trigger in both engines. The
+countdown is now also measured in the reflow walk: it stays inside the
+drawer at 1284×856, 1440×900, 1728×1080, 390×844, 360×800 and 320×700, and
+neither the drawer, nor the sleep row, nor the document scrolls sideways.
+
+Executed on this change: `cargo fmt --all -- --check` (exit 0); `cargo
+clippy --locked --workspace --all-targets -- -D warnings` (exit 0); `cargo
+test --locked --workspace -- --test-threads=2` (380 passed, 0 failed, 3
+ignored); `cargo build --locked -p vela-web --target
+wasm32-unknown-unknown --release` (exit 0); `scripts/build-web.sh`
+(wasm-bindgen 0.2.129) into `dist/` (exit 0); and the Playwright suite in
+Chromium (62 passed, 1 skipped — the opt-in live import, 4m30s) and in
+Firefox (62 passed, 1 skipped, 5m36s), both including the extended
+`tests/browser/dr07-a11y.spec.mjs`. A screen reader was not run, and neither
+were the native client's WebKitGTK rendering, its physical audio and the
+Docker runtime: this host has no X server.
+
+## DR-07 the queue drawer is readable with a keyboard — 2026-10-21
+
+The queue drawer is the surface a keyboard user opens to find out what plays
+next, to change the volume and to move the playback position. It now reads as
+one set of controls instead of three unnamed rails.
+
+The focus ring of the drawer is the semantic accent role instead of a
+hardcoded pistachio. `dialog.queue-drawer :focus-visible` paints
+`2px solid var(--accent)` with a `3px` offset, so the ring is the light
+`#08754c` on the light panel and the dark `#d3e9a5` on the dark panel. The
+hardcoded `#d3e9a5` on the white panel is gone; the design audit had measured
+that ring at 1.315:1 in the light theme. Under `forced-colors: active` the
+ring is the system `Highlight` role; it is never removed. Measured in
+Chromium against the live panel
+surface: light `rgb(8, 117, 76)` on `rgb(255, 255, 255)` = 5.74:1, dark
+`rgb(211, 233, 165)` on `rgb(28, 32, 29)` = 12.54:1, 2px wide, 3px offset, on
+the close button, the queue track, the move and remove row actions and both
+rails.
+
+The two native rails carry visible names. `<label class="queue-field-label"
+for="queue-volume">Volume</label>` and `<label class="queue-field-label"
+for="queue-position">Playback position</label>` are bound to the existing
+`queue-volume` and `queue-position` ids, so the name is on screen and in the
+accessibility tree at the same time. Both rails are real 44px targets that
+fill their column: measured 325×44 in a 325px column at 1284×856 and in
+every wider viewport, 299×44 at 360px and 259×44 at 320px, with no document
+overflow at any of them. The queue row is a 44px target as well (the 38px
+cover is unchanged).
+
+Both rails announce a value a person can act on. The volume announces a
+rounded percentage of the real output level (`80%`, `0%`, `100%` after real
+Home, Arrow and End keypresses). The position announces a real `m:ss of m:ss`
+pair of the real track (`0:00 of 0:01` for the real one-second fixture). An
+unknown duration is announced as `Duration unknown`: the technical one-second
+maximum of the range is never read as a track length, and the empty queue
+proves that branch.
+
+Escape closes the drawer and hands the focus back to the control that opened
+it. The drawer leaves the DOM instead of closing, so a removed native modal
+dialog would drop the focus on the document body. The opener is captured
+while it still owns the focus, the top layer is left before the drawer leaves,
+and the focus is restored after the renderer's next batch only when the
+trigger is still connected and no other control has claimed the focus.
+Measured: after Escape the `document.activeElement` is the connected
+`Show playback queue` button, in the empty queue and in both themes.
+
+The root's own player seek input was left alone: it already carries the
+accessible name `Playback position` and uses the same `m:ss of m:ss` format
+for its `aria-valuetext`, but an unknown duration is announced there as
+`0:00 of 0:00`, where the drawer says `Duration unknown`. That difference
+is recorded in [KNOWN_LIMITATIONS](KNOWN_LIMITATIONS.md).
+
+Executed on this change: `cargo fmt --all`; `cargo clippy --locked
+--workspace --all-targets -- -D warnings` (exit 0); `cargo test --locked
+--workspace -- --test-threads=2` (380 passed, 0 failed, 3 ignored);
+`cargo build --locked -p vela-web --target wasm32-unknown-unknown --release`;
+`scripts/build-web.sh` (wasm-bindgen 0.2.129) into `dist/`; and the
+Playwright suite in Chromium (62 passed, 1 skipped — the opt-in live import)
+and in Firefox (62 passed, 1 skipped), both including the new permanent
+journey `tests/browser/dr07-a11y.spec.mjs`, which owns its server, data and
+sessions and measures the live ring in both themes, the drawer's real Tab
+order, the live rail rectangles, the live labels, the live `aria-valuetext`
+after real keypresses and the real focus return. Firefox needed an audio
+output on this host: without a PulseAudio null sink its media element cannot
+decode at all, so the sink the CI workflow provides was started for the run.
+A screen reader was not run, and neither were the native client's WebKitGTK
+rendering, its physical audio and the Docker runtime: this host has no X
+server. The exact numbers are in [QA_EVIDENCE](QA_EVIDENCE.md); the remaining
+limits are in [KNOWN_LIMITATIONS](KNOWN_LIMITATIONS.md).
+
 ## DR-05 readable states and one feedback stack — 2026-10-21
 
 The Home editorial and My Wave cards, the queue drawer and the idle player now

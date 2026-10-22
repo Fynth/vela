@@ -537,24 +537,79 @@ fn quality_label(track: &Track) -> Option<String> {
     }
 }
 
+/// The sleep timer's own state: the chosen length, the remaining seconds,
+/// the generation that retires a running timer and the message of the last
+/// transition. They are one unit, so a message of one timer is never shown
+/// next to the countdown of another.
+#[derive(Clone, Copy)]
+struct SleepTimer {
+    minutes: Signal<String>,
+    remaining: Signal<u64>,
+    generation: Signal<u64>,
+    /// The message of the last transition. The drawer shows it while the
+    /// drawer is open; the root's receipt shows it while the drawer is
+    /// closed. It is never in both, so it is never announced twice.
+    status: Signal<String>,
+    /// The surface that can announce a message right now.
+    drawer_open: Signal<bool>,
+}
+
+impl SleepTimer {
+    /// Put the one meaningful message of a transition in the surface that
+    /// can say it: the drawer's own status line while the drawer is open,
+    /// the root's receipt while the drawer is closed. The message is never
+    /// in two surfaces at once, so it is never announced twice.
+    fn announce(mut self, message: String, mut receipt: Signal<String>) {
+        if *self.drawer_open.peek() {
+            self.status.set(message);
+            return;
+        }
+        receipt.set(message);
+    }
+
+    /// Drop the message of the last transition. The next open starts from
+    /// an empty line, so a message that was already delivered is never
+    /// repeated.
+    fn clear_status(mut self) {
+        self.status.set(String::new());
+    }
+
+    /// Stop the timer and drop its message. The generation retires the
+    /// running countdown of the session that is gone.
+    fn stop(mut self) {
+        let next = self.generation.peek().wrapping_add(1);
+        self.generation.set(next);
+        self.minutes.set("0".into());
+        self.remaining.set(0);
+        self.status.set(String::new());
+    }
+}
+
+/// The sleep timer's messages. The countdown itself is a quiet timer; these
+/// are the one meaningful message of each transition.
+const SLEEP_CANCELED: &str = "Sleep timer canceled.";
+const SLEEP_EXPIRED: &str = "Sleep timer reached zero and paused playback.";
+
+/// Start, replace or cancel the sleep timer. The start, the cancel and the
+/// expiry are one meaningful message each, and the message is written by
+/// the root into the surface that can announce it.
 fn set_sleep_timer(
     value: String,
-    mut minutes: Signal<String>,
-    mut remaining: Signal<u64>,
-    mut generation: Signal<u64>,
+    mut timer: SleepTimer,
     playback: PlaybackUi,
-    mut notice: Signal<String>,
+    receipt: Signal<String>,
 ) {
-    let next_generation = generation.peek().wrapping_add(1);
-    generation.set(next_generation);
-    minutes.set(value.clone());
+    let next_generation = timer.generation.peek().wrapping_add(1);
+    timer.generation.set(next_generation);
+    timer.minutes.set(value.clone());
     let parsed = value.parse::<u64>().unwrap_or(0);
     if parsed == 0 || parsed > 120 {
-        remaining.set(0);
+        timer.remaining.set(0);
         return;
     }
     let deadline = js_sys::Date::now() + parsed as f64 * 60_000.0;
-    remaining.set(parsed * 60);
+    timer.remaining.set(parsed * 60);
+    timer.announce(format!("Sleep timer set for {parsed} minutes."), receipt);
     let session = playback
         .auth
         .peek()
@@ -564,7 +619,7 @@ fn set_sleep_timer(
     spawn(async move {
         loop {
             gloo_timers::future::TimeoutFuture::new(1000).await;
-            if *generation.peek() != next_generation {
+            if *timer.generation.peek() != next_generation {
                 return;
             }
             if playback
@@ -578,11 +633,11 @@ fn set_sleep_timer(
                 return;
             }
             let left = ((deadline - js_sys::Date::now()) / 1000.0).max(0.0) as u64;
-            remaining.set(left);
+            timer.remaining.set(left);
             if left == 0 {
                 playback.engine.peek().pause();
-                minutes.set("0".into());
-                notice.set("Sleep timer reached zero and paused playback.".into());
+                timer.minutes.set("0".into());
+                timer.announce(SLEEP_EXPIRED.into(), receipt);
                 return;
             }
         }
@@ -1196,7 +1251,10 @@ struct PlaylistPickerTarget {
 /// TR07: the row menu and the add-to-playlist picker are two layers of one
 /// surface state. `return_focus` keeps the DOM trigger that opened the layer so
 /// Escape, the backdrop and a committed action restore it exactly, while the
-/// root player's own native dialog focus handling stays untouched.
+/// root player's own native dialog focus handling stays untouched. The queue
+/// drawer is a surface of its own, so it freezes its trigger in its own slot:
+/// a row menu that happens to be open behind the drawer must never take the
+/// drawer's focus return.
 #[derive(Clone)]
 struct Surfaces {
     menu: Signal<Option<String>>,
@@ -1210,6 +1268,10 @@ struct Surfaces {
     command: Signal<u64>,
     reads: client::RequestScope,
     return_focus: Rc<RefCell<Option<web_sys::Element>>>,
+    /// The drawer's own trigger. The drawer and the row menu are two
+    /// different surfaces, so they freeze two different controls: the
+    /// drawer's focus return is never the row's More button.
+    queue_focus: Rc<RefCell<Option<web_sys::Element>>>,
 }
 
 impl Surfaces {
@@ -1248,6 +1310,32 @@ impl Surfaces {
     }
     fn picker_adding(&self) -> bool {
         *self.picker_busy.read()
+    }
+
+    /// Freeze the control that opened the queue drawer. The trigger is
+    /// captured while it still owns the focus, so the restore below hands
+    /// the focus back to the same control. The document body is not a
+    /// trigger: a surface that was opened without a focused control has
+    /// nothing to restore. A trigger that is already frozen is not
+    /// replaced: the capture belongs to the surface that owns it, so no
+    /// later render can swap it for a control that happens to be focused
+    /// inside that surface. The drawer keeps this trigger in its own slot,
+    /// so a row menu that is open behind it keeps its own frozen trigger
+    /// and never takes the drawer's focus return.
+    fn capture_queue_trigger(&self) {
+        if self.queue_focus.borrow().is_some() {
+            return;
+        }
+        let Some(document) = web_sys::window().and_then(|window| window.document()) else {
+            return;
+        };
+        let Some(active) = document.active_element() else {
+            return;
+        };
+        if active.tag_name().eq_ignore_ascii_case("BODY") {
+            return;
+        }
+        *self.queue_focus.borrow_mut() = Some(active);
     }
 
     /// Freeze the invoking trigger: the focused control inside this row for a
@@ -1292,13 +1380,27 @@ impl Surfaces {
 
     fn restore_focus(&self) {
         let target = self.return_focus.borrow_mut().take();
+        self.focus_later(target);
+    }
+
+    /// Hand the focus back to the control that opened the queue drawer. The
+    /// drawer freezes its own trigger, so its focus return is never the row
+    /// menu's More button.
+    fn restore_queue_focus(&self) {
+        let target = self.queue_focus.borrow_mut().take();
+        self.focus_later(target);
+    }
+
+    /// Focus a frozen trigger after the renderer's next batch. The layer
+    /// leaves the DOM in that batch (a native modal dialog also leaves the
+    /// top layer there and would otherwise pull focus to the document body),
+    /// so focus is restored after it instead of racing it. A trigger that is
+    /// no longer connected is not focused, and a newer surface generation
+    /// means a later surface owns the focus now.
+    fn focus_later(&self, target: Option<web_sys::Element>) {
         let Some(element) = target else {
             return;
         };
-        // The layer leaves the DOM in the renderer's next batch (a native modal
-        // dialog also leaves the top layer there and would otherwise pull focus
-        // to the document body), so focus is restored after that batch instead
-        // of racing it. A trigger that is no longer connected is not focused.
         let surfaces = self.clone();
         let generation = *self.generation.peek();
         wasm_bindgen_futures::spawn_local(async move {
@@ -1411,7 +1513,56 @@ impl Surfaces {
         busy.set(false);
         error.set(String::new());
         self.return_focus.borrow_mut().take();
+        self.queue_focus.borrow_mut().take();
     }
+}
+
+/// The queue drawer's native dialog. The drawer leaves the top layer
+/// before it leaves the DOM: a modal dialog that is removed while it is
+/// open drops the focus on the document body.
+fn queue_dialog() -> Option<web_sys::HtmlDialogElement> {
+    web_sys::window()?
+        .document()?
+        .get_element_by_id("queue-drawer-dialog")?
+        .dyn_into()
+        .ok()
+}
+
+/// Open the queue drawer. The control that opened it is frozen in the
+/// drawer's own slot as the focus target, so the root can hand the focus
+/// back to it, and the drawer's own announcement surface starts empty: a
+/// message that was already delivered outside the drawer is never repeated
+/// inside it.
+fn open_queue(mut show_queue: Signal<bool>, mut timer: SleepTimer, surfaces: &Surfaces) {
+    surfaces.capture_queue_trigger();
+    timer.status.set(String::new());
+    show_queue.set(true);
+}
+
+/// Close the queue drawer and hand the focus back to the control that
+/// opened it. The native dialog leaves the top layer before the drawer
+/// leaves the DOM, so the focus is never dropped on the document body, and
+/// the drawer's own announcement surface is dropped with it.
+fn close_queue(mut show_queue: Signal<bool>, mut timer: SleepTimer, surfaces: &Surfaces) {
+    if let Some(dialog) = queue_dialog()
+        && dialog.open()
+    {
+        dialog.close();
+    }
+    show_queue.set(false);
+    timer.status.set(String::new());
+    surfaces.restore_queue_focus();
+}
+
+/// The player bar's queue control. The drawer is a modal surface, so the
+/// control behind it is inert while the drawer is open; the toggle still
+/// closes the drawer when it is reachable.
+fn toggle_queue(show_queue: Signal<bool>, timer: SleepTimer, surfaces: &Surfaces) {
+    if *show_queue.peek() {
+        close_queue(show_queue, timer, surfaces);
+        return;
+    }
+    open_queue(show_queue, timer, surfaces);
 }
 
 /// Focus one control by DOM id after the renderer's DOM batch. Returns whether
@@ -1643,6 +1794,7 @@ fn App() -> Element {
         command: Signal::new(0),
         reads: client::RequestScope::default(),
         return_focus: Rc::new(RefCell::new(None)),
+        queue_focus: Rc::new(RefCell::new(None)),
     });
     // The lean web build has no mounted event, so the active layer is focused
     // after the renderer's DOM batch (the same pattern the queue drawer and Now
@@ -1721,9 +1873,17 @@ fn App() -> Element {
     let mut favorite_pending = use_signal(|| None::<String>);
     let mut shuffle = use_signal(|| false);
     let mut repeat = use_signal(|| "off".to_string());
-    let mut sleep_minutes = use_signal(|| "0".to_string());
-    let mut sleep_remaining = use_signal(|| 0_u64);
-    let mut sleep_generation = use_signal(|| 0_u64);
+    let mut show_queue = use_signal(|| false);
+    // The sleep timer and the surface that can announce it are one unit:
+    // the drawer shows the message of a transition while it is open, the
+    // root's receipt shows it while it is closed.
+    let sleep = SleepTimer {
+        minutes: use_signal(|| "0".to_string()),
+        remaining: use_signal(|| 0_u64),
+        generation: use_signal(|| 0_u64),
+        status: use_signal(String::new),
+        drawer_open: show_queue,
+    };
     let mut playback_order = use_signal(PlaybackOrder::default);
     let playback_status = use_signal(String::new);
     let mut playback_expired = use_signal(|| false);
@@ -1754,7 +1914,6 @@ fn App() -> Element {
         repeat,
         auth,
     };
-    let mut show_queue = use_signal(|| false);
     let now = NowPlayingUi {
         open: use_signal(|| false),
         generation: use_signal(|| 0_u64),
@@ -1762,6 +1921,7 @@ fn App() -> Element {
         busy: use_signal(|| false),
     };
     let mut now_track = use_signal(|| None::<(String, usize)>);
+    let now_surfaces = surfaces.clone();
     let now_actions = use_hook(move || now_playing::Actions {
         close: EventHandler::new(move |_| now.close()),
         failed: EventHandler::new(move |message| {
@@ -1780,8 +1940,10 @@ fn App() -> Element {
         }),
         retry: EventHandler::new(move |_| engine.peek().resume()),
         queue: EventHandler::new(move |_| {
+            // The sheet leaves the top layer first, so the focus is back on
+            // the sheet's own trigger when the drawer freezes it.
             now.close();
-            show_queue.set(true);
+            open_queue(show_queue, sleep, &now_surfaces);
         }),
         select: EventHandler::new(move |at| select_queued(at, playback)),
         favorite: EventHandler::new(move |track: Track| {
@@ -2011,9 +2173,10 @@ fn App() -> Element {
             playlist_undo_pending.set(None);
             playlist_undo_error.set(String::new());
             // Account change: the open menu/picker and every captured row trigger
-            // belong to the previous account and must not survive it.
+            // belong to the previous account and must not survive it. The drawer
+            // leaves the top layer through the same closer as every other exit.
             surfaces.reset();
-            show_queue.set(false);
+            close_queue(show_queue, sleep, &surfaces);
             playback_order.write().reset(0, 0);
             shuffle.set(false);
             repeat.set("off".into());
@@ -2897,7 +3060,7 @@ fn App() -> Element {
                             shell::SettingsDestinations { page: page(), administrator: auth.read().as_ref().is_some_and(|a| a.user.is_admin), radio_available: radio_seed.read().is_some(), onnav: actions.navigate }
                             settings::Appearance { device, status: device_save, repair: device_repair, zoom_supported: device_zoom_supported } div { class: "panel", h2 { "A space that is yours" } p { "Your library is private. Music files stay on this server, and your session credentials stay in a secure browser cookie." }
                                 dl { dt { "Server version" } dd { "{version}" } dt { "Collection storage" } dd { {stats.read().as_ref().map(|s| bytes(s.size_bytes)).unwrap_or_else(|| "—".into())} } dt { "Playback" } dd { "Original audio · Browser native" } dt { "Signed federation" } dd { "Not implemented" } }
-                                button { class: "button secondary", onclick: move |_| { spawn_authorized(auth, async move { match mutate("POST", "/api/logout", None, &token(auth)).await { Ok(()) => { engine.peek().bind(String::new(),None); auth.set(None); invalidate_library(library); clear_catalog(catalog); tracks.set(Vec::new()); queue.set(Vec::new()); playlists.set(Vec::new()); selected_playlist.set(None); stats.set(None); jobs.set(Vec::new()); share_url.set(String::new()); let next_sleep = sleep_generation.peek().wrapping_add(1); sleep_generation.set(next_sleep); sleep_minutes.set("0".into()); sleep_remaining.set(0); page.set("home".into());  error.set(String::new()); username.set(String::new()); } Err(message) => error.set(message) } }); }, "Sign out" }
+                                button { class: "button secondary", onclick: move |_| { spawn_authorized(auth, async move { match mutate("POST", "/api/logout", None, &token(auth)).await { Ok(()) => { engine.peek().bind(String::new(),None); auth.set(None); invalidate_library(library); clear_catalog(catalog); tracks.set(Vec::new()); queue.set(Vec::new()); playlists.set(Vec::new()); selected_playlist.set(None); stats.set(None); jobs.set(Vec::new()); share_url.set(String::new()); sleep.stop(); page.set("home".into());  error.set(String::new()); username.set(String::new()); } Err(message) => error.set(message) } }); }, "Sign out" }
                             }
                             div { class: "panel", h2 { "Listening controls" } p { "Press Space to play or pause, and the arrow keys to seek 10 seconds. Use your device’s media controls when your browser supports them. Theme and app size are in Appearance above; they change this device only and are never sent to the server." } small { "Codec support depends on your browser. Files are streamed directly without transcoding." } }
                             listening::PrivacySettings {auth,view:listening_view,collector:engine.peek().listening(),onhistory:move |_| actions.navigate.call("history".into())}
@@ -3000,7 +3163,7 @@ fn App() -> Element {
                 div { class: "player-bar", "aria-label": "Music player",
                     div { class: "player-now",
                         if let Some(track)=current.clone() {
-                            button { class:"now-playing now-playing-trigger","aria-label":"Open now playing","aria-haspopup":"dialog",onclick:move |_|{show_queue.set(false);now.show();},
+                            button { class:"now-playing now-playing-trigger","aria-label":"Open now playing","aria-haspopup":"dialog",onclick:move |_|{show_queue.set(false); sleep.clear_status(); now.show();},
                                 Art {key:"{track.id}-{track.artwork_id:?}",track:track.clone()}
                                 span {class:"now-playing-meta",
                                     span {class:"now-playing-heading",strong {class:"player-title","{track.title}"}
@@ -3038,7 +3201,7 @@ fn App() -> Element {
                                 span { class: "play-toggle-face", if playing() || requested_play { Icon { name: "pause" } } else { Icon { name: "play" } } }
                             }
                             button { id: "player-next", class: "icon-button", "aria-label": "Next track", disabled: current.is_none(), onclick: move |_| advance(Command::Next, playback), Icon { name: "next" } }
-                            button { class: "icon-button mobile-queue", "aria-label": "Show playback queue and controls", onclick: move |_| show_queue.set(!show_queue()), Icon { name: "queue" } }
+                            button { class: "icon-button mobile-queue", "aria-label": "Show playback queue and controls", onclick: { let surfaces = surfaces.clone(); move |_| toggle_queue(show_queue, sleep, &surfaces) }, Icon { name: "queue" } }
                             button { class: if repeat() != "off" {"icon-button player-repeat active"} else {"icon-button player-repeat"}, "aria-label": "Repeat: {repeat}", "aria-pressed": repeat() != "off", disabled: current.is_none(), onclick: move |_| { change_repeat(repeat); },
                                 if repeat() == "one" {
                                     Icon { name: "repeat-one" }
@@ -3067,12 +3230,12 @@ fn App() -> Element {
                                 small {"Original file · direct stream"}
                             }
                         }
-                        button { class: if show_queue() {"icon-button selected"}else{"icon-button"},"aria-label":"Show playback queue","aria-expanded":show_queue(),onclick:move |_| {show_queue.set(!show_queue());}, Icon { name: "queue" } }
+                        button { class: if show_queue() {"icon-button selected"}else{"icon-button"},"aria-label":"Show playback queue","aria-expanded":show_queue(),onclick:{ let surfaces = surfaces.clone(); move |_| toggle_queue(show_queue, sleep, &surfaces) }, Icon { name: "queue" } }
                         button { class: if muted() {"icon-button player-mute active"}else{"icon-button player-mute"},"aria-label":"Mute","aria-pressed":muted(),onclick:move |_| toggle_mute(muted,volume),
                             if muted() { MutedIcon {} } else { Icon { name: "volume" } }
                         }
                         input { id:"player-volume", r#type:"range", min:"0", max:"1", step:"0.01", value:"{volume_value}", "aria-label":"Volume", oninput: move |e| { if let Ok(value) = e.value().parse::<f64>() { if *muted.peek() { muted.set(false); } change_volume(value,volume); } } }
-                        button { class:"icon-button player-expand","aria-label":"Expand player","aria-haspopup":"dialog",disabled:current.is_none(),onclick:move |_| {show_queue.set(false);now.show();}, ExpandIcon {} }
+                        button { class:"icon-button player-expand","aria-label":"Expand player","aria-haspopup":"dialog",disabled:current.is_none(),onclick:move |_| {show_queue.set(false); sleep.clear_status(); now.show();}, ExpandIcon {} }
                     }
                 }
                 /* TR07: the add-to-playlist picker is a native modal dialog, so the
@@ -3269,9 +3432,10 @@ fn App() -> Element {
                     position: position(),
                     duration: duration(),
                     volume: volume_value,
-                    sleep_minutes: sleep_minutes(),
-                    sleep_remaining: sleep_remaining(),
-                    onclose: move |_| show_queue.set(false),
+                    sleep_minutes: (sleep.minutes)(),
+                    sleep_remaining: (sleep.remaining)(),
+                    sleep_status: (sleep.status)(),
+                    onclose: { let surfaces = surfaces.clone(); move |_| close_queue(show_queue, sleep, &surfaces) },
                     onselect: move |at| select_queued(at, playback),
                     onremove: move |at| remove_queued(at, playback),
                     onmoveup: move |at| move_queue_up(at, playback),
@@ -3286,12 +3450,15 @@ fn App() -> Element {
                     onvolume: move |value| { if *muted.peek() { muted.set(false); } change_volume(value, volume); },
                     onretry: move |_| engine.peek().resume(),
                     onsleep: move |value| {
-                        if value == "0" && sleep_minutes.peek().as_str() != "0" {
-                            notice.set("Sleep timer canceled.".into());
+                        if value == "0" && sleep.minutes.peek().as_str() != "0" {
+                            sleep.announce(SLEEP_CANCELED.into(), notice);
                         }
-                        set_sleep_timer(value, sleep_minutes, sleep_remaining, sleep_generation, playback, notice);
+                        set_sleep_timer(value, sleep, playback, notice);
                     },
-                    onchoose: move |_| { show_queue.set(false); actions.navigate.call("library".into()); },
+                    onchoose: { let surfaces = surfaces.clone(); move |_| {
+                        close_queue(show_queue, sleep, &surfaces);
+                        actions.navigate.call("library".into());
+                    } },
                 } }
                 if *now.open.read() {
                     if let Some(track)=current.clone(){now_playing::NowPlaying {

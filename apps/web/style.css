@@ -73,6 +73,7 @@
   --vela-nav-active-text: #d3e9a5;
   --vela-track-hover: #ffffff04;
   --vela-track-current: #d3e9a505;
+  --vela-track-next: #d3e9a533;
   --vela-seek-rail: #343d2c;
   --vela-seek-fill: #bbcda8;
   --vela-mobile-player: #1c2318;
@@ -164,6 +165,7 @@
   --vela-nav-active-text: #08754c;
   --vela-track-hover: #00000005;
   --vela-track-current: #08754c0d;
+  --vela-track-next: #08754c33;
   --vela-seek-rail: #c1d1c5;
   --vela-seek-fill: #08754c;
   --vela-mobile-player: #fff;

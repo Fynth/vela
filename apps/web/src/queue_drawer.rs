@@ -2,6 +2,7 @@
 //! never a second player and never a second copy of the queue.
 use crate::icons::Icon;
 use crate::playback::Projection;
+use crate::seconds;
 use dioxus::prelude::*;
 use gloo_timers::future::TimeoutFuture;
 use vela_domain::Track;
@@ -29,6 +30,23 @@ fn format_duration(duration_ms: i64) -> String {
     format!("{}:{:02}", total_seconds / 60, total_seconds % 60)
 }
 
+/// Close the drawer. The native dialog leaves the top layer before the
+/// drawer leaves the DOM: a modal dialog that is removed while it is open
+/// drops the focus on the document body. The control that opened the
+/// drawer is frozen by the root together with the surface generation that
+/// retires it, and the root restores the focus through its own guarded
+/// path; this drawer never keeps a second copy of that convention.
+fn closer(onclose: EventHandler<()>) -> impl FnMut() {
+    move || {
+        if let Some(dialog) = drawer()
+            && dialog.open()
+        {
+            dialog.close();
+        }
+        onclose.call(());
+    }
+}
+
 #[component]
 pub fn QueueDrawer(
     queue: Vec<Track>,
@@ -45,6 +63,7 @@ pub fn QueueDrawer(
     volume: f64,
     sleep_minutes: String,
     sleep_remaining: u64,
+    sleep_status: String,
     onclose: EventHandler<()>,
     onselect: EventHandler<usize>,
     onremove: EventHandler<usize>,
@@ -62,6 +81,13 @@ pub fn QueueDrawer(
     onsleep: EventHandler<String>,
     onchoose: EventHandler<()>,
 ) -> Element {
+    // The drawer is a native modal dialog: the browser owns the focus
+    // trap, the top layer and the backdrop. The element is looked up
+    // after the renderer's DOM batch, because the lean Dioxus web build
+    // has no mounted-event support. The control that opened the drawer
+    // is frozen by the root, not here: this effect only opens the
+    // surface and never reads a signal, so no later render can replace
+    // the frozen trigger.
     use_effect(move || {
         spawn(async move {
             TimeoutFuture::new(0).await;
@@ -121,6 +147,41 @@ pub fn QueueDrawer(
     } else {
         1.0
     };
+    // DR-07: both rails announce a value a person can act on. The volume is a
+    // rounded percentage of the real output level. The position is a real
+    // "m:ss of m:ss" pair; an unknown duration is announced as unknown, the
+    // technical one-second maximum is never read as a track length.
+    let volume_text = format!("{}%", (volume.clamp(0.0, 1.0) * 100.0).round() as i64);
+    let seek_text = if duration.is_finite() && duration > 0.0 {
+        format!(
+            "{} of {}",
+            seconds(position.min(duration)),
+            seconds(duration)
+        )
+    } else {
+        "Duration unknown".to_string()
+    };
+    // DR-07: the sleep countdown ticks every second. A polite live region
+    // would read "4:58", "4:57", "4:56" without a pause, so the countdown is
+    // a `timer` with an explicit `aria-live="off"`. Its name carries the
+    // remaining time, so a person who navigates to it still hears that the
+    // timer runs and how long is left.
+    let sleep_text = if sleep_remaining > 0 {
+        format_duration((sleep_remaining * 1000) as i64)
+    } else {
+        String::new()
+    };
+    // DR-07: the sleep timer's own announcement. The countdown is a quiet
+    // timer, so the start, the cancel and the expiry are one meaningful
+    // message each. The root writes that message into the drawer's status
+    // line; the line changes only on those transitions, never on a tick.
+    //
+    // Escape, the close button and "Open library" are the same command:
+    // the drawer leaves the top layer before it leaves the DOM, and the
+    // focus goes back to the control that opened it.
+    let mut cancel = closer(onclose);
+    let mut dismiss = closer(onclose);
+    let mut choose = closer(onchoose);
 
     rsx! {
         dialog {
@@ -131,7 +192,7 @@ pub fn QueueDrawer(
             "aria-label": "Playback queue",
             oncancel: move |event| {
                 event.prevent_default();
-                onclose.call(());
+                cancel();
             },
             div {
                 class: "queue-panel",
@@ -147,7 +208,7 @@ pub fn QueueDrawer(
                         class: "icon-button queue-close",
                         r#type: "button",
                         "aria-label": "Close playback queue",
-                        onclick: move |_| onclose.call(()),
+                        onclick: move |_| dismiss(),
                         Icon { name: "close" }
                     }
                 }
@@ -208,6 +269,7 @@ pub fn QueueDrawer(
                 }
 
                 div { class: "queue-volume",
+                    label { class: "queue-field-label", r#for: "queue-volume", "Volume" }
                     input {
                         id: "queue-volume",
                         r#type: "range",
@@ -216,6 +278,7 @@ pub fn QueueDrawer(
                         step: "0.01",
                         value: "{volume}",
                         "aria-label": "Queue volume",
+                        "aria-valuetext": "{volume_text}",
                         oninput: move |event| {
                             if let Ok(value) = event.value().parse::<f64>() {
                                 onvolume.call(value);
@@ -227,6 +290,7 @@ pub fn QueueDrawer(
                 // The modal background is inert, so the drawer carries the seek
                 // itself: transport must stay reachable while it is open.
                 div { class: "queue-seek",
+                    label { class: "queue-field-label", r#for: "queue-position", "Playback position" }
                     input {
                         id: "queue-position",
                         r#type: "range",
@@ -235,6 +299,7 @@ pub fn QueueDrawer(
                         step: "0.1",
                         value: "{position}",
                         "aria-label": "Queue playback position",
+                        "aria-valuetext": "{seek_text}",
                         disabled: !has_current,
                         oninput: move |event| {
                             if let Ok(value) = event.value().parse::<f64>() {
@@ -353,7 +418,7 @@ pub fn QueueDrawer(
                             class: "button secondary",
                             r#type: "button",
                             "aria-label": "Open library",
-                            onclick: move |_| onchoose.call(()),
+                            onclick: move |_| choose(),
                             "Open library"
                         }
                     }
@@ -368,27 +433,48 @@ pub fn QueueDrawer(
                     "Clear upcoming tracks"
                 }
 
-                div { class: "inline-form sleep-timer",
-                    label { r#for: "sleep-timer", "Sleep timer" }
-                    select {
-                        id: "sleep-timer",
-                        value: "{sleep_minutes}",
-                        onchange: move |event| onsleep.call(event.value()),
-                        option { value: "0", selected: sleep_minutes == "0", "Off" }
-                        option { value: "5", selected: sleep_minutes == "5", "5 minutes" }
-                        option { value: "15", selected: sleep_minutes == "15", "15 minutes" }
-                        option { value: "30", selected: sleep_minutes == "30", "30 minutes" }
-                        option { value: "60", selected: sleep_minutes == "60", "60 minutes" }
-                    }
-                    if sleep_remaining > 0 {
-                        small { role: "status", "Pauses in {format_duration((sleep_remaining * 1000) as i64)}" }
-                        button {
-                            class: "text-button",
-                            r#type: "button",
-                            "aria-label": "Cancel sleep timer",
-                            onclick: move |_| onsleep.call("0".to_string()),
-                            "Cancel sleep timer"
+                // DR-07: one announcement surface inside the drawer, and it
+                // is always there. The live region exists before the first
+                // transition, so an announcement depends on a change of its
+                // text and never on the insertion of the region itself. The
+                // modal background is inert, so the root's receipt cannot say
+                // anything while the drawer is open; this line is the only
+                // place the sleep timer's start, cancel and expiry are spoken
+                // from inside the drawer. The line and the sleep row share
+                // one wrapper, so an empty line takes no space at all.
+                div { class: "queue-sleep",
+                    div { class: "inline-form sleep-timer",
+                        label { r#for: "sleep-timer", "Sleep timer" }
+                        select {
+                            id: "sleep-timer",
+                            value: "{sleep_minutes}",
+                            onchange: move |event| onsleep.call(event.value()),
+                            option { value: "0", selected: sleep_minutes == "0", "Off" }
+                            option { value: "5", selected: sleep_minutes == "5", "5 minutes" }
+                            option { value: "15", selected: sleep_minutes == "15", "15 minutes" }
+                            option { value: "30", selected: sleep_minutes == "30", "30 minutes" }
+                            option { value: "60", selected: sleep_minutes == "60", "60 minutes" }
                         }
+                        if sleep_remaining > 0 {
+                            small {
+                                role: "timer",
+                                "aria-live": "off",
+                                "aria-label": "Pauses in {sleep_text}",
+                                "Pauses in {sleep_text}"
+                            }
+                            button {
+                                class: "text-button",
+                                r#type: "button",
+                                "aria-label": "Cancel sleep timer",
+                                onclick: move |_| onsleep.call("0".to_string()),
+                                "Cancel sleep timer"
+                            }
+                        }
+                    }
+                    p {
+                        class: if sleep_status.is_empty() { "queue-sleep-status is-empty" } else { "queue-sleep-status" },
+                        role: "status",
+                        "{sleep_status}"
                     }
                 }
 

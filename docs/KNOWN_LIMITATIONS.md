@@ -1,5 +1,106 @@
 # Unsupported and unverified functionality
 
+## DR-07 keyboard readable queue drawer — 2026-10-21, second review 2026-10-22
+
+The drawer's focus ring, its two rails, their visible names, its Tab order and
+the focus return after Escape were measured against the live DOM in Chromium
+and in Firefox; both engines report the same ring, the same rectangles and the
+same focus return. A screen reader was not run: the accessible names, the
+announced values and the focus returns are a source-level guarantee, not
+a measured announcement. The `forced-colors: active` rule uses the system
+`Highlight` role, but the mode itself was not emulated, so the painted result
+in a forced-colors desktop is unverified. A 200% browser zoom and a 150% app
+scale were not exercised for this package.
+
+The two real media fixtures of this repository are one second long, so the
+`m:ss` position format cannot show a sub-second position: a rail at `0.1`
+still announces `0:00`. That is the format's own resolution, not a wrong
+reading. A track with a real length would exercise the same code path
+unchanged, but it was not available on this host.
+
+The root's own player seek input was not touched. It already carries the
+accessible name `Playback position` and the same `m:ss of m:ss`
+`aria-valuetext`, but an unknown duration is announced there as `0:00 of 0:00`
+instead of the drawer's `Duration unknown`. The two surfaces therefore do not
+say the same thing about an unknown length; only the drawer was in this
+package's scope.
+
+Four of the drawer's exits hand the focus back to a connected trigger:
+Escape, the close button, the Now Playing sheet's `View full queue`, which
+opens the drawer from the sheet and hands the focus back to the sheet's own
+`Open now playing` trigger, and the `Open library` action, which is drawn
+only while the queue is empty and now goes through the same closer: the
+native dialog leaves the top layer before the drawer leaves the DOM, and the
+navigation to the library does not strand the focus on the document body
+(measured in Chromium and in Firefox). The focus round trip itself is the
+root's: the root freezes the control that opened the drawer and restores it
+through its own guarded path, so the drawer keeps no second copy of that
+convention.
+
+The sleep countdown is a `timer` with an explicit `aria-live="off"`: it
+ticks every second, and a polite live region would read "4:58", "4:57",
+"4:56" without a pause. Its accessible name carries the remaining time, so
+a person who navigates to it still hears that the timer runs. The start, the
+cancel and the expiry are one meaningful message each, written by the root
+into one `role="status"` line inside the drawer, because the modal
+background is inert while the drawer is open and the root's receipt cannot
+say anything from there. The root decides where the message goes: the line
+inside the modal while the drawer is open, the root's receipt while the
+drawer is closed, never both at once, so the message is never announced
+twice. The consequence is honest and small: a sleep message that is
+produced while the drawer is open lives only in the drawer and is gone when
+the drawer closes — the cancel in particular no longer leaves a receipt in
+the feedback stack. The countdown's own role, the one status line and its
+text are DOM-level guarantees; that a screen reader says them was not
+measured, because no screen reader was run.
+
+At 320px the queue row's title is truncated to a single character by the
+fixed 44px row actions next to the 38px cover. That is the pre-existing
+narrow-row layout, not a regression of this package, and it was not redesigned
+here.
+
+The drawer's announcement line is a permanent live region: it is in the DOM
+before the first transition and only its text changes, so the announcement
+depends on a text change and not on the insertion of the region together with
+its content. The empty line is collapsed to zero height without a margin and
+takes no space, which was measured in both engines at six viewports. That a
+screen reader speaks the changed text of a region that was already there was
+not measured: no screen reader was run.
+
+The drawer and the row menu keep two different frozen triggers, so a row menu
+that is open behind the drawer no longer takes the drawer's focus return. The
+menu itself is not closed by the drawer: at desktop widths it is the
+anchored panel it has always been (it has no backdrop there), it is inert
+while the modal drawer is open, and it stays open behind the drawer. That is
+the pre-existing surface behavior, not a regression, and the redesign of that
+anchored panel was not in this package's scope.
+
+The current row's tint and the next occurrence's outline are now the
+project's own roles, `--vela-track-current` and `--vela-track-next`, with a
+value per theme. Measured over the panel they sit on, the light theme's
+current row is 1.07:1 and its outline 1.34:1 against the white panel (the
+hardcoded pistachio they replaced read 1.005:1 and 1.055:1), the dark
+theme's 1.05:1 and 1.74:1. Both are decorative tints, not text and not the
+focus ring, and they stay below the 3:1 that a non-text indicator would
+need: the row that is also the next occurrence is marked, but it is not
+announced by contrast, and the redesign of that marker was not in this
+package's scope.
+
+The native desktop client, its WebKitGTK rendering, its physical audio and the
+Docker runtime were not run: this host has no X server. The browser suites
+needed an audio device for Firefox, so a PulseAudio null sink was started for
+the run; the sink is a test environment, not a product capability, and no
+physical audio output exists here.
+
+The drawer's trigger is frozen from `document.active_element()` at the moment
+the drawer opens. Chromium and Firefox on Linux focus a button on click, so
+both measured engines return the focus to the right control. A WebKit engine
+that does not focus a button on click would freeze a different control, or
+freeze nothing at all and the focus would not return. The row menu does not
+have that exposure: it resolves a stable element id instead. Only the two
+measured engines were checked, so this stays unverified for WebKit/Safari
+until the native parity package runs against a real WebKitGTK window.
+
 ## DR-05 readable states and feedback stack — 2026-10-21
 
 The English dictionary covers the system's own labels in the editorial card,
