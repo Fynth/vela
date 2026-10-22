@@ -1,8 +1,8 @@
 # Vela Music
 
-Downloads: [v0.12.8](https://github.com/Fynth/vela/releases/tag/v0.12.8) — Windows EXE, Linux AppImage/DEB/tar.gz and signed Android arm64 APK. The 0.12.9 candidate is tagged and builds through the same release workflow.
-Arch: `yay -S vela-music-bin` ([AUR](https://aur.archlinux.org/packages/vela-music-bin)).
-See [requirements, CI and signing](docs/DISTRIBUTION.md) and [verified release evidence](docs/RELEASE_LEDGER_0.12.8.md).
+Downloads: [v0.12.9](https://github.com/Fynth/vela/releases/tag/v0.12.9) — Windows EXE, Linux AppImage/DEB/tar.gz and signed Android arm64 APK.
+Arch: `yay -S vela-music-bin` ([AUR](https://aur.archlinux.org/packages/vela-music-bin)) — 0.12.9-1.
+See [requirements, CI and signing](docs/DISTRIBUTION.md) and [verified release evidence](docs/RELEASE_LEDGER_0.12.9.md).
 
 A Rust-first, self-hosted music cloud with a Dioxus web interface. This is an early implementation under active development, not a finished alternative to established servers.
 
