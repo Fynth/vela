@@ -1,5 +1,52 @@
 # Unsupported and unverified functionality
 
+## DR-02 the underlap and the two glass bands — 2026-10-22
+
+The package lets the catalog run under the topbar and the player and paints
+those two bands with the DR-01 glass roles. The measurements are in
+[QA_EVIDENCE](QA_EVIDENCE.md) and [PERFORMANCE.md](PERFORMANCE.md); what was
+**not** measured is here.
+
+- **The frame budget is a software-raster number, and a GPU-backed stand is
+  NOT_RUN.** The renderer on this host is SwiftShader in every launch mode
+  (`WEBGL_debug_renderer_info`), so the 0.00 points the glass costs here say
+  nothing about a browser that composites on a GPU. The plan's 5-point
+  budget is met on this stand and is not claimed for any other device.
+- **The same measurement reads two very different numbers, and the cause
+  was not isolated.** In a plain process the glass costs 0.00 points of
+  frames over 33ms (602 frames, the median 16.7ms, the longest 16.8ms); the
+  same page, browser, driver, server and session inside the Playwright test
+  runner read 15.7–24.4 points. The difference is the process, not the page:
+  the painted filters, the scroll range and the element count are identical
+  in both. The budget is gated on the plain-process number because that is
+  the environment a reader's browser is in, and the higher number is
+  published next to it. A reader whose raster threads are busy may see
+  something closer to the higher number.
+- **The opaque fallback is not automatic.** It is what a reader with
+  `prefers-reduced-transparency: reduce` or `forced-colors: active` gets,
+  what `print` gets, and what an engine without `backdrop-filter` gets. No
+  CSS feature exists that asks a browser whether it can afford a blur, so a
+  slow device keeps the glass until the reader asks for less transparency.
+- **Firefox renders the blur differently from Chromium.** Both engines
+  pass the same journeys — two filters, the effective rectangle, the
+  composited contrast, the modes and the preserved source — but the frames
+  are not expected to be pixel-identical, and they are not compared.
+- **`prefers-reduced-transparency: reduce` was not exercised.** Playwright
+  has no switch for it on this host, so the rule was read in the stylesheet
+  and not run. `forced-colors: active`, `prefers-reduced-motion: reduce`
+  and `print` were run in the live document.
+- **A screen reader was not run.** The bands changed their surface and
+  their caption colour; the roles, the names, the live regions and the
+  focus order are unchanged, but nothing here is a screen-reader claim.
+- **The native client is not covered.** `apps/desktop/style.css` keeps its
+  own `--vela-*` vocabulary and was not touched: the native underlap and the
+  native glass are DR-08's scope, and nothing here says a native window
+  renders a glass layer.
+- **The underlap is a layout change, not a data change.** No API, no
+  migration, no manifest, no static asset and no `media_assets` row was
+  touched; the two bands are styled by the existing `apps/web/style.css`,
+  which `scripts/build-web.sh` repackages into `dist/`.
+
 ## DR-01 the glass and motion token layer — 2026-10-22
 
 DR-01 declares the vocabulary and applies none of it. The measurements are

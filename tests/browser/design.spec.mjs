@@ -168,11 +168,26 @@ test('DESIGN01 high contrast, responsive music surfaces and navigation retain ac
             return [parts[0] || 0, parts[1] || 0, parts[2] || 0, parts[3] ?? 1];
           };
           const background = element => {
+            // DR02: a translucent band is not the surface of its first
+            // opaque ancestor. The translucent backgrounds between the element
+            // and that ancestor are composited in overlay order, so the
+            // measured contrast is the one of the text on the real surface.
+            const layers = [];
+            let base = null;
             for (let parent = element; parent; parent = parent.parentElement) {
               const color = rgb(getComputedStyle(parent).backgroundColor);
-              if (color[3] === 1) return color;
+              if (color[3] === 0) continue;
+              if (color[3] === 1) { base = color; break; }
+              layers.push(color);
             }
-            return rgb(getComputedStyle(document.body).backgroundColor);
+            if (!base) base = rgb(getComputedStyle(document.body).backgroundColor);
+            let result = base;
+            for (const layer of layers.reverse()) {
+              result = [0, 1, 2]
+                .map(at => layer[at] * layer[3] + result[at] * (1 - layer[3]))
+                .concat(1);
+            }
+            return result;
           };
           const luminance = channels => channels.slice(0, 3).map(value => value / 255)
             .map(value => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4)

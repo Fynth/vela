@@ -261,10 +261,15 @@
   background:var(--vela-scrollbar); border:2px solid transparent;
   border-radius:8px; background-clip:content-box;
 }
+/* DR02: the content column now spans every shell row, so the one scroller
+   runs under the two floating bands instead of stopping above them. The one
+   bottom reserve — plus 24px of air — belongs to the content wrapper: it is
+   what lets the last row scroll fully above the player and the navigation. */
 .content-inner {
   width:100%; max-width:var(--vela-content-max); min-width:0;
   margin:0 auto;
-  padding:var(--vela-content-top) max(var(--vela-gutter), var(--vela-safe-right)) 24px
+  padding:var(--vela-content-top) max(var(--vela-gutter), var(--vela-safe-right))
+    calc(var(--vela-bottom-reserve) + 24px)
     max(var(--vela-gutter), var(--vela-safe-left));
 }
 .player-center {
@@ -1210,7 +1215,7 @@ input::placeholder { color:var(--quiet); opacity:1; }
   .app-shell>.mobile-nav>button.active {
     color:var(--vela-nav-active-text); background:var(--vela-nav-active);
   }
-  .content-inner { padding-bottom:20px; }
+  .content-inner { padding-bottom:calc(var(--vela-bottom-reserve) + 20px); }
   .queue-panel { bottom:var(--vela-bottom-reserve); }
   /* DR05: the recovery status moved into `.feedback-stack`, which owns the
      bottom offset itself. The old per-instance fixed `bottom` rule is gone,
@@ -1772,7 +1777,7 @@ input[type="range"]:focus { outline:2px solid var(--accent); outline-offset:3px;
    first primary action is never pushed under the transport. */
 @media (max-width:760px) and (max-height:640px) {
   :root { --vela-content-top:16px; }
-  .content-inner { padding-bottom:16px; }
+  .content-inner { padding-bottom:calc(var(--vela-bottom-reserve) + 16px); }
   .content-footer { margin:28px 0 14px; padding-top:16px; }
   .empty-state, .empty-state.compact { min-height:180px; }
   .home-header { margin-bottom:12px; }
@@ -1877,6 +1882,152 @@ input[type="range"]:focus { outline:2px solid var(--accent); outline-offset:3px;
   .now-playing-idle .now-playing-meta strong { font-size:12px; font-weight:600; white-space:normal; }
   .now-playing-idle .now-playing-meta small { font-size:10px; font-weight:400; }
   .player-buttons { gap:4px; }
+}
+
+/* ============================================================================
+   DR02 — one main scroller under two glass bands --------------------------
+   The catalog used to stop above the topbar and the player: the scroller was
+   a sibling band and the two strips were opaque, so the library never looked
+   like it continued. This section makes the content column span every shell
+   row, pulls the one scroller up under the topbar and lets the two bands
+   float over the real rows and covers.
+
+   The geometry is declared once and only here:
+     - `.main-content` spans rows 1..-1. The sidebar keeps column 1 row 1,
+       the player keeps row 2 and the mobile navigation keeps row 3.
+     - `.main-scroll` moves up by exactly the topbar height plus the one
+       safe top inset and takes the same amount back as padding, so the first
+       heading keeps its old y and the first frame does not jump.
+     - `.content-inner` owns the one bottom reserve plus 24px (20px on the
+       mobile composition), so the last row can always be scrolled above the
+       bands. No page adds a spacer of its own.
+     - `scroll-padding` keeps a focused target inside the effective rectangle
+       between the two bands with 8px to spare.
+
+   The glass is progressive. The opaque surfaces stay the base, and one
+   `@supports` block paints the two floating bands with the DR01 glass roles.
+   The collection stays opaque — sidebar, navigation, rows, grids, panels and
+   the inner dialog surfaces: a blur over a long list is a jank and a
+   readability cost, not a depth cue.
+   ============================================================================ */
+.main-content { grid-row: 1 / -1; }
+@media (max-width: 760px) {
+  .main-content { grid-column: 1; grid-row: 1 / -1; }
+}
+.main-scroll {
+  /* The one scroller starts under the topbar and ends under the player. */
+  margin-top: calc(-1 * (var(--vela-topbar-height) + var(--vela-safe-top)));
+  padding-top: calc(var(--vela-topbar-height) + var(--vela-safe-top));
+  /* A focused target lands inside the effective rectangle between the two
+     bands, never under a strip. */
+  scroll-padding-top: calc(var(--vela-topbar-height) + var(--vela-safe-top) + 8px);
+  scroll-padding-bottom: calc(var(--vela-bottom-reserve) + 8px);
+  /* The scroller is painted before the two bands — a positioned box with
+     `z-index: auto` is painted in an earlier phase than a band with a
+     positive `z-index` — so the bands' glass samples the content that
+     scrolls under them. The scroller deliberately does **not** open a
+     stacking context of its own: a row's action menu is a descendant of the
+     scroller, and a stacking context here would trap that menu (and the
+     mobile action sheet) below the player and below the DR-05 receipt. */
+  position: relative;
+}
+
+@supports ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))) {
+  /* The two floating bands are the only glass surfaces of the shell. Without
+     the support query the reader gets the same two opaque bands. */
+  .app-shell > .player-bar,
+  .main-content > .topbar {
+    background: var(--vela-glass-bg);
+    color: var(--vela-glass-text);
+  }
+  .main-content > .topbar {
+    -webkit-backdrop-filter: blur(var(--vela-glass-blur-topbar));
+    backdrop-filter: blur(var(--vela-glass-blur-topbar));
+    border-bottom-color: var(--vela-glass-border);
+    box-shadow: inset 0 1px var(--vela-glass-highlight);
+  }
+  .app-shell > .player-bar {
+    -webkit-backdrop-filter: blur(var(--vela-glass-blur));
+    backdrop-filter: blur(var(--vela-glass-blur));
+    /* The one soft outer shadow of the shell belongs to the player; the
+       topbar keeps the top edge highlight and nothing else. */
+    box-shadow: inset 0 1px var(--vela-glass-highlight), var(--vela-glass-shadow);
+  }
+  /* The mobile composition is the same band with the smaller radius and its
+     own 1px edge. */
+  @media (max-width: 760px) {
+    .app-shell > .player-bar {
+      -webkit-backdrop-filter: blur(var(--vela-glass-blur-mobile));
+      backdrop-filter: blur(var(--vela-glass-blur-mobile));
+      border-top-color: var(--vela-glass-border);
+    }
+  }
+  /* DR04's hairline keeps its one pixel and its place; only its colour comes
+     from the glass role now. */
+  @media (min-width: 761px) {
+    .app-shell > .player-bar::before { background: var(--vela-glass-border); }
+  }
+  /* A caption on a glass band cannot use the quiet role: over a light cover
+     it falls to about 3:1. The hierarchy is carried by the size and the
+     weight, never by the opacity of the text. */
+  .app-shell > .player-bar .player-time,
+  .app-shell > .player-bar .player-artist,
+  .app-shell > .player-bar .player-album,
+  .app-shell > .player-bar .player-quality-format,
+  .app-shell > .player-bar .player-quality small,
+  .main-content > .topbar .breadcrumb {
+    color: var(--vela-glass-text);
+  }
+  .app-shell > .player-bar .player-time,
+  .app-shell > .player-bar .player-artist,
+  .app-shell > .player-bar .player-quality-format {
+    font-weight: 500;
+  }
+}
+
+/* Reduced motion: the glass is a static surface, so nothing on the two bands
+   animates. The global override already covers every element; this states the
+   contract for the bands and their pseudo-elements. */
+@media (prefers-reduced-motion: reduce) {
+  .app-shell > .player-bar,
+  .main-content > .topbar,
+  .app-shell > .player-bar::before,
+  .main-content > .topbar::before {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+/* Forced colours and reduced transparency: the bands go back to their opaque
+   roles and the blur is removed. A forced palette and a translucent surface
+   cannot be reconciled, and a reader who asked for less transparency gets
+   less transparency. */
+@media (forced-colors: active), (prefers-reduced-transparency: reduce) {
+  .app-shell > .player-bar {
+    background: var(--vela-player-bg);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    box-shadow: none;
+  }
+  .main-content > .topbar {
+    background: var(--vela-bg);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    box-shadow: none;
+  }
+  /* The mobile composition has its own opaque role for the same band. */
+  @media (max-width: 760px) {
+    .app-shell > .player-bar { background: var(--vela-mobile-player); }
+  }
+}
+/* Print: no blur and no shadow. */
+@media print {
+  .app-shell > .player-bar,
+  .main-content > .topbar {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    box-shadow: none;
+  }
 }
 
 /* DR01: reduce zeroes the eight duration roles, so a component that reads a

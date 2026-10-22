@@ -236,14 +236,14 @@ colours:
 
 | Role | Value | Declared at | Consumer |
 | --- | --- | --- | --- |
-| `--vela-glass-bg` | `#131513d9` (dark) / `#f4f7f3e6` (light) | `apps/web/style.css:89` / `:217` | none yet — DR-02 owns the surfaces |
-| `--vela-glass-blur` | `16px` | `apps/web/style.css:90` | none yet — DR-02 |
-| `--vela-glass-blur-mobile` | `12px` | `apps/web/style.css:91` | none yet — DR-02 |
-| `--vela-glass-blur-topbar` | `12px` | `apps/web/style.css:92` | none yet — DR-02 |
-| `--vela-glass-border` | `#ffffff14` (dark) / `#14271c14` (light) | `apps/web/style.css:93` / `:218` | none yet — DR-02 |
-| `--vela-glass-highlight` | `#ffffff0f` (dark) / `#ffffffb3` (light) | `apps/web/style.css:94` / `:219` | none yet — DR-02 |
-| `--vela-glass-shadow` | `0 18px 50px #00000059` (dark) / `0 18px 50px #21372924` (light) | `apps/web/style.css:95` / `:220` | none yet — DR-02 |
-| `--vela-glass-text` | `var(--vela-text)` | `apps/web/style.css:96` | none yet — DR-02 |
+| `--vela-glass-bg` | `#131513d9` (dark) / `#f4f7f3e6` (light) | `apps/web/style.css:89` / `:217` | the two floating bands — the player and the topbar (DR-02) |
+| `--vela-glass-blur` | `16px` | `apps/web/style.css:90` | the desktop player band (DR-02) |
+| `--vela-glass-blur-mobile` | `12px` | `apps/web/style.css:91` | the mobile player band (DR-02) |
+| `--vela-glass-blur-topbar` | `12px` | `apps/web/style.css:92` | the topbar band (DR-02) |
+| `--vela-glass-border` | `#ffffff14` (dark) / `#14271c14` (light) | `apps/web/style.css:93` / `:218` | the player's hairline and the topbar's bottom edge (DR-02) |
+| `--vela-glass-highlight` | `#ffffff0f` (dark) / `#ffffffb3` (light) | `apps/web/style.css:94` / `:219` | the top-edge inset highlight of both bands (DR-02) |
+| `--vela-glass-shadow` | `0 18px 50px #00000059` (dark) / `0 18px 50px #21372924` (light) | `apps/web/style.css:95` / `:220` | the one soft outer shadow of the player band (DR-02) |
+| `--vela-glass-text` | `var(--vela-text)` | `apps/web/style.css:96` | the captions of both bands (DR-02) |
 | `--vela-motion-instant` | `80ms` | `apps/web/style.css:97` | none yet — DR-03 |
 | `--vela-motion-quick` | `120ms` | `apps/web/style.css:98` | none yet — DR-03 |
 | `--vela-motion-overlay` | `140ms` | `apps/web/style.css:99` | none yet — DR-03 |
@@ -286,11 +286,13 @@ not a contrast claim.** The declared background is `#131513d9` and
 state. This says nothing about legibility over artwork, and the contrast
 over an image is DR-02's work — it is not claimed here.
 
-**Nothing consumes the roles yet.** A grep over `apps/web/*.css` and
-`apps/web/src/**/*.rs` finds no reader of `--vela-glass-*`, `--vela-motion-*`
-or `--vela-ease-*`; the only occurrences are the declarations themselves
-and the permanent spec that reads them back. The package's result is the
-vocabulary, not a surface.
+**The glass roles now have two consumers; the motion roles still have none.**
+DR-02 (below) reads `--vela-glass-*` for the two floating bands — the player
+and the topbar — inside one `@supports` block. A grep over `apps/web/*.css`
+and `apps/web/src/**/*.rs` still finds **no** reader of `--vela-motion-*` or
+`--vela-ease-*`: the only occurrences are the declarations themselves and
+the permanent specs that read them back. DR-01's result is the vocabulary,
+and DR-02 is the first surface built on it.
 
 The [ADR0023](DECISIONS/0023-contrast-and-listening-layout.md) decisions
 stay in force and are not revisited here: the contrast-qualified roles are
@@ -302,6 +304,66 @@ Firefox, 1284×856 and 390×844, both themes) is in
 [QA_EVIDENCE](QA_EVIDENCE.md); the permanent gate is
 `tests/browser/dr01-tokens.spec.mjs`.
 
+
+## DR-02 the two floating glass bands — 2026-10-22
+
+DR-02 is the first package that gives the DR-01 vocabulary a surface. The
+shell keeps its grid, its sidebar, its one HTMLMediaElement and its one
+scroller; what changes is that the catalog now **continues under** the
+topbar and the player instead of stopping above them.
+
+**The geometry is declared once** (`apps/web/style.css`, the DR-02 section
+at the end of the file, before the DR-01 reduce block):
+
+| Rule | Value | Why |
+| --- | --- | --- |
+| `.main-content` | `grid-row: 1 / -1` (desktop and mobile) | the content column spans every shell row: the sidebar keeps column 1 row 1, the player keeps row 2, the mobile navigation keeps row 3 |
+| `.main-scroll` | `margin-top: calc(-1 * (var(--vela-topbar-height) + var(--vela-safe-top)))` and the same value as `padding-top` | the one scroller starts under the topbar and the first heading keeps its old y — the frame does not jump |
+| `.main-scroll` | `scroll-padding-top: calc(topbar + safe-top + 8px)`, `scroll-padding-bottom: calc(var(--vela-bottom-reserve) + 8px)` | a focused target lands inside the effective rectangle between the two bands with 8px to spare |
+| `.content-inner` | `padding-bottom: calc(var(--vela-bottom-reserve) + 24px)` (mobile `+20px`, short height `+16px`) | the one content reserve: the last row can always be scrolled above the bands. No page adds a spacer of its own |
+| `.main-scroll` | `position: relative` and **no** stacking context of its own | a positioned box with `z-index: auto` is painted before the two bands, so their glass samples the content that scrolls under them. The scroller must not open a stacking context: a row's action menu and the mobile action sheet are its descendants, and a context here would trap them below the player and below the DR-05 receipt |
+
+**The effective visible rectangle** is `scroller.top + topbar (+ safe top)`
+to `scroller.bottom - reserve`: 75→768 at 1284×856, 63→654 at 390×844.
+`--vela-bottom-reserve` is unchanged — 88 on the desktop, 120+70+safe-bottom
+on the mobile composition — and it is now the height of the bands the
+scroller floats over rather than a gap above them.
+
+**The glass is progressive.** The opaque surfaces stay the base; one
+`@supports ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px)))`
+block paints the two bands:
+
+- the player and the topbar take `--vela-glass-bg` and `--vela-glass-text`;
+- the topbar blurs with `--vela-glass-blur-topbar` (12px), the desktop player
+  with `--vela-glass-blur` (16px), the mobile player with
+  `--vela-glass-blur-mobile` (12px);
+- the player's DR-04 hairline keeps its one pixel and takes
+  `--vela-glass-border`; the topbar's bottom edge takes the same role;
+- both bands carry the `--vela-glass-highlight` inset on their top edge;
+- the **one** soft outer shadow (`--vela-glass-shadow`) belongs to the
+  player. The topbar has no second outer shadow.
+
+**The collection stays opaque.** The sidebar, the mobile navigation, the
+rows, the grids, the cards, the panels and the inner surfaces of the dialogs
+carry no filter: a blur over a long list is a jank and a readability cost.
+The only other filtered surface in the product is the `::backdrop` of an
+open native dialog, so at most **three** filters are visible at once.
+
+**The captions on a glass band use `--vela-glass-text`, not the quiet
+role.** Over a light cover the quiet role (`#798372`) falls to about
+3.07:1 on the composited surface, which is a failure. The hierarchy on the
+bands is therefore carried by the **size and the weight** — the title 12px/600,
+the artist, the time and the quality format 10px/500, the album and the
+quality caption 10px/400 — and never by the opacity of the text.
+
+**The modes are explicit.** `prefers-reduced-motion: reduce` keeps the static
+glass and sets `transition:none` / `animation:none` on both bands and their
+pseudo-elements. `forced-colors: active` and
+`prefers-reduced-transparency: reduce` return the bands to their opaque
+roles (`--vela-player-bg`, `--vela-mobile-player`, `--vela-bg`) and remove
+the blur. `print` removes the blur and the shadow. Without the
+`@supports` query the two opaque bands are the fallback. No new hex value
+and no new role was introduced: the bands read the DR-01 vocabulary only.
 
 Web sidebar scrolls as one region on short windows. Native shell is one two-column
 grid with one content scroll owner and one bottom player row; count sidebar width

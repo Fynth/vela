@@ -2923,6 +2923,118 @@ Executed, not claimed: `cargo fmt --check`; strict `cargo clippy -p vela-web
 --all-targets -- -D warnings`; strict wasm32 clippy; `cargo test -p vela-web`
 (45 passed); release web build; full Chromium Playwright suite.
 
+## DR-02 one main scroller under two glass bands (2026-10-22)
+
+The library now **continues under** the topbar and the player. Before this
+package the main scroller was a sibling band: it ended above the two
+strips, and the strips were opaque, so the catalog looked cut off. The
+shell keeps its grid, its sidebar, its one HTMLMediaElement and its one
+scroller; what changed is the geometry of that scroller and the surface of
+the two floating bands.
+
+What changed in the source — `apps/web/style.css` only, no Rust:
+
+- `.main-content` spans `grid-row: 1 / -1` on the desktop and on the
+  mobile composition (the sidebar keeps column 1 row 1, the player keeps
+  row 2, the mobile navigation keeps row 3). The content column now
+  reaches the bottom of the shell.
+- `.main-scroll` moves up by exactly `calc(-1 * (var(--vela-topbar-height)
+  + var(--vela-safe-top)))` and takes the same amount back as `padding-top`,
+  so the scroller starts under the topbar while the first heading keeps
+  its old y. It also gets `scroll-padding-top: calc(topbar + safe-top +
+  8px)`, `scroll-padding-bottom: calc(var(--vela-bottom-reserve) + 8px)`
+  and `position: relative` — and deliberately **no** stacking context of
+  its own. A positioned box with `z-index: auto` is painted before the two
+  bands, which is all the glass needs, while a `z-index: 0` context here
+  would trap a row's action menu and the mobile action sheet below the
+  player and below the DR-05 receipt. The plan's `z-index: 0` was tried
+  first and the music suite caught it: with it, the "Add to playlist…"
+  item of an open row menu was covered by the receipt; the same test
+  passes with the shipped stylesheet and failed with the `z-index: 0`
+  variant, and the original stylesheet passes as well.
+- `.content-inner` owns the one bottom reserve: `padding-bottom:
+  calc(var(--vela-bottom-reserve) + 24px)`, `+20px` on the mobile
+  composition and `+16px` in the short-height window. No page adds a
+  spacer of its own.
+- One `@supports ((backdrop-filter:blur(1px)) or
+  (-webkit-backdrop-filter:blur(1px)))` block paints the two bands with the
+  DR-01 roles: the topbar blurs with `--vela-glass-blur-topbar` (12px),
+  the desktop player with `--vela-glass-blur` (16px), the mobile player
+  with `--vela-glass-blur-mobile` (12px); the DR-04 hairline keeps its one
+  pixel and takes `--vela-glass-border`; both bands carry the
+  `--vela-glass-highlight` inset on their top edge; the one soft outer
+  shadow (`--vela-glass-shadow`) belongs to the player alone.
+- The captions on a glass band read `--vela-glass-text` instead of the
+  quiet role, and the hierarchy is carried by size and weight (the title
+  12px/600, the artist, the time and the quality format 10px/500, the
+  album and the quality caption 10px/400) instead of by opacity.
+- The modes are explicit: `prefers-reduced-motion: reduce` keeps the
+  static glass and silences the bands; `forced-colors: active` and
+  `prefers-reduced-transparency: reduce` return the bands to their opaque
+  roles and remove the blur; `print` removes the blur and the shadow.
+
+The collection stays opaque: the sidebar, the mobile navigation, the rows,
+the grids, the cards, the panels and the inner surfaces of the dialogs
+carry no filter. The only other filtered surface in the product is the
+`::backdrop` of an open native dialog.
+
+Measured, in Chromium and in Firefox, on a real account with real
+uploaded tracks — the details and the artifacts are in
+[QA_EVIDENCE](QA_EVIDENCE.md) and [PERFORMANCE.md](PERFORMANCE.md):
+
+- The effective rectangle is `scroller.top + topbar (+ safe top)` to
+  `scroller.bottom - reserve`: **75→768** at 1284×856 and **63→654** at
+  390×844. The scroller now reaches the bottom of the viewport, and the
+  reserve is the height of the bands it floats over.
+- At scroll 0 the first heading keeps its y: the content wrapper starts
+  at the bottom of the topbar (75 / 63) and the heading at
+  `topbar.bottom + --vela-content-top`.
+- Real rows pass under both bands while scrolling, and the last row of
+  the list still ends entirely above the player.
+- Exactly **two** visible `backdrop-filter` consumers (the topbar and the
+  player) and **three** with one overlay open; no row, grid or panel
+  carries a filter.
+- The composited contrast over the measured bright cover
+  (`rgb(246, 243, 224)`, read from the uploaded fixture's own artwork)
+  is **10.89:1** for the band captions in the dark theme and **14.50:1**
+  in the light theme; the transport glyphs are **4.61:1** and **7.06:1**,
+  and the focus ring **10.89:1** / **14.50:1**. The in-situ measurement
+  over the real painted backdrop pixels is never worse than the
+  analytical one.
+- Scrolling, the theme and the queue keep the same media element, the
+  same source, the same generation and a position that never rewinds.
+- The frame budget: with the glass, 602 frames in ten seconds, the median
+  frame 16.7ms, the longest 16.8ms and **zero** frames over 33ms — the
+  same numbers as the opaque fallback, so the glass costs **0.00 points**
+  against the plan's 5-point budget. The measurement runs in a browser
+  process the test runner does not instrument: the same page, browser,
+  driver, server and session read 15.7–24.4 points inside the runner, and
+  the difference is the harness, not the product. The renderer here is
+  SwiftShader, so a GPU-backed stand is NOT_RUN.
+
+The permanent gate is `tests/browser/dr02-glass.spec.mjs` (7 journeys) and
+the frame budget's own helper `tests/browser/dr02-frame-budget.mjs`. The
+geometric assertions of the older suites that described the
+*non-overlapping* siblings were updated to the new contract — the scroller
+now ends at the viewport bottom and the content is measured against the
+effective rectangle — and the opaque-surface assertions of TR01/TR03 now
+read the glass colour when the engine can blur a backdrop.
+
+The Rust gate is green and unchanged by this package (no Rust file was
+touched): `cargo fmt --all -- --check` exit 0; `cargo clippy --locked
+--workspace --all-targets -- -D warnings` exit 0; `cargo test --locked
+--workspace -- --test-threads=2` **380 passed, 0 failed, 3 ignored**;
+`cargo build --locked -p vela-web --target wasm32-unknown-unknown
+--release` exit 0; `cargo build --locked -p vela-server` exit 0;
+`scripts/build-web.sh` exit 0 (wasm-bindgen 0.2.129) into `dist/`; and
+`cmp apps/web/style.css dist/style.css` is identical — the CSS is
+repackaged by the existing build, and no new static path was added.
+
+The whole browser suite is green in both engines: Chromium **89 passed,
+1 skipped** (the opt-in live import), 6.2m; Firefox **89 passed, 1
+skipped**, 7.5m. The seven new DR-02 journeys alone: Chromium 7/7 and
+Firefox 7/7.
+
 ## DR-01 one glass and motion vocabulary (2026-10-22)
 
 The token layer, and nothing else. `apps/web/style.css` now declares one

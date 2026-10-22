@@ -130,6 +130,20 @@ function near(actual, expected, tolerance = 0.75) {
   expect.soft(Math.abs(actual - expected), `${actual} should be ${expected}±${tolerance}`).toBeLessThanOrEqual(tolerance);
 }
 
+/**
+ * DR02: a colour with an alpha, compared channel by channel. The engine
+ * rounds the alpha of a computed colour, so an exact string would be a
+ * statement about the engine's rounding rather than about the design.
+ */
+function expectGlassColour(actual, channels, alpha, label) {
+  const parts = String(actual).match(/[\d.]+/g);
+  expect.soft(parts, `${label} is a colour`).not.toBeNull();
+  expect.soft(Number(parts[0]), `${label} red`).toBe(channels[0]);
+  expect.soft(Number(parts[1]), `${label} green`).toBe(channels[1]);
+  expect.soft(Number(parts[2]), `${label} blue`).toBe(channels[2]);
+  expect.soft(Number(parts[3]), `${label} alpha`).toBeCloseTo(alpha, 2);
+}
+
 test('TR01 self-hosted Manrope subsets load with no runtime font CDN and keep role names collision-safe', async ({ page }) => {
   test.setTimeout(90000);
   // Keep evidence outside Playwright's own outputDir so a concurrent suite run
@@ -227,10 +241,13 @@ test('TR01 self-hosted Manrope subsets load with no runtime font CDN and keep ro
       sidebar: getComputedStyle(document.querySelector('.sidebar')).backgroundColor,
       player: getComputedStyle(document.querySelector('.player-bar')).backgroundColor,
       topbarBorder: getComputedStyle(document.querySelector('.topbar')).borderBottomColor,
+      // DR02: the two floating bands are glass where the engine can blur a
+      // backdrop, and the same two opaque roles where it cannot.
+      glass: CSS.supports('backdrop-filter', 'blur(1px)') || CSS.supports('-webkit-backdrop-filter', 'blur(1px)'),
     }));
     expect(surfaces.body).toBe('rgb(19, 21, 19)');
     expect(surfaces.sidebar).toBe('rgb(14, 16, 15)');
-    expect(surfaces.player).toBe('rgb(16, 19, 15)');
+    expect(surfaces.player).toBe(surfaces.glass ? 'rgba(19, 21, 19, 0.85)' : 'rgb(16, 19, 15)');
 
     // Light stays a real, separate adaptation of the same canonical roles.
     await page.getByRole('button', { name: 'Change color theme', exact: true }).click();
@@ -399,7 +416,11 @@ test('TR02 shell reserves one sidebar offset and one player band with one centra
         near(measured.nav.height, 70);
         near(measured.nav.bottom, height);
         expect.soft(measured.nav.display, `${width} mobile navigation visible`).toBe('flex');
-        near(measured.scroller.bottom, measured.player.top);
+        // DR02: the one scroller runs under the two floating bands instead of
+        // stopping above them. The effective rectangle it leaves for the
+        // content is the scroller minus the reserved bands.
+        near(measured.scroller.bottom, height);
+        near(measured.scroller.bottom - measured.player.height - measured.nav.height, measured.player.top);
         expect.soft(measured.sidebarLeftGap, `${width} no double left offset`).toBeCloseTo(0, 0);
       } else {
         expect.soft(measured.sidebar.display, `${width} sidebar visible`).not.toBe('none');
@@ -409,7 +430,11 @@ test('TR02 shell reserves one sidebar offset and one player band with one centra
         near(measured.topbar.paddingLeft, gutter);
         near(measured.player.height, playerHeight);
         near(measured.player.bottom, height);
-        near(measured.scroller.bottom, measured.player.top);
+        // DR02: the scroller reaches the bottom of the viewport and the
+        // player floats over it; the effective bottom of the content is the
+        // top of the player band.
+        near(measured.scroller.bottom, height);
+        near(measured.scroller.bottom - measured.player.height, measured.player.top);
         expect.soft(measured.nav.display, `${width} no mobile navigation`).toBe('none');
         // Centered inside the main column only: equal side gaps, never a
         // window-centered band that ignores the sidebar offset.
@@ -426,7 +451,11 @@ test('TR02 shell reserves one sidebar offset and one player band with one centra
       }));
       near(afterScroll.topbar, measured.topbarScroll.before);
       near(afterScroll.player, mobile ? height - 70 : height);
-      expect.soft(clearance.footerBottom, `${width} last row above player`).toBeLessThanOrEqual(clearance.scrollerBottom + 1);
+      // DR02: the scroller now reaches the bottom of the viewport, so the
+      // footer is measured against the effective bottom of the content — the
+      // top of the floating bands — and not against the scroller itself.
+      expect.soft(clearance.footerBottom, `${width} last row above player`)
+        .toBeLessThanOrEqual(clearance.playerTop + 1);
       expect.soft(clearance.footerTop, `${width} footer starts below topbar`).toBeGreaterThanOrEqual(clearance.topbarTop + clearance.topbarHeight - 1);
 
       await page.locator('#main-scroll').evaluate(element => { element.scrollTop = 0; });
@@ -464,7 +493,8 @@ test('TR02 shell reserves one sidebar offset and one player band with one centra
       expect.soft(zoomed.topbarHeight, `${zoom} topbar scales once`).toBeCloseTo(75 * zoom, 0);
       expect.soft(zoomed.playerHeight, `${zoom} player scales once`).toBeCloseTo(88 * zoom, 0);
       expect.soft(zoomed.playerBottom, `${zoom} player ends at viewport`).toBeCloseTo(zoomed.innerHeight, 0);
-      expect.soft(zoomed.scrollerBottom, `${zoom} scroller ends above player`).toBeCloseTo(zoomed.playerBottom - zoomed.playerHeight, 0);
+      expect.soft(zoomed.scrollerBottom, `${zoom} scroller reaches the viewport bottom`).toBeCloseTo(zoomed.innerHeight, 0);
+      expect.soft(zoomed.scrollerBottom - zoomed.playerHeight, `${zoom} the effective bottom is the player top`).toBeCloseTo(zoomed.playerBottom - zoomed.playerHeight, 0);
       expect.soft(zoomed.overflow, `${zoom} no zoom overflow`).toBeLessThanOrEqual(1);
       await page.evaluate(previousValue => {
         if (previousValue) document.documentElement.style.setProperty('--app-zoom', previousValue);
@@ -651,8 +681,14 @@ test('TR03 persistent player projects the root engine with reference geometry an
     const lightPlayer = await page.evaluate(() => ({
       background: getComputedStyle(document.querySelector('.player-bar')).backgroundColor,
       face: getComputedStyle(document.querySelector('.play-toggle-face')).backgroundColor,
+      // DR02: the light theme paints the same glass band.
+      glass: CSS.supports('backdrop-filter', 'blur(1px)') || CSS.supports('-webkit-backdrop-filter', 'blur(1px)'),
     }));
-    expect(lightPlayer.background).toBe('rgb(255, 255, 255)');
+    if (lightPlayer.glass) {
+      expectGlassColour(lightPlayer.background, [244, 247, 243], 230 / 255, 'the light glass surface');
+    } else {
+      expect(lightPlayer.background).toBe('rgb(255, 255, 255)');
+    }
     expect(lightPlayer.face).toBe('rgb(8, 117, 76)');
     await page.getByRole('button', { name: 'Change color theme', exact: true }).click();
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
@@ -958,6 +994,9 @@ test('TR03 persistent player projects the root engine with reference geometry an
           volume: volume ? { width: volume.getBoundingClientRect().width, value: volume.value } : null,
           nav: box('.mobile-nav'),
           overflow: document.documentElement.scrollWidth - innerWidth,
+          // DR02: the two floating bands are glass where the engine can blur
+          // a backdrop and the same opaque roles where it cannot.
+          glass: CSS.supports('backdrop-filter', 'blur(1px)') || CSS.supports('-webkit-backdrop-filter', 'blur(1px)'),
           titleText: document.querySelector('.now-playing strong.player-title')?.textContent,
           qualityText: document.querySelector('.player-quality-format')?.textContent,
           audio: (() => {
@@ -985,13 +1024,24 @@ test('TR03 persistent player projects the root engine with reference geometry an
           .toBeCloseTo(height - (measured.nav.display === 'none' ? 0 : measured.nav.height), 0.75);
         expect.soft(measured.player.paddingLeft, `${width} player gutter`).toBeCloseTo(26, 0.75);
         expect.soft(measured.player.paddingTop, `${width} player vertical padding`).toBeCloseTo(10, 0.75);
-        expect.soft(measured.player.backgroundColor, `${width} player surface`).toBe('rgb(16, 19, 15)');
+        // DR02: the player is one of the two floating glass bands where the
+        // engine can blur a backdrop, and the same opaque band where it
+        // cannot. The geometry below is the same in both cases.
+        if (measured.glass) {
+          expectGlassColour(measured.player.backgroundColor, [19, 21, 19], 217 / 255, `${width} player glass surface`);
+        } else {
+          expect.soft(measured.player.backgroundColor, `${width} player surface`).toBe('rgb(16, 19, 15)');
+        }
         // DR04: the physical 1px top border is replaced by a hairline that does
         // not take vertical space, so the band still measures 88px and the
         // transport column can own the whole height.
         expect.soft(measured.player.borderTopWidth, `${width} the physical player border is gone`).toBe(0);
         expect.soft(measured.hairline.height, `${width} hairline height`).toBe('1px');
-        expect.soft(measured.hairline.backgroundColor, `${width} hairline color`).toBe('rgb(52, 59, 46)');
+        if (measured.glass) {
+          expectGlassColour(measured.hairline.backgroundColor, [255, 255, 255], 20 / 255, `${width} glass hairline colour`);
+        } else {
+          expect.soft(measured.hairline.backgroundColor, `${width} hairline color`).toBe('rgb(52, 59, 46)');
+        }
         expect.soft(measured.hairline.pointerEvents, `${width} the hairline never takes a click`).toBe('none');
         expect.soft(measured.center.top, `${width} the transport column owns the band`).toBeCloseTo(measured.player.top, 0.75);
         expect.soft(measured.center.bottom, `${width} the transport column owns the band`).toBeCloseTo(measured.player.bottom, 0.75);
@@ -2142,6 +2192,9 @@ const TR09_GEOMETRY = () => {
     player: rect('.player-bar'), nav: rect('.mobile-nav'), sidebar: rect('.sidebar'),
     playerSurface: getComputedStyle(document.querySelector('.player-bar')).backgroundColor,
     navSurface: getComputedStyle(document.querySelector('.mobile-nav')).backgroundColor,
+    // DR02: the player is one of the two glass bands where the engine can
+    // blur a backdrop, and the same opaque band where it cannot.
+    glass: CSS.supports('backdrop-filter', 'blur(1px)') || CSS.supports('-webkit-backdrop-filter', 'blur(1px)'),
     playerNow, playerCenter, playerRight,
     zoneOverlaps: {
       nowCenter: intersects(playerNow, playerCenter),
@@ -2623,9 +2676,15 @@ test('TR09 mobile composition, tablet boundaries and one reserved bottom band', 
       expect.soft(measured.zoneOverlaps.nowCenter, `${width} title zone clear of transport`).toBe(false);
       expect.soft(measured.zoneOverlaps.centerRight, `${width} transport clear of the right zone`).toBe(false);
 
-      // The reserve the layout consumed equals the space the scroller ends above.
-      expect.soft(measured.reserve, `${width} bottom reserve`).toBeCloseTo(height - measured.scroller.bottom, 0);
-      expect.soft(measured.scroller.bottom, `${width} scroller ends above the bands`).toBeLessThanOrEqual(measured.player.y + 1);
+      // DR02: the one scroller now runs under the two floating bands. The
+      // reserve is the height of the bands it floats over, and the effective
+      // bottom of the content is the top of the lowest band.
+      expect.soft(measured.scroller.bottom, `${width} the scroller reaches the viewport bottom`).toBeCloseTo(height, 0);
+      expect.soft(measured.reserve, `${width} bottom reserve`).toBeCloseTo(
+        measured.player.height + (measured.nav.display === 'none' ? 0 : measured.nav.height), 0,
+      );
+      expect.soft(measured.scroller.bottom - measured.reserve, `${width} the effective bottom is the band top`)
+        .toBeCloseTo(measured.player.y, 0);
 
       if (band === 'mobile') {
         expect.soft(measured.sidebar?.display, `${width} no sidebar`).toBe('none');
@@ -2635,7 +2694,14 @@ test('TR09 mobile composition, tablet boundaries and one reserved bottom band', 
         expect.soft(measured.player.height, `${width} mini-player band`).toBeCloseTo(120, 0);
         expect.soft(measured.player.bottom, `${width} mini-player above navigation`).toBeCloseTo(measured.nav.y, 0);
         expect.soft(measured.topbar.height, `${width} mobile topbar`).toBeCloseTo(63, 0);
-        expect.soft(measured.playerSurface, `${width} mini-player uses the mobile player role`).toBe('rgb(28, 35, 24)');
+        // DR02: the mini-player is one of the two glass bands where the
+        // engine can blur a backdrop; without that support it keeps the
+        // mobile player role.
+        if (measured.glass) {
+          expectGlassColour(measured.playerSurface, [19, 21, 19], 217 / 255, `${width} the glass mini-player surface`);
+        } else {
+          expect.soft(measured.playerSurface, `${width} mini-player uses the mobile player role`).toBe('rgb(28, 35, 24)');
+        }
         expect.soft(measured.navSurface, `${width} navigation uses the mobile nav role`).toBe('rgb(16, 20, 14)');
         expect.soft(measured.playerRight?.display, `${width} desktop volume stays in the expanded player`).toBe('none');
         expect.soft(
@@ -2696,8 +2762,11 @@ test('TR09 mobile composition, tablet boundaries and one reserved bottom band', 
           topbar: document.querySelector('.topbar').getBoundingClientRect().top,
         };
       });
+      // DR02: the scroller reaches the bottom of the viewport, so the final
+      // footer is measured against the effective bottom of the content — the
+      // top of the topmost floating band, the player.
       expect.soft(clearance.footerBottom, `${width} final footer above the bands`)
-        .toBeLessThanOrEqual(clearance.scrollerBottom + 1);
+        .toBeLessThanOrEqual(clearance.playerTop + 1);
       await page.locator('#main-scroll').evaluate(element => { element.scrollTop = 0; });
       await settle(page);
       await page.screenshot({ path: `${output}/tr09-composition-${width}x${height}.png`, animations: 'disabled' });
@@ -2752,8 +2821,16 @@ test('TR09 safe-area insets are consumed once by the bands and the content gutte
     expect(insets.nav.height, 'the navigation row owns the bottom inset once').toBeCloseTo(70 + 34, 0);
     expect(insets.nav.bottom).toBeCloseTo(844, 0);
     expect(insets.player.bottom, 'the mini-player stays above the navigation band').toBeCloseTo(insets.nav.y, 1);
-    expect(insets.scroller.y, 'content starts below the topbar inset').toBeCloseTo(insets.topbar.bottom, 1);
-    expect(insets.reserve, 'the reserve includes the inset exactly once').toBeCloseTo(844 - insets.scroller.bottom, 0);
+    // DR02: the scroller starts under the topbar and reaches the bottom of
+    // the viewport, so the content — not the scroller — is what starts below
+    // the topbar inset, and the reserve is the height of the bands.
+    expect(insets.scroller.y, 'the scroller runs under the topbar').toBeLessThan(insets.topbar.bottom);
+    expect(insets.inner.y, 'content starts below the topbar inset').toBeCloseTo(insets.topbar.bottom, 1);
+    expect(insets.scroller.bottom, 'the scroller reaches the viewport bottom').toBeCloseTo(844, 0);
+    expect(insets.reserve, 'the reserve includes the inset exactly once')
+      .toBeCloseTo(insets.player.height + insets.nav.height, 0);
+    expect(insets.scroller.bottom - insets.reserve, 'the effective bottom is the top of the topmost band')
+      .toBeCloseTo(insets.player.y, 0);
     expect(insets.inner.paddingLeft, 'content gutter honours the left inset').toBeCloseTo(24, 0);
     expect(insets.inner.paddingRight, 'content gutter honours the right inset').toBeCloseTo(24, 0);
     expect(insets.player.paddingLeft, 'player respects the left inset').toBeCloseTo(24, 0);
@@ -2782,6 +2859,10 @@ test('TR09 safe-area insets are consumed once by the bands and the content gutte
     const wide = await page.evaluate(TR09_GEOMETRY);
     expect(wide.topbar.height).toBeCloseTo(99, 0);
     expect(wide.inner.paddingLeft, 'the wider of gutter and inset wins').toBeCloseTo(33, 0);
+    // DR02: the desktop topbar owns the top inset once, and the content
+    // starts below it — the scroller itself runs under the band.
+    expect(wide.inner.y, 'the content starts below the topbar inset').toBeCloseTo(wide.topbar.bottom, 1);
+    expect(wide.scroller.y, 'the scroller runs under the topbar').toBeLessThan(wide.topbar.bottom);
     expect(wide.documentOverflow).toBeLessThanOrEqual(1);
     await writeFile(`${output}/tr09-safe-area-evidence.json`, JSON.stringify({ baseline, insets, wide }, null, 2));
   } finally { await runtime.close(); }
@@ -2807,9 +2888,15 @@ test('TR09 short-height 390x600 keeps both bands reserved and every layer usable
     expect(short.nav.height, 'the navigation band stays reserved').toBeCloseTo(70, 0);
     expect(short.nav.bottom).toBeCloseTo(600, 0);
     expect(short.player.bottom).toBeCloseTo(short.nav.y, 0);
-    expect(short.scroller.bottom).toBeCloseTo(short.player.y, 0);
+    // DR02: the scroller reaches the bottom of the short viewport and the
+    // bands float over it; the effective bottom of the content is the top of
+    // the bands, the reserve is their height.
+    expect(short.scroller.bottom, 'the scroller reaches the viewport bottom').toBeCloseTo(600, 0);
+    expect(short.scroller.bottom - short.reserve, 'the effective bottom is the player top')
+      .toBeCloseTo(short.player.y, 0);
     expect(short.scroller.clientHeight, 'the content keeps a usable scroller').toBeGreaterThan(240);
-    expect(short.reserve).toBeCloseTo(600 - short.scroller.bottom, 0);
+    expect(short.reserve, 'the reserve is the height of the bands')
+      .toBeCloseTo(short.player.height + short.nav.height, 0);
 
     // The primary transport and every navigation tab stay fully inside the
     // visible viewport instead of being clipped by the short height.

@@ -1,5 +1,81 @@
 # Reproducible performance measurements
 
+## DR-02 the glass frame budget (2026-10-22)
+
+The two floating bands (the player and the topbar) are the only surfaces of
+the product that carry a `backdrop-filter`. This entry is the local budget
+for that filter: what the product costs when the catalog scrolls under the
+two bands, against the same scroll with the opaque fallback.
+
+**Stand.** Headless Chromium 156.0.8078.4 on Linux x86_64, viewport
+1284×856, no display server. The compositor's renderer is
+`ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero)), SwiftShader
+driver)` — **software rasterisation**; `/dev/dri` exists on this host but no
+GPU-backed browser is available here, so **a GPU-backed stand is NOT_RUN**.
+The account is real, the 24 tracks are real uploaded originals, and the page
+is the real Library with the real shell.
+
+**Method.** `tests/browser/dr02-frame-budget.mjs` launches the browser,
+opens the Library and scrolls for ten seconds with the page's own animation
+clock (a sine over the whole scroll range, so the backdrop under both bands
+changes on every frame). It then repeats the same ten seconds with
+`backdrop-filter: none` on the two bands — the opaque fallback — in the same
+viewport, on the same page, in the same browser.
+
+**The measurement runs in a process of its own, and that matters.** The
+Playwright test runner attaches to every browser it starts: its client, its
+trace agent and its own machinery sit next to the renderer while a
+measurement runs. On this host the *same* page, browser, driver, server and
+session read:
+
+| Where the measurement runs | glass: frames > 33ms | opaque: frames > 33ms | difference |
+| --- | ---: | ---: | ---: |
+| A plain process (the product's own environment) | **0 of 602 (0.00 %)** | 0 of 602 (0.00 %) | **0.00 points** |
+| Inside the Playwright test runner | 96–122 of ~500 (15.7–24.4 %) | 0 of 602 (0.00 %) | 15.7–24.4 points |
+
+The two rows are the same code, the same page (the same 1321px scroll range,
+the same 888 elements, the same `blur(16px)` on the player and `blur(12px)`
+on the topbar) and the same server; only the process that owns the browser
+differs. The runner's row is the harness's cost, not the product's, so the
+budget is measured in the plain process and the permanent gate
+(`tests/browser/dr02-glass.spec.mjs`) runs it there.
+
+**Result.** With the glass: 602 frames in ten seconds, the median frame
+16.7 ms (60 fps), the longest frame 16.8 ms, **zero** frames over 33 ms.
+With the opaque fallback: the same 602 frames, the same median, the same
+longest frame. The glass costs **0.00 points** of frames over 33 ms against
+the opaque fallback on this stand — inside the 5-point budget the DR-02 plan
+sets. The median frame does not move either, so the filter is not what sets
+the cadence of the scroll.
+
+**What this is not.** It is a local budget on a software rasteriser, not a
+promise about any other device: the number says that the two glass bands
+cost nothing measurable here, and it says nothing about a GPU-backed
+browser, a phone, a laptop on battery, or a machine whose raster threads
+are busy. A GPU-backed stand is NOT_RUN on this host. The opaque fallback
+stays implemented and reachable (`prefers-reduced-transparency: reduce`,
+`forced-colors: active`, `print`, and any engine without
+`backdrop-filter`), so a reader who cannot afford the blur gets the opaque
+band.
+
+**A diagnostic, not a gate.** The same ten-second scroll was run with the
+two bands blurred, with no blur at all, with only the player blurred, with
+only the topbar blurred and with both blurred at 4px and at 8px
+(`target/checks/dr02-glass/perf-diagnostics.json`): all six read 602 frames,
+a 16.7 ms median, a 16.8 ms longest frame and **0 %** frames over 33 ms.
+The blur radius is therefore not what costs anything on this stand — the
+whole filter is free here — which is why the shipped radii (16px for the
+desktop player, 12px for the topbar and the mobile player) are the ones the
+DR-01 roles declare.
+
+**Reproduce.**
+
+```bash
+cd tests/browser
+npx playwright test dr02-glass.spec.mjs --grep "frame budget"
+# the raw numbers: target/checks/dr02-glass/<engine>/performance.json
+```
+
 ## Distribution pipeline 2026-10-20
 
 Distribution 0.12.8 limits Cargo builds to two jobs per runner and reuses Cargo caches, including after downstream failures. Browser quality uses the debug server; package verification independently starts the optimized extracted server. A pinned prebuilt wasm-bindgen avoids compiling a second CLI graph. This is build resource policy, with no new playback/startup benchmark claim. AppImage uses host GTK/WebKit libraries. Published byte sizes are recorded in the [release ledger](RELEASE_LEDGER_0.12.8.md); see [DISTRIBUTION](DISTRIBUTION.md).

@@ -334,8 +334,12 @@ test('DR06 the width matrix keeps zero overflow and a real transport', async ({ 
           expect(button.height, `${width} ${button.label} height`).toBeGreaterThanOrEqual(43.5);
         }
         expect(measured.reserve, `${width} the reserved bottom band`).toBeCloseTo(190, 0);
-        expect(measured.scrollerBottom, `${width} the scroller ends above the bands`)
-          .toBeCloseTo(height - 190, 0);
+        // DR02: the one scroller runs under the two floating bands; the
+        // effective bottom of the content is the top of the mini-player.
+        expect(measured.scrollerBottom, `${width} the scroller reaches the viewport bottom`)
+          .toBeCloseTo(height, 0);
+        expect(measured.scrollerBottom - measured.reserve, `${width} the effective bottom is the player top`)
+          .toBeCloseTo(measured.player.top, 0);
       } else {
         expect(measured.nav.display, `${width} no duplicate navigation surface`).toBe('none');
       }
@@ -345,15 +349,21 @@ test('DR06 the width matrix keeps zero overflow and a real transport', async ({ 
       await page.locator('#main-scroll').evaluate((element) => { element.scrollTop = element.scrollHeight; });
       const clearance = await page.evaluate(() => {
         const scroller = document.querySelector('#main-scroll').getBoundingClientRect();
+        const player = document.querySelector('.player-bar').getBoundingClientRect();
         const rows = [...document.querySelectorAll('.track-row')];
         const last = rows[rows.length - 1].getBoundingClientRect();
         const actions = rows[rows.length - 1].querySelector('.track-actions').getBoundingClientRect();
         return {
           scrollerBottom: scroller.bottom, lastBottom: last.bottom, actionsBottom: actions.bottom,
+          playerTop: player.top,
           gap: scroller.bottom - actions.bottom,
         };
       });
-      expect(clearance.gap, `${width} the last action clears the bands`).toBeGreaterThanOrEqual(8);
+      // DR02: the scroller reaches the bottom of the viewport, so the last
+      // action is measured against the top of the floating mini-player.
+      expect(clearance.playerTop - clearance.actionsBottom, `${width} the last action clears the bands`)
+        .toBeGreaterThanOrEqual(8);
+      expect(clearance.gap, `${width} the last action stays inside the scroller`).toBeGreaterThanOrEqual(8);
       await page.locator('#main-scroll').evaluate((element) => { element.scrollTop = 0; });
     }
     await writeFile(join(output, 'dr06-transport.json'), JSON.stringify(evidence, null, 2));
@@ -534,8 +544,12 @@ test('DR06 the safe-area inset is counted once by the bands and the reserve', as
     expect(emulated.player.bottom + emulated.nav.height, 'the bands fill the viewport once')
       .toBeCloseTo(844, 0);
     expect(emulated.reserve, 'the reserve keeps the inset exactly once').toBeCloseTo(120 + 70 + 34, 0);
-    expect(emulated.scrollerBottom, 'the scroller ends above the reserved bands')
-      .toBeCloseTo(844 - (120 + 70 + 34), 0);
+    // DR02: the scroller reaches the bottom of the viewport and the bands
+    // float over it; the reserve is the height of the bands it floats over.
+    expect(emulated.scrollerBottom, 'the scroller reaches the viewport bottom')
+      .toBeCloseTo(844, 0);
+    expect(emulated.scrollerBottom - emulated.reserve, 'the effective bottom is the player top')
+      .toBeCloseTo(emulated.player.top, 0);
     expect(emulated.overflow, 'the inset does not create an overflow').toBeLessThanOrEqual(1);
 
     const css = (await (await page.request.get(runtime.origin + '/style.css')).text()).replace(/\s+/g, ' ');
@@ -573,11 +587,19 @@ test('DR06 the safe-area inset is counted once by the bands and the reserve', as
       }
       const topbar = document.querySelector('.topbar').getBoundingClientRect();
       const scroller = document.querySelector('#main-scroll').getBoundingClientRect();
-      return { boxes, topbar: { height: topbar.height, bottom: topbar.bottom }, scrollerTop: scroller.top };
+      const inner = document.querySelector('.content-inner').getBoundingClientRect();
+      return {
+        boxes, topbar: { height: topbar.height, bottom: topbar.bottom },
+        scrollerTop: scroller.top, innerTop: inner.top,
+      };
     });
     evidence.push({ sides });
     expect(sides.topbar.height, 'the topbar owns the top inset once').toBeCloseTo(63 + 24, 0);
-    expect(sides.scrollerTop, 'the content starts below the topbar inset')
+    // DR02: the scroller runs under the topbar; the content is what starts
+    // below it, and the top inset is counted exactly once.
+    expect(sides.scrollerTop, 'the scroller runs under the topbar')
+      .toBeLessThan(sides.topbar.bottom);
+    expect(sides.innerTop, 'the content starts below the topbar inset')
       .toBeCloseTo(sides.topbar.bottom, 1);
     // The effective edge is the larger of the gutter and the inset; the
     // player and the navigation use their own smaller gutter (16px and 6px),
