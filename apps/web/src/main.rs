@@ -3291,7 +3291,7 @@ fn App() -> Element {
                             }},
                                 Art {key:"{track.id}-{track.artwork_id:?}",track:track.clone()}
                                 span {class:"now-playing-meta",
-                                    span {class:"now-playing-heading",strong {class:"player-title","{track.title}"}
+                                    span {class:"now-playing-heading",strong {class:"player-title",title:track.title.clone(),"{track.title}"}
                                         span {class:"player-eq","data-state":player_state,"aria-hidden":"true",i{}i{}i{}i{}}
                                     }
                                     small {class:"player-artist",title:track.artist.clone(),"{track.artist}"}
@@ -3311,7 +3311,7 @@ fn App() -> Element {
                                 },Icon {name:"heart"}}
                             span {class:"sr-only player-state-text","data-state":player_state,"{player_state_label}"}
                         } else {
-                            div {class:"now-playing",div {class:"artwork",Icon{name:"music"}}span {class:"now-playing-meta",strong {"Nothing playing"}small {"Choose a track"}}}
+                            div {class:"now-playing now-playing-idle",div {class:"artwork",Icon{name:"music"}}span {class:"now-playing-meta",strong {"Nothing playing"}small {"Choose a track"}}}
                             span {class:"sr-only player-state-text","data-state":player_state,"{player_state_label}"}
                         }
                     }

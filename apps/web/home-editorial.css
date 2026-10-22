@@ -442,3 +442,54 @@
     transform: none;
   }
 }
+
+/* --- DR06: the empty editorial cards keep their own text ----------------
+   The empty feature and the empty wave have no artwork behind them, so a
+   fixed height only clipped their honest copy on a phone. They now take the
+   height their text needs, keep a real 44px action and wrap long words. The
+   image-backed feature and wave keep their own 288px and 160px. */
+@media (max-width: 760px) {
+  .home-feature-empty {
+    height: auto;
+    min-height: 0;
+    overflow-wrap: anywhere;
+  }
+  .home-feature-empty .home-feature-copy {
+    height: auto;
+    padding: 16px;
+    gap: 0;
+  }
+  .home-feature-empty .home-feature-title {
+    font-size: 24px;
+    font-weight: 550;
+    line-height: 1.1;
+    max-width: 18ch;
+    margin-bottom: 12px;
+  }
+  .home-feature-empty .home-feature-subtitle {
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  .home-feature-empty .home-feature-actions {
+    margin-top: 12px;
+  }
+  .home-feature-empty .home-feature-listen,
+  .home-feature-empty .home-feature-open {
+    height: 44px;
+    min-height: 44px;
+  }
+  .home-wave-empty {
+    height: auto;
+    min-height: 160px;
+    overflow-wrap: anywhere;
+  }
+  .home-wave-empty .home-wave-copy {
+    height: auto;
+    min-height: inherit;
+    gap: 16px;
+  }
+  .home-wave-empty .home-wave-note,
+  .home-wave-empty .home-wave-note p {
+    overflow-wrap: anywhere;
+  }
+}

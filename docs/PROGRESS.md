@@ -1,5 +1,109 @@
 # Verified progress
 
+## DR-06 the music in the first phone screen — 2026-10-22
+
+The mobile composition spent its first screen on its pre-list. On a 320×700
+phone the first track started at **478.09px** and the mini-player covered
+everything below **510px**, so the reader saw **32 of 115px** of the first
+row — the title, but none of its actions. The package moves the music up: the
+first track and its whole action row are inside the first screen, and nothing
+in the audio, the queue, the session, the owner-scoped data paths or the
+desktop composition changed.
+
+**What changed.** One scoped `@media (max-width:760px)` block at the end of
+`apps/web/style.css`, one block in `apps/web/home-editorial.css`, one
+attribute in `apps/web/src/filters.rs` and one `title` attribute in
+`apps/web/src/main.rs`.
+
+- `--vela-content-top` is **16px** on the mobile band (25px before). The
+  63px topbar is unchanged.
+- The page heading keeps its real Play action and costs 83.91px at 320px
+  (91.91px before): the gap is 8px and the bottom margin 12px.
+- The section toolbar is 100px (111px before): the search field takes its own
+  row, the heading margin is gone and the summary keeps its own line.
+- The filter block is 44px (72.69px before). The default library order is a
+  fact about the collection, not a control: `p.filter-summary` now carries
+  `data-default-order="true"` **only** while the applied filters equal
+  `TrackFilters::default()`, and on the phone that sentence leaves the flow
+  with the existing `.sr-only` technique. It stays in the DOM with its
+  `role="status"` and its text, so the sentence stays available to a screen
+  reader; an active filter or sort has no marker, is shown and may wrap. The
+  draft/applied semantics, the reset and the `Results for “…”` line are
+  unchanged. An actual screen-reader announcement was **not** observed.
+- The table header is one **36px** row. The empty actions heading no longer
+  opens a second, empty grid row, and the row is `44px minmax(0,1fr) 44px`
+  with the actions on their own row.
+- The track row is **113px** (115px before): 44 + 8 + 44 of targets, 8px of
+  gap, 8px of padding above and below and the 1px rule. The five 44px
+  actions are right-aligned inside the row and are not clipped.
+- The mini-player keeps its 120px band, its separate 44px seek rail and the
+  70px navigation; the transport gap is 4px, so the three 44px controls take
+  140px instead of 148px and the title path gets the room. The idle sentence
+  is 12px/600 and 10px/400 with the short DR-05 wording, and it **wraps**
+  instead of being cut: Chromium measures that Manrope text at 87px and
+  Firefox at 89.87px for an 88px title path, so the sentence takes two lines
+  of 18px in Firefox and one in Chromium, and the 60px of content still clear
+  the 44px seek rail. The current track's title keeps its 12px role, its
+  42px cover and its standard ellipsis — with the full name now in the
+  element's `title`.
+- The empty editorial card and the empty wave take the height their own text
+  needs on a phone; the image-backed feature and wave keep their 288px and
+  160px.
+
+**Measured, not estimated.** The baseline came from
+`tests/browser/dr06-probe.mjs` before the change; the acceptance numbers
+come from the new permanent spec `tests/browser/dr06-mobile.spec.mjs`, which
+measures the live document (rendered rectangles and computed styles) rather
+than trusting declared CSS values, and reads the DOM's own `role` and
+`data-default-order` attributes. The spec also
+fetches `/style.css` once, to assert that the shell still carries a single
+`--vela-bottom-reserve` authority with a single inset term:
+
+| Surface | 320×700 before | 320×700 after | 390×844 before | 390×844 after |
+| --- | --- | --- | --- | --- |
+| First `.track-row` top | 478.09px | **378.91px** | 430.19px | **339px** |
+| First `.track-row` bottom | 593.09px | **491.91px** | 545.19px | **452px** |
+| `.track-header` height | 50.5px | **36px** | 50.5px | **36px** |
+| `.track-row` height | 115px | **113px** | 115px | **113px** |
+| `--vela-content-top` | 25px | **16px** | 25px | **16px** |
+| Document overflow | 0px | **0px** | 0px | **0px** |
+
+The plan asked for at least 88px of useful height at 320px; the package
+delivers **99.18px**. The first track and its actions end 18.09px above the
+mini-player. At 390×844 two whole rows end at 565px and the player starts at
+654px.
+
+The transport did not move: the player band is 120px, the navigation 70px,
+the reserve 190px, Play/Next/Queue are 44×44, the seek rail is 44px and the
+navigation is exactly five equal destinations of 60×53 (320), 68×53 (360),
+74×53 (390) and 149.6×61 (760). The document overflow is 0px at 320, 360,
+390, 760, 761 and 768.
+
+The safe-area arithmetic was measured with a **simulated** 34px bottom inset
+through the shell's own `--vela-safe-bottom` variable: the navigation row
+grows 70 → **104px** (the inset once), the two bands together fill the 844px
+viewport exactly (740 + 104), the reserve becomes **224px** (120 + 70 + 34)
+and the scroller ends at 620px. Real hardware insets were not exercised.
+
+Executed on this change: `cargo fmt --all -- --check` (exit 0); `cargo
+clippy --locked --workspace --all-targets -- -D warnings` (exit 0, with a
+real recompilation of `vela-web`); `cargo test --locked --workspace --
+--test-threads=2` (380 passed, 0 failed, 3 ignored); `cargo build --locked -p
+vela-web --target wasm32-unknown-unknown --release` (exit 0);
+`scripts/build-web.sh` (wasm-bindgen 0.2.129) into `dist/` (exit 0); and the
+Playwright suite in Chromium (**78 passed, 1 skipped — the opt-in live
+import, 5.1m**) and in Firefox (**78 passed, 1 skipped, 6.4m**), both
+including the new permanent `tests/browser/dr06-mobile.spec.mjs` (10 journeys)
+and the updated TR02 pre-list expectation. The measurements and the
+screenshots are in `target/checks/dr06-mobile/` and in
+[QA_EVIDENCE](QA_EVIDENCE.md); the remaining limits are in
+[KNOWN_LIMITATIONS](KNOWN_LIMITATIONS.md).
+
+A screen reader was not run, a real mobile browser with a dynamic toolbar was
+not used, the hardware safe-area insets were not exercised and the native
+client's WebKitGTK rendering, its physical audio and the Docker runtime were
+not run: this host has no X server.
+
 ## Second DR-04/DR-05/DR-07 audit round: three point fixes — 2026-10-22
 
 The second independent audit of the same slice rejected it on three defects

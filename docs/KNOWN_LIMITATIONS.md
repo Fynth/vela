@@ -1,5 +1,57 @@
 # Unsupported and unverified functionality
 
+## DR-06 the mobile composition — 2026-10-22
+
+The package moves the music into the first phone screen. The measurements are
+in [QA_EVIDENCE](QA_EVIDENCE.md); what was **not** measured is here.
+
+- The safe-area numbers are **SIMULATED**. This host has no cutout and no
+  device, so the 34px bottom inset, the 24px top inset and the 16px side
+  insets were emulated through the shell's own `--vela-safe-*` variables —
+  the same variables `env(safe-area-inset-*)` feeds. The geometry is the
+  geometry a notched device would lay out, but no hardware was involved, and
+  a real home indicator, a real cutout and a real landscape rotation were
+  not exercised.
+- No real mobile browser was used. The measurements come from a headless
+  Chromium and a headless Firefox at fixed viewports. A mobile browser with a
+  dynamic toolbar, a URL bar that collapses, an onscreen keyboard and a
+  device-pixel ratio other than 1 were not tested. The shell already divides
+  its viewport units by the app zoom, but the interaction between a dynamic
+  `dvh` and the keyboard was not observed.
+- The idle sentence of the mini-player reads in full at 100% app size on a
+  320px phone, and it **wraps** instead of being cut: the two engines measure
+  the same Manrope text differently (Chromium 87px, Firefox 89.87px at
+  12px/600) and the title path is 88px there, so the sentence takes two lines
+  of 18px in Firefox and one in Chromium. The band still keeps its 60px of
+  content above the 44px seek rail. The **current** track's title keeps the
+  standard ellipsis instead, and the full name stays in the DOM and in the
+  `title` attribute.
+- The plan's `.section-toolbar { margin-bottom: 0 }` was applied to the
+  **library's** section toolbar — the pre-list the plan measures — and not
+  to every section toolbar on the phone. The other pages keep their section
+  rhythm: their toolbars are followed by content that has no margin of its
+  own, so a global zero would have pulled every heading onto its first card.
+  The library's own toolbar, the search row and the filter block were
+  measured; the other pages' spacing was not re-measured after the change.
+- The 761..850px band has no queue control in the player bar. That is the
+  existing composition — the mini queue is hidden below 900px and the
+  desktop right zone below 850px — and this package did not change it. The
+  queue stays reachable from the Now Playing sheet and the drawer, and the
+  band was not re-designed here.
+- The 150% evidence is the application's own app size, a CSS `zoom` on the
+  document root. A real 150% system font scale, a browser zoom of 200% and
+  `forced-colors: active` were not exercised, and a screen reader was not
+  run: the announcement claims about the default library order are DOM facts
+  — the node is in the DOM, its `role` is `status`, its text is unchanged —
+  and not observed announcements.
+- The 80% app-size evidence reads the row targets as `rect / zoom`. The app
+  size is a CSS `zoom` on the document root, so `getBoundingClientRect()`
+  already reports the zoomed space; dividing once returns CSS pixels. A
+  check that multiplied by the zoom instead counted it twice and failed a
+  correct 44px target at 28.16px — the assertion, not the UI, was wrong.
+- The native client's WebKitGTK rendering, its physical audio and the Docker
+  runtime were not run: this host has no X server.
+
 ## DR-04/DR-05/DR-07 audit round — 2026-10-22
 
 The five defects of the independent audit were closed with source changes and

@@ -296,12 +296,15 @@ test('TR02 shell reserves one sidebar offset and one player band with one centra
          navigation bar) and <=760 is one mobile composition, so the tablet
          boundary and the mobile band are both measured here. */
       { width: 1024, height: 900, sidebar: 190, gutter: 25, contentTop: 24, playerHeight: 88 },
-      { width: 760, height: 900, sidebar: 0, gutter: 20, contentTop: 25, playerHeight: 120 },
-      { width: 671, height: 900, sidebar: 0, gutter: 20, contentTop: 25, playerHeight: 120 },
-      { width: 621, height: 900, sidebar: 0, gutter: 20, contentTop: 25, playerHeight: 120 },
-      { width: 620, height: 900, sidebar: 0, gutter: 20, contentTop: 25, playerHeight: 120 },
-      { width: 390, height: 844, sidebar: 0, gutter: 20, contentTop: 25, playerHeight: 120 },
-      { width: 320, height: 780, sidebar: 0, gutter: 16, contentTop: 25, playerHeight: 120 },
+      /* DR06: the mobile composition spends its first screen on the music, so
+         the content top is 16px on every width that owns the mobile band. The
+         tablet ladder above is untouched. */
+      { width: 760, height: 900, sidebar: 0, gutter: 20, contentTop: 16, playerHeight: 120 },
+      { width: 671, height: 900, sidebar: 0, gutter: 20, contentTop: 16, playerHeight: 120 },
+      { width: 621, height: 900, sidebar: 0, gutter: 20, contentTop: 16, playerHeight: 120 },
+      { width: 620, height: 900, sidebar: 0, gutter: 20, contentTop: 16, playerHeight: 120 },
+      { width: 390, height: 844, sidebar: 0, gutter: 20, contentTop: 16, playerHeight: 120 },
+      { width: 320, height: 780, sidebar: 0, gutter: 16, contentTop: 16, playerHeight: 120 },
     ]) {
       await page.setViewportSize({ width, height });
       await settle(page);

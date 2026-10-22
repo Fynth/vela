@@ -210,6 +210,13 @@ pub fn LibraryFilters(
     let applied_summary = summary(&applied);
     let changed = draft.read().parse().map_or(true, |draft| draft != applied);
     let active = applied != TrackFilters::default();
+    // DR06: the default library order is a fact about the collection, not a
+    // control the reader has to act on. The marker says exactly that — the
+    // applied filters are the default ones — so the phone composition can keep
+    // the sentence in the DOM as a status line without spending a visible row
+    // of the first screen on it. An active filter or sort has no marker and
+    // is still shown.
+    let default_order = !active;
     let sort_value = match values.sort {
         TrackSort::Library => "library",
         TrackSort::Title => "title",
@@ -223,7 +230,9 @@ pub fn LibraryFilters(
                     onclick: move |_| open.set(!open()),
                     if open() { "Hide filters" } else { "Filter and sort" }
                 }
-                p { class: "filter-summary", role: "status", "{applied_summary}" }
+                p { class: "filter-summary", role: "status",
+                    "data-default-order": default_order.then_some("true"),
+                    "{applied_summary}" }
                 if active && !open() {
                     button { class: "button secondary small", onclick: move |_| onreset.call(()), "Reset filters" }
                 }

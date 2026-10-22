@@ -1778,3 +1778,75 @@ input[type="range"]:focus { outline:2px solid var(--accent); outline-offset:3px;
     height:44px;
   }
 }
+
+/* --- DR06: the first phone screen shows the music -----------------------
+   The mobile composition spent its first screen on the pre-list: the page
+   heading, the section toolbar, the filter block and a 50px table header
+   pushed the first track below the mini-player. One scoped override after
+   the existing mobile rules: the desktop composition is untouched, 760/761
+   stays the only boundary, and the 44px targets, the 120px player band, the
+   70px navigation band and the one reserved bottom band are unchanged. */
+@media (max-width:760px) {
+  :root { --vela-content-top:16px; }
+
+  /* The page heading: the title and the real Play action stay two rows at
+     320px and share one row from 360px, and the block costs 12px less. */
+  .page-heading { gap:8px; margin-bottom:12px; }
+  .page-heading h1 { font-size:28px; font-weight:650; line-height:1.14; }
+
+  /* The section toolbar of the library is the pre-list of the first phone
+     screen: the search field takes its own row, the heading keeps its own
+     line and hands its margin to the filter block below it. The scope is the
+     library section on purpose — the other pages' toolbars are followed by
+     content that has no margin of its own, so the same gap and the same zero
+     margin would pull their heading onto the first card. */
+  .library-section .section-toolbar { flex-wrap:wrap; gap:8px; margin-bottom:0; }
+  .library-section .section-toolbar h2 { font-size:20px; font-weight:600; margin-bottom:0; }
+  .library-section .section-toolbar p { font-size:14px; font-weight:400; margin-bottom:0; }
+  .library-section .section-toolbar .search-form {
+    flex-basis:100%; width:100%; max-width:100%; min-height:44px;
+  }
+
+  /* The filter block: 12px above and below, and the default library order
+     leaves the flow. The sentence stays in the DOM as a status line — it keeps
+     its role and its text in the accessibility tree — while an active filter
+     or sort is shown and may wrap. No screen-reader announcement was
+     observed. */
+  .library-filters { margin:12px 0; }
+  .filter-toolbar { gap:8px; align-items:center; }
+  .filter-summary[data-default-order="true"] {
+    position:absolute; clip:rect(0,0,0,0); clip-path:inset(50%);
+    width:1px; height:1px; overflow:hidden; white-space:nowrap;
+  }
+
+  /* The table header: three real columns, one row. The empty actions
+     heading is hidden, so it cannot open a second, empty grid row. */
+  .track-header { min-height:36px; padding:8px 0; }
+  .track-header > span:last-child { display:none; }
+  .track-header, .track-row { grid-template-columns:44px minmax(0,1fr) 44px; gap:8px; }
+  /* One row is the track, the second is its own actions: 44 + 8 + 44 of
+     targets, 8px of gap, 8px of padding above and below and the 1px rule. */
+  .track-row { padding:8px 0; min-height:113px; }
+  .track-actions { grid-column:2/-1; justify-content:flex-end; gap:0; }
+  /* The loading skeleton reuses `.track-row`, so the same three columns and
+     the same two-row height apply to it: the last empty heading is hidden and
+     the dot sits on the actions row instead of being pushed into a fourth
+     column that no longer exists. */
+  .skeleton-track-row { grid-template-columns:44px minmax(0,1fr) 44px; padding:8px 0; }
+  .skeleton-track-row > :last-child { grid-column:2/-1; justify-self:end; }
+
+  /* The mini-player: the same 120px band and the same separate 44px seek
+     rail. The title path gets the room the tighter transport leaves, and the
+     idle sentence keeps the short DR-05 wording at the small role sizes. */
+  .player-now { min-width:0; }
+  .now-playing { min-width:0; }
+  .now-playing-meta { flex:1 1 auto; min-width:0; }
+  /* The idle sentence is short and must read in full. The two engines measure
+     the same Manrope text a little differently, so the sentence wraps onto a
+     second line instead of losing its last glyph. The band keeps its 60px of
+     content: two lines of 18px and the 10px subtitle still fit above the
+     44px seek rail. */
+  .now-playing-idle .now-playing-meta strong { font-size:12px; font-weight:600; white-space:normal; }
+  .now-playing-idle .now-playing-meta small { font-size:10px; font-weight:400; }
+  .player-buttons { gap:4px; }
+}

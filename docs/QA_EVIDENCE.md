@@ -1,5 +1,68 @@
 # Verified0.12.0 package and preserved runtime checkpoint
 
+## DR-06 the music in the first phone screen — 2026-10-22
+
+The package changes the **density** of the mobile composition. Nothing in the
+audio, the queue, the session, the owner-scoped data paths or the desktop
+composition changed: no asset, no allowlist entry, no manifest, no migration
+and no second media element.
+
+The measured baseline on this host (Chromium, Library, **2 real tracks**,
+default filters, no notices) was taken with `tests/browser/dr06-probe.mjs`
+against the pre-change stylesheets and is written to
+`target/checks/dr06-probe/dr06-baseline.json`; the "after" column below is the
+same probe pointed at the changed stylesheets and is written to
+`target/checks/dr06-probe/dr06-probe.json`. Both are real files, produced by
+`node dr06-probe.mjs` with `VELA_TEST_WEB_DIR` selecting the stylesheet set:
+
+| Surface | Before | After |
+| --- | --- | --- |
+| First `.track-row` top, 320×700 | **478.09px** | **378.91px** (99.18px gained; the plan required 88px) |
+| First `.track-row` bottom, 320×700 | 593.09px | **491.91px** (the whole row, actions included, is above the 510px mini-player) |
+| First `.track-row` top, 390×844 | 430.19px | **339px** |
+| First `.track-row` bottom, 390×844 | 545.19px | **452px** (two full rows end at 565px, the player starts at 654px) |
+| `.page-heading` height, 320×700 | 91.91px | 83.91px |
+| `.section-toolbar` height | 111px | 100px |
+| `.library-filters` height | 72.69px | 44px (the default order leaves the flow) |
+| `.track-header` height | 50.5px | **36px** (one row; the empty actions heading no longer opens a second grid row) |
+| `.track-row` height | 115px | **113px** (44 + 8 + 44 + 8 + 8 + the 1px rule) |
+| `--vela-content-top` | 25px | **16px** |
+| Document overflow, 320/360/390/760/761/768 | 0px | **0px** |
+
+| Check | Paths | Evidence | Status | NOT_RUN |
+| --- | --- | --- | --- | --- |
+| The first track and its own actions are inside the first screen | apps/web/style.css, tests/browser/dr06-mobile.spec.mjs | Measured in the live document at 320×700 and 390×844 with a real account and two real uploaded tracks: the first `.track-row` starts at **378.92px** (limit 390px) and ends at **491.92px** (limit 510px) at 320×700, and at **339px** / **452px** at 390×844. The action row is a real 44px row of five 44×44 buttons whose right edge is the row's own right edge, so nothing is clipped and nothing touches the title or the time. The evidence is `target/checks/dr06-mobile/dr06-first-screen.json` and the screenshots `dr06-library-320x700.png`, `dr06-library-390x844.png` | PASS measured | A real mobile browser with a dynamic toolbar was not used |
+| The table header is one row | apps/web/style.css | The `.track-header` measures **36px** (35..37) at 320 and 390, and its grid has a single row: the empty actions heading is `display: none`, so its three visible labels (`#`, `TITLE`, `TIME`) no longer open a second, empty row | PASS measured | — |
+| The idle sentence of the mini-player reads in full | apps/web/style.css, apps/web/src/main.rs | The idle title is the short DR-05 wording "Nothing playing" at **12px/600** with the 10px/400 subtitle "Choose a track". Measured in both engines at 320×700: the text is never cut horizontally (`scrollWidth` ≤ `clientWidth` + 1) and it takes at most two lines (≤37px) inside the 120px band, whose 60px of content still clears the 44px seek rail. The two engines measure the same Manrope text differently — Chromium 87px, Firefox 89.87px for an 88px title path — so the sentence **wraps** in Firefox instead of losing its last glyph | PASS measured | — |
+| The default library order is available to a screen reader, not shown | apps/web/src/filters.rs, apps/web/style.css | The summary carries `data-default-order="true"` **only** while the applied filters equal `TrackFilters::default()`. Measured at 320 and 390: the element is in the DOM, its `role` is `status`, its text is "Library order", and it is visually hidden with the existing `.sr-only` technique — `position: absolute`, a **1×1px** box and `clip-path: inset(50%)` — so the text stays in the accessibility tree while the filter block is **44px** tall instead of 72.69px. With an active sort ("Recently added") the marker is **absent**, the box is **288px** wide at 320 and **350px** at 390, the clip is gone and the text is not truncated | PASS measured | Screen reader NOT_RUN: the announcement is a DOM fact, not an observed announcement |
+| The transport and the navigation are unchanged | apps/web/style.css | Measured at 320, 360, 390 and 760: the player band is **120px**, the navigation band is **70px**, the reserve is **190px**, the scroller ends at **654px** of 844px, the document overflow is **0px**, Play/Next/Queue are **44×44** and the seek rail is **44px** tall. The navigation is exactly **5** equal destinations, **60×53** at 320, **68×53** at 360, **74×53** at 390 and **149.6×61** at 760 — every one of them at least 44×44. At 761 and 768 the composition is the tablet one: the 88px band, no navigation and **0px** overflow | PASS measured | — |
+| The safe-area inset is counted once | apps/web/style.css, tests/browser/dr06-mobile.spec.mjs | **SIMULATED**: the host has no cutout, so the inset is emulated through the same `--vela-safe-*` variables the shell consumes. Baseline: the navigation is **70px** and the reserve **190px**. With `--vela-safe-bottom: 34px`: the navigation row is **104px** (70 + 34, once), the player band still ends directly above it at **740px**, the two bands together fill the viewport exactly (740 + 104 = **844px**), the reserve is **224px** (120 + 70 + 34) and the scroller ends at **620px** = 844 − 224. The document overflow stays **0px**. The stylesheet still carries one reserve authority with one `--vela-safe-bottom` term | PASS measured (simulated) | Real hardware safe-area insets NOT_RUN: no device and no X server on this host |
+| The empty editorial card keeps its own height | apps/web/home-editorial.css, tests/browser/dr06-mobile.spec.mjs | Measured at 390×844: the empty feature card is **191.9px** tall (limit 240px), its "Open playlists" action is **44px** tall and lies completely inside the card. At a 150% app size the card measures **326.45** visual px (**217.63** CSS px): the copy is not clipped (`scrollHeight` ≤ `clientHeight`), the action is still 44px in CSS pixels and inside the card. The empty wave — reached for real by failing the recommendations request — keeps its **160px** minimum, its copy is not clipped and its real action is a 44px target inside the card | PASS measured | A real 150% system font scale was not used; the application's own app size was |
+| The long current title is shortened, not pushed out | apps/web/src/main.rs, apps/web/style.css | A real upload with an 80-character title is played at 320×700: the mini-player's title is **67px** wide with a `scrollWidth` of **423px**, so it is shortened with the standard ellipsis, the full name is in the element's `title` attribute and in the DOM text, the title stays on one line (**18px** tall) and the document overflow is **0px** | PASS measured | — |
+| The composition survives a viewport and a page change | apps/web/style.css, tests/browser/dr06-mobile.spec.mjs | After the viewport moved 390 → 320 → 390 → 360 and the page moved Library → Home → Library: **1** media element, the same `src`, the same `data-source-generation`, the same playing state, a position that is not reset, and the same queue — the same rows, the same count and the same **one** current occurrence read through the queue drawer | PASS measured | — |
+| The last focusable row clears the bands | apps/web/style.css, tests/browser/dr06-mobile.spec.mjs | Scrolled to the end of the one central scroller at 320, 360, 390, 760, 761 and 768: the last row's action row — the last focusable control of the list — ends at least **8px** above the scroller's bottom, so it is never behind the player band or the navigation | PASS measured | — |
+| The reference widths render in both themes | apps/web/style.css, tests/browser/dr06-mobile.spec.mjs | Rendered and measured at 320×700, 360×800, 390×844, 1284×856, 1440×900 and 1728×1000 in the dark and the light theme: the document overflow is **0px** everywhere, the player band is **120px** on the phone band and **88px** on the desktop band, the navigation is **70px** with **5** destinations on the phone and absent on the desktop. The screenshots are `dr06-library-<width>x<height>-<theme>.png` in `target/checks/dr06-mobile/` | PASS measured | — |
+| The composition holds at 80% app size and under reduced motion | apps/web/style.css, tests/browser/dr06-mobile.spec.mjs | At 390×844 the app size reaches **0.8** through four presses of the documented Settings control (not an injected variable), the document overflow stays **0px**, and the five row actions measure **35.19px** rendered = **43.99 CSS px** (`rect / zoom`), so they are still 44px targets. Under `prefers-reduced-motion: reduce` (`matchMedia` true) the row, header, library toolbar, Play control and player bar all report `animation-name: none`, a **0s** animation duration and a **0s** transition duration, and the composition is still the measured one — header **36px**, row **113px**, overflow **0px** | PASS measured | A real 150% system font scale and a real browser zoom were not used; `forced-colors` was not emulated |
+| Rust quality and web build | workspace | `cargo fmt --all -- --check` exit 0; `cargo clippy --locked --workspace --all-targets -- -D warnings` exit 0 (a real recompilation of `vela-web`); `cargo test --locked --workspace -- --test-threads=2` (380 passed, 0 failed, 3 ignored); `cargo build --locked -p vela-web --target wasm32-unknown-unknown --release` exit 0; `scripts/build-web.sh` exit 0 (wasm-bindgen 0.2.129) into `dist/` | PASS | The native client's WebKitGTK rendering, its physical audio and the Docker runtime NOT_RUN: no X server on this host |
+| Browser suites | tests/browser | The Chromium Playwright suite PASS (**78 passed, 1 skipped — the opt-in live import, 5.1m**) and the Firefox Playwright suite PASS (**78 passed, 1 skipped, 6.4m**), both including the new permanent `tests/browser/dr06-mobile.spec.mjs` (10 journeys) and the updated TR02 pre-list expectation. Firefox's audio assertions run through the host's `vela_ci` PulseAudio null sink | PASS | screen reader, forced-colors, browser zoom 200% and native WebKitGTK NOT_RUN |
+
+The permanent coverage of this package is `tests/browser/dr06-mobile.spec.mjs`:
+the first-screen budget, the width matrix, the filter summary's real
+visibility, the empty editorial card, the empty wave, the safe-area
+arithmetic, the long title, the app-size/reduced-motion scene and the
+audio/queue invariant — 10 journeys. It owns its server,
+its data and its sessions and it measures the live document rather than
+trusting declared CSS values; the one exception is the single
+`--vela-bottom-reserve` formula, which it reads from the served `/style.css`
+to prove the shell kept one reserve authority. The evidence is in
+`target/checks/dr06-mobile/`.
+
+The one documented deviation from the plan is recorded in
+[KNOWN_LIMITATIONS](KNOWN_LIMITATIONS.md): the plan's global
+`.section-toolbar { margin-bottom: 0 }` is applied to the **library's**
+section toolbar, the pre-list the plan measures, and the other pages keep
+their section rhythm.
+
 ## Second DR-04/DR-05/DR-07 audit round: three point fixes — 2026-10-22
 
 | Check | Paths | Evidence | Status | NOT_RUN |

@@ -175,7 +175,7 @@ than rhythm values:
   documented source exception relative to the 19–42px directive, not a licence
   to change the other headings.
 - The coarse-pointer composition keeps its own 8px transport gap and 19px
-  glyphs, and the mobile composition keeps its 120px band and 8px transport
+  glyphs, and the mobile composition keeps its 120px band and 4px transport
   gap (DR-06). The desktop composition owns the 4px gap and the 15/17px
   glyphs.
 - The app size is a CSS zoom on the document root: it scales the layout but
@@ -185,6 +185,42 @@ than rhythm values:
   app-size feature, not of this size map.
 - The `input`/`select` padding is 10px 12px: the horizontal value moved to the
   scale, the vertical one keeps the ≥44px total target.
+
+## DR-06 the mobile composition's measured numbers — 2026-10-22
+
+The phone band has one boundary (760/761) and one override. The numbers below
+are the rendered ones, measured in Chromium and in Firefox against a real
+account with real uploaded tracks, not the declared ones.
+
+| Surface | Measured on the phone band | Note |
+| --- | --- | --- |
+| `--vela-content-top` | **16px** | the desktop content top is 24px; the 63px topbar is unchanged |
+| `.page-heading` | 83.91px at 320px, 44px at 360 and 390px | the title and the real Play action share one row from 360px |
+| `.library-section .section-toolbar` | 100px | the search field takes its own row; the other pages keep their own toolbar rhythm |
+| `.library-filters` | 44px | the default library order leaves the flow on the phone |
+| `.track-header` | **36px** | one row; the empty actions heading is `display: none` |
+| `.track-row` | **113px** | 44 + 8 + 44 of targets, 8px of padding above and below, the 1px rule |
+| Track grid | `44px minmax(0,1fr) 44px`, 8px gap | the actions are their own row, `grid-column: 2/-1` |
+| Player band / navigation band | 120px / 70px | unchanged; the reserve is 190px |
+| Transport | Play, Next and Queue 44×44, 4px apart (140px) | the idle title is 12px/600, the subtitle 10/400; the current title keeps its 12px role and its 42px cover |
+
+The idle sentence wraps instead of being cut: the two engines measure the
+same Manrope text differently (Chromium 87px, Firefox 89.87px at 12px/600)
+and the title path is 88px at 320px, so the sentence takes two lines of 18px
+in Firefox and one in Chromium. The band keeps its 60px of content above the
+44px seek rail. The current track's title keeps the standard ellipsis and
+its full name in the DOM and in the `title` attribute.
+
+The default library order is a **fact, not a control**: the summary carries
+`data-default-order="true"` only while the applied filters equal
+`TrackFilters::default()`, and on the phone that sentence leaves the flow
+with the existing `.sr-only` technique — it stays in the DOM with its
+`role="status"` and its text. An active filter or sort has no marker, is
+shown and may wrap.
+
+The empty editorial card and the empty wave take the height their own text
+needs on a phone; the image-backed feature keeps its 288px and the
+image-backed wave its 160px.
 
 
 Web sidebar scrolls as one region on short windows. Native shell is one two-column
