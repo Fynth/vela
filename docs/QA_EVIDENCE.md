@@ -1,5 +1,144 @@
 # Verified0.12.0 package and preserved runtime checkpoint
 
+## Second DR-04/DR-05/DR-07 audit round: three point fixes — 2026-10-22
+
+| Check | Paths | Evidence | Status | NOT_RUN |
+| --- | --- | --- | --- | --- |
+| The recovery status is a permanent live region (D1) | apps/web/src/main.rs, apps/web/style.css | The `role="status"` node of the recovery row is in the DOM before the first failure and only its text changes. Measured in the live document: before any failure the row is present with an empty text, the `is-empty` class, `position: absolute`, a height of **0** and **0** controls, and the feedback stack is **0px** tall; the real failure ("Connection interrupted. Reconnecting…", the transport's own bounded retry budget) arrives in the same node — the node carries a marker that survives the arrival — the row becomes `position: static` and **74px** tall with its one **44px** Retry control, and the stack grows to **74px**. The row is still withheld while the Now Playing sheet or the queue drawer is open: the node stays in the DOM, empty and collapsed, so the message is stated once | PASS measured | Screen reader NOT_RUN |
+| The Undo receipt is a permanent live region (D1) | apps/web/src/main.rs, apps/web/style.css | The `role="status"` node of the Undo row is in the DOM before the first Add. Measured: the empty row is present with an empty text, `position: absolute`, a height of **0** and **0** controls; the real receipt "Added “Signal” to Region signals." arrives in the same node (the marker survives), the row becomes `position: static` and **70px** tall with its **2** controls (Undo and Dismiss) and the stack grows to **70px**; the dismissal empties the text, collapses the row again and the stack returns to **0px** — the height it had before the message. The controls sit outside the live region, so their names are never read with the message | PASS measured | Screen reader NOT_RUN |
+| The Undo failure is a permanent alert region (D1) | apps/web/src/main.rs, apps/web/style.css | The `role="alert"` node of the Undo failure is in the DOM before the failure: measured, it is present with an empty text, the `is-empty` class, `position: absolute` and a height of **0**. The real failure — the DELETE of the Undo never reaches the server — arrives as a change of its text ("Connection interrupted. Please try again."); the node becomes `position: static` and **19.5px** tall and it carries a marker that survives the arrival, so it is the same node. The dismissal takes the failure with the receipt: the text is empty again and the node is collapsed at **0px**, exactly as it was before the receipt existed. The alert is no longer nested inside the `role="status"` region: the status is the text element of the row and the alert is its sibling | PASS measured | Screen reader NOT_RUN |
+| One lookup of the queue drawer's dialog (D2) | apps/web/src/main.rs, apps/web/src/queue_drawer.rs | The drawer's own `drawer()` copy of the `get_element_by_id("queue-drawer-dialog")` lookup is gone. The root's `queue_dialog()` is `pub(crate)` and the drawer module calls it — `crate::queue_dialog()`, the same way the drawer already calls the root's `seconds()` helper. The drawer still opens its native modal dialog in the same deferred effect, so the focus trap, the top layer and the backdrop are unchanged | PASS source | — |
+| The Now Playing trigger limitation says what the code does (D3) | docs/KNOWN_LIMITATIONS.md, apps/web/src/main.rs | The limitation now states that the frozen trigger is the control that holds the focus when the sheet opens — the code refuses only the document body and never checks that it is the sheet's own opener — that the previously focused control is frozen instead on a platform where a click does not focus a button, and that the browser's own focus restore is the fallback only for the document-body case. The sheet's own focus return is the native dialog's restore; the application freezes the element only to donate it to the drawer | PASS source | The other platforms were not measured |
+| The shell's `container-type` side effect is recorded (U1) | docs/KNOWN_LIMITATIONS.md, apps/web/style.css | `container-type: inline-size` applies **style** and **inline-size** containment; it does **not** apply layout or paint containment, so the shell is **not** the containing block of its `position: fixed` descendants and does **not** establish a stacking context. Measured in Chromium: a `position: fixed` child of a `container-type: inline-size` element is anchored to the **viewport** (right edge = viewport's right edge, not the container's), a negative `z-index` descendant escapes the container and paints below the container's own background, and `getComputedStyle(shell).contain` reads `none`; the same probe with `contain: layout style inline-size` anchors the fixed child to the container and keeps the negative descendant inside it. The feedback stack, the mobile track menu and the native dialogs are therefore fixed layers of the viewport, not of the shell, and the shell's `overflow: hidden` does not clip them. The shell's own box is `100dvh / zoom` tall, so at 100% and 150% the container box and the viewport coincide — the measured, neutral case. The limitation records that `dvh` is the *dynamic* viewport size (it tracks the viewport as a mobile browser's toolbar shows and hides, and it is **not** the largest size in the `vh` family - `lvh` is); the dynamic viewport already accounts for the toolbar, so the visible area is not automatically shorter than the shell, and nothing is claimed about that case | PASS measured | A mobile browser with a dynamic toolbar NOT_RUN |
+| Rust quality and web build | workspace | `cargo fmt --all -- --check` exit 0; `cargo clippy --locked --workspace --all-targets -- -D warnings` exit 0; `cargo test --locked --workspace -- --test-threads=2` (380 passed, 0 failed, 3 ignored); `cargo build --locked -p vela-web --target wasm32-unknown-unknown --release` exit 0; `scripts/build-web.sh` exit 0 (wasm-bindgen 0.2.129) into `dist/` | PASS | The native client's WebKitGTK rendering, its physical audio and the Docker runtime NOT_RUN: no X server on this host |
+| Browser suites | tests/browser | Chromium Playwright suite PASS (68 passed, 1 skipped — the opt-in live import, 5.1m) and Firefox Playwright suite PASS (68 passed, 1 skipped, 6.3m), both including the new permanent-live-region journey in `tests/browser/dr05-states.spec.mjs`, the reworked `tests/browser/dr07-a11y.spec.mjs` and the two `prototype-transfer` journeys that assert the Undo receipt | PASS | screen reader, forced-colors, browser zoom 200% and native WebKitGTK NOT_RUN |
+| The stack in the six viewports, both engines | target/checks/dr05-permanent-regions/ | Measured in the live document with the recovery status and the Undo receipt both present: 1284×856, 1440×900 and 1728×1000 give a **152px** stack (the recovery row 74px, the 8px gap, the Undo row 70px = 152px; the collapsed ordinary receipt is out of the flow at 0px and adds no second gap, because a flex `gap` only separates the items that are in the flow); 390×844 and 360×800 give **227px**; 320×700 gives **202.5px**. The intersection area with the player bar is **0px²** and with the mobile navigation **0px²** at every viewport, the document overflow is **0px** and the count of visible interactive targets with a side below 44px is **0**. The screenshots are `feedback-stack-<engine>-<width>x<height>.png` and the numbers are `regions-<engine>.json` | PASS measured | — |
+
+The permanent coverage of this round is one new journey in
+`tests/browser/dr05-states.spec.mjs`: "DR05 the recovery status and the Undo
+receipt are permanent live regions". It owns its server, data and sessions,
+signs in a real account, adds a real track to a real playlist, breaks a real
+stream and breaks a real Undo, and it measures the live document: the
+presence of the node, the text of its live region, the `is-empty` class, the
+computed `position`, the height of the row, the number of its controls and
+the height of the whole stack before the message, after the message and after
+the dismissal.
+
+Host note: Firefox needs an audio output to decode a media stream. The first
+Firefox run of this round failed every playback test with
+`audio.currentTime` stuck at 0 while the same build passed in Chromium. An
+isolated probe outside the application reproduced it exactly — Firefox's
+media element reported a decode error (code 3) on a plain data-URI WAV while
+Chromium played the same file — and the cause was the host's PulseAudio: the
+root server with the `vela_ci` null sink had died and left a stale socket.
+The null sink was started again exactly as the CI workflow does
+(`pulseaudio --start`, `module-null-sink`, `pactl set-default-sink
+vela_ci`), the probe then advanced the clock (0 → 1.613s in three seconds)
+and the Firefox suite passed in full. The failure was the host's audio
+device, not the application.
+
+## DR-04/DR-05/DR-07 audit round: one time format, one closer, one permanent receipt — 2026-10-22
+
+| Check | Paths | Evidence | Status | NOT_RUN |
+| --- | --- | --- | --- | --- |
+| One time format in the crate (D1) | apps/web/src/queue_drawer.rs | The drawer's own `format_duration()` is gone; the queue rows use `seconds(track.duration_ms as f64 / 1000.0)` and the sleep countdown `seconds(sleep_remaining as f64)`, the root's helper. The output did not change: the removed helper divided the milliseconds by 1000 and printed `m:ss`, and the root's helper truncates the same number of seconds. Measured in the live drawer in Chromium and in Firefox: the two queued rows show the real `m:ss` of the server's real durations (`0:01` for the one-second fixtures) and the countdown keeps `Pauses in m:ss` | PASS measured | — |
+| One closing path (D2) | apps/web/src/queue_drawer.rs, apps/web/src/main.rs | The drawer's `closer()` is gone. Escape, the close button and "Open library" call the root's handler, which closes the native dialog before the drawer leaves the DOM, clears the announcement line and restores the focus. Measured in Chromium and in Firefox: after Escape the dialog is gone and the focus is on the connected `Show playback queue` trigger; after the drawer's own close button the same; after "Open library" the focus is on the same trigger and not on the document body | PASS measured | — |
+| Every rhythm role is the authority it claims (D3) | apps/web/style.css, docs/DESIGN_SYSTEM.md | All eleven roles are consumed through `var(...)` in the file that declares them, each with the value the literal had: `--vela-space-1` 4 uses, `--vela-space-2` 2, `--vela-space-3` 2, `--vela-space-4` 1, `--vela-space-6` 2, `--vela-space-8` 1, `--vela-radius-control` 4, `--vela-radius-cover` 3, `--vela-radius-panel` 1, `--vela-target-size` 3, `--vela-heading-section` 1. The rendered values did not move: the transport is still five 44px controls and four 4px gaps = 236px, the track grid gap is still 12px, the section heading is still 20px/600, the navigation step is still 44px and the group gap 24px (the permanent `tests/browser/dr04-density.spec.mjs` measures all of them) | PASS measured | — |
+| The size map and the volume paragraph agree (D4) | docs/DESIGN_SYSTEM.md | The table and the paragraph now make one statement, and it is the code: 65×44 above 1100px of viewport width, 44×44 from 1100px down to 760px, and the volume is not in the player bar below 760px or below 600px of layout width. Measured in Chromium and in Firefox on a settled layout: 65×44 at 1284×856, 44×44 at 1000×856, and at 900×856 with the app's own 150% size (a 600px layout width) the volume is `display: none` while the queue and the mute are still on screen. The measured values are in `target/checks/dr04-density/dr04-density-size-map.json` | PASS measured | Firefox re-evaluates the shell's container query one layout late when a zoomed root is resized; a reload settles it, and the difference is recorded in KNOWN_LIMITATIONS |
+| The covers are what the code says (D3) | docs/DESIGN_SYSTEM.md, apps/web/style.css | The "covers stay at 6px" line is replaced by the measured radii: the library track cover and the player bar's cover are 6px, the Now Playing sheet's cover is 16px (12px below 680px), the album card's cover is 7px and the mobile player bar's cover is 5px. The base cover radius is the `--vela-radius-cover` role | PASS measured | — |
+| The root receipt is a permanent live region (D5) | apps/web/src/main.rs, apps/web/style.css | The live region is in the DOM before the first message and only its text changes. Measured in Chromium and in Firefox: the empty receipt is present with an empty text, the `is-empty` class, `position: absolute`, a height of 0 and no dismiss control; the message "Added to your playback queue." arrives in the same node (the node carries a marker that survives the arrival and the dismissal), the receipt becomes `position: static` with a height of 70px and a dismiss control; the dismissal empties the text, collapses the receipt again and the feedback stack is exactly as tall as it was before the message. The dismiss control sits outside the live region | PASS measured | Screen reader NOT_RUN: the announcement itself was not observed, only the DOM facts behind it |
+| The drawer's own live region is still permanent | apps/web/src/queue_drawer.rs, tests/browser/dr07-a11y.spec.mjs | The drawer's `role="status"` line is in the DOM with an empty text before the first transition, holds exactly one text after the start, the cancel and the expiry, and the empty line measures 0px of height and 0px of margin. The `m:ss` of the rows and of the countdown is the root's format | PASS measured | Screen reader NOT_RUN |
+| The focus returns to the connected trigger after every exit | apps/web/src/main.rs, tests/browser/dr07-a11y.spec.mjs | Measured in Chromium and in Firefox in five scenes: Escape, the drawer's own close button, "Open library", "Now Playing" → "View full queue" → Escape (the focus goes to the `Open now playing` trigger) and a drawer that re-renders under the keyboard. The trigger is connected in every scene and the focus is never on the document body. A control inside another open dialog is not frozen as a trigger, the Now Playing sheet hands its own trigger to the drawer, and the guarded restore does not take the focus away from a control that already owns it | PASS measured | — |
+| The player's own now-playing controls close the drawer through the common path | apps/web/src/main.rs | "Open now playing" and "Expand player" call the root's `close_queue()`, so the native dialog never leaves the DOM open and the frozen trigger is never left in its slot. The behaviour of the two buttons is unchanged in the measured scenes | PASS measured | — |
+| Rust quality and web build | workspace | `cargo fmt --all -- --check` exit 0; `cargo clippy --locked --workspace --all-targets -- -D warnings` exit 0; `cargo test --locked --workspace -- --test-threads=2` (380 passed, 0 failed, 3 ignored); `cargo build --locked -p vela-web --target wasm32-unknown-unknown --release` exit 0; `scripts/build-web.sh` exit 0 (wasm-bindgen 0.2.129) into `dist/`; `cargo build --locked -p vela-server` exit 0 | PASS | The native client's WebKitGTK rendering, its physical audio and the Docker runtime NOT_RUN: no X server on this host |
+| Browser suites | tests/browser | Chromium Playwright suite PASS (67 passed, 1 skipped — the opt-in live import, 5.3m) and Firefox Playwright suite PASS (67 passed, 1 skipped, 6.9m), both including the extended `tests/browser/dr07-a11y.spec.mjs` (the close-button scene, the receipt scenes and the `m:ss` assertions) and `tests/browser/dr04-density.spec.mjs` with its new size-map journey. The evidence of the two engines is written to `target/checks/dr07-a11y-<engine>/` and `target/checks/dr04-density/` | PASS | screen reader, forced-colors and native WebKitGTK NOT_RUN |
+
+The permanent coverage of this round lives in two journeys: the DR-07
+journey owns the drawer's exits, the permanent announcement surfaces and the
+time format, and the new DR-04 size-map journey owns the cover radius and
+the three states of the volume. Both run in Chromium and in Firefox against
+the real server with real uploaded tracks.
+
+## DR-04 dense desktop control with real 44px targets — 2026-10-22
+
+| Check | Paths | Evidence | Status | NOT_RUN |
+| --- | --- | --- | --- | --- |
+| Every visible control is a real 44px target | apps/web/style.css | Measured with `getBoundingClientRect()` on the live document, not from the stylesheet. The Library at 1284×856 with a real current track: **20** visible interactive targets had a side below 44px before the change (12 navigation items 181×41, the player's favorite 32×36, four transport buttons 28×28, three utility buttons 32×32) and **0** after it. The same measurement is 0 at 1440×900, 1728×1000, 768×1024, 390×844 and 320×700. The idle library (nothing playing) and the library with a current track are measured separately; the disabled transport is listed as disabled and the enabled controls are re-measured after the track loads | PASS measured | Screen reader NOT_RUN; the target sizes are visual geometry, not an announcement |
+| The Play button and the seek range never overlap (DV-15) | apps/web/style.css | The real rectangles at 1284×856: before, the Play button was `y779..823` and the seek range `y811..855` — a 12px vertical overlap. After, the transport row is `y768..812` and the seek row `y812..856`, the range is `y812..856`, and the pairwise intersection area between the Play button, the four transport buttons, the three utility buttons, the player's favorite and the seek range is **0px²**. The same 0px² holds at 1440×900, 1728×1000 and 768×1024, and at the 80%, 100% and 150% app sizes | PASS measured | — |
+| The band keeps its 88px and the hairline costs nothing | apps/web/style.css | The physical `border-top` is gone (`border-top-width: 0px`) and the hairline is drawn by `.player-bar::before` (`height: 1px`, `background: rgb(52, 59, 46)`, `pointer-events: none`). The band still measures 88px at 1284×856, 1440×900, 1728×1000 and 768×1024 (`y768..856`, `y812..900`, `y912..1000`, `y936..1024`) | PASS measured | — |
+| The transport is dense, not inflated | apps/web/style.css | Five 44px controls and four 4px gaps = 236px of transport. The transport glyph is 15px and the utility glyph 17px; the Play face is 32px inside its 44px hit box; the volume is 65×44 at ≥1101px and 44×44 at ≤1100px | PASS measured | — |
+| The navigation step is the item itself | apps/web/style.css | The measured navigation item is 181×44 with a 44px step, so twelve entries occupy 528px exactly. The measured gaps between the sidebar's own groups are 24px (the brand keeps its own 24px bottom margin, which is why the first gap is 48px). No margin is added on top of any entry. Account and Settings are reached by scrolling the one sidebar region | PASS measured | — |
+| The heading keeps its fluid roles | apps/web/style.css | The section heading is 20px/600 (was 21px/600); the general `h2` is 24px/600; the page heading is the fluid `clamp(28px, 2.7vw, 38px)`/650 and measured 34.668px/650 at 1284×856. Manrope, the 14px base, the 12px/550 row title and the 12px secondary text are unchanged. The text-leaf table before → after differs in exactly one entry | PASS measured | — |
+| Real pointer and focus actions | apps/web/style.css | A real `Tab` press puts the browser in the keyboard focus modality, then every visible transport control is focused: `document.activeElement` is that control, `:focus-visible` matches and the outline is 2px. A real `mouse.click` on the middle of the seek rail moves the range to the middle of the real track (the 4s fixture: 2.0s of 4.0s) | PASS measured | — |
+| The source, the queue and the cursor are untouched | apps/web/src/main.rs | After the geometry change, navigating Home → Search → Settings → Library keeps the same `src` and the same `data-source-generation` of the single root media element; the document still holds exactly one `audio` element | PASS measured | — |
+| The app size 80/100/150 keeps the composition | apps/web/style.css | The app's own size control (Settings → Appearance) was used: 4 × `Decrease app size` → 80%, `Reset to 100%`, 10 × `Increase app size` → 150%. At 768×1024, 1284×856, 1440×900 and 1728×1000 the document overflow is 0px, the body overflow is 0px and the control intersections are 0px². The app size is a CSS zoom on the document root, so the shell became a query container and the transport column follows the layout width (856px at a 1284px window and 150%) instead of the visual viewport | PASS measured | The app size does not move the viewport breakpoints for the rest of the application — only the player's composition follows the layout width. **The 44px target is NOT preserved at an 80% app size — see the next row** |
+| The 44px target and the app size are two different things | apps/web/style.css, target/checks/dr04-density/dr04-density-matrix.json | The 44px target is a size in the layout coordinate system. The app size is a CSS `zoom` on the document root, so `getBoundingClientRect()` returns the **scaled** rectangle: at an 80% app size a 44×44 layout box measures **35.2×35.2** in the viewport. Measured in the live document over the 768/1284/1440/1728 windows: at an 80% app size **50 of 51** (768×1024) and **52 of 53** (the three wider windows) visible interactive targets measure below 44px, while at 100% the count is **0** and at 150% it is **0**. The browser zoom is a different mechanism: it shrinks the CSS viewport instead of the elements, so at 80/100/150% browser zoom the count is **0** at every window. The 44px guarantee therefore holds for the 100% and 150% app sizes and for every browser zoom, and does **not** hold for the 80% app size — the user has asked for a smaller interface, and the hit boxes shrink with it | PASS measured | The 80% app size is a deliberate user choice, not a defect of this package; the 44px target is a property of the 100% layout, and it is not restored at 80% |
+| The browser zoom 80/100/150 keeps the composition | apps/web/style.css | The browser zoom was emulated as a device scale factor of 0.8, 1 and 1.5 over the 768/1284/1440/1728 windows, so the CSS viewport is the window divided by the zoom and the media queries agree with the layout again. At every combination the document overflow is 0px, the body overflow is 0px and the control intersections are 0px². A layout narrower than 760px is the mobile composition and keeps its own 120px band | PASS measured | Browser zoom 200% NOT_RUN |
+| The mobile composition did not regress | apps/web/style.css | 320×700 and 390×844: 0 visible targets with a side below 44px, the band is still 120px, the physical 1px border is kept, the transport gap is still 8px and the control intersections are 0px² | PASS measured | The first track is still cut off at 320px; that is DR-06's scope and it was not changed here |
+| Rust quality and web build | workspace | `cargo fmt --all -- --check` exit 0; `cargo clippy --locked --workspace --all-targets -- -D warnings` exit 0; `cargo test --locked --workspace -- --test-threads=2` (380 passed, 0 failed, 3 ignored); `cargo build --locked -p vela-web --target wasm32-unknown-unknown --release` exit 0; `scripts/build-web.sh` exit 0 (wasm-bindgen 0.2.129) into `dist/`; `cargo build --locked -p vela-server` exit 0 | PASS | The native client's WebKitGTK rendering, its physical audio and the Docker runtime NOT_RUN: no X server on this host |
+| Browser suites | tests/browser | Chromium Playwright suite PASS (68 passed, 1 skipped — the opt-in live import, 4.7m) and Firefox Playwright suite PASS (68 passed, 1 skipped, 6.0m), both including the permanent `tests/browser/dr04-density.spec.mjs` (5 journeys) and the updated TR03 and TR04a in `tests/browser/prototype-transfer.spec.mjs`. The DR04 journey now also reads the queue and the cursor through the drawer's own projection (3 rows, 1 current occurrence, both unchanged across a Home/Search/Settings round trip), and the app-size matrix asserts the measured `zoom` against the requested percent so a broken size switch cannot leave it green. Firefox advances media time because the host's PulseAudio null sink (`vela_ci`) is up; without it the audio assertions fail on an unchanged baseline as well | PASS measured | screen reader, forced-colors and native WebKitGTK NOT_RUN |
+
+Permanent coverage: `tests/browser/dr04-density.spec.mjs` owns its server, data
+and sessions and measures the live rectangles: the target table of the idle and
+the playing library, the tiled 44px transport and seek rows, the zero
+intersection area, the hairline, the glyph sizes against the button sizes,
+the 44px navigation step and the 528px total, the 20px section heading, the
+fluid page heading, a real focus action on every transport control, a real
+pointer click on the seek rail, the source-preservation round trip, the
+80/100/150% app-size matrix at four viewports and the 320/390 mobile
+regression. The before/after tables and the text-leaf table live in
+`target/checks/dr04-density/` (`dr04-density-before.json`,
+`dr04-density-after.json`, `dr04-density-desktop.json`,
+`dr04-density-matrix.json`) and the screenshots in
+`target/checks/dr04-density/shots/`. The capture harness is
+`tests/browser/dr04-density.mjs` and the screenshot matrix is
+`tests/browser/dr04-shots.mjs`.
+
+### The decisive review round (Codex gpt-6.1-sol xhigh, 2026-10-22)
+
+The decisive reviewer returned `REJECT` on the first pass with four blockers,
+all of them documentation claims rather than code, and every one of them was
+reproduced by the team lead before it was accepted:
+
+- **`container-type: inline-size` was described as applying
+  `contain: layout style inline-size`.** It does not. The property applies
+  style and inline-size containment only, so the shell is not the containing
+  block of its `position: fixed` descendants and creates no stacking context.
+  Verified by measurement, not by reading: a probe page reported the fixed
+  child anchored to the viewport (`right: 1400` with an 800px container), a
+  negative `z-index` descendant escaping the container, and
+  `computedStyle(shell).contain === 'none'`; the same probe with
+  `contain: layout style inline-size` anchored the child to the container
+  (`right: 800`) and confined the negative descendant. Real application at a
+  150% app size: the shell box and the viewport coincide, which is the
+  neutral case the limitation now states.
+- **The `dvh` definition was corrected but its old conclusion survived.** The
+  conclusion "the visible area is shorter than the shell" does not follow:
+  the dynamic viewport already accounts for the toolbar. The claim is now
+  withdrawn rather than restated.
+- **`.sidebar .nav-item` was called 44×44.** The rule sets `width: 100%`; the
+  measured rectangle is **181×44**. The step is 44px tall, which is what the
+  528px total rests on.
+- **The 152px stack was explained with two 8px gaps.** The artifact is
+  74 + 8 + 70 = 152; the collapsed absolute row adds no gap because a flex
+  `gap` only separates in-flow items.
+
+Two non-blocking remarks were also adopted: the DR04 journey now reads the
+queue count, the rows and the current occurrence from the drawer instead of
+asserting them in a comment (verified non-vacuous: 3 rows, 1 current row, and
+a deliberately altered queue fails the comparison), and the app-size matrix
+asserts the measured `zoom` against the requested percent.
+
+The second reviewer (`omp` reviewer, minimax-m3.1-flash, thinking max) did
+**not** produce a verdict: it ran 131 minutes and hit its own 7200s timeout
+(exit 124) in a read-only pass, after two earlier attempts in previous cycles
+died to memory pressure. That is NOT_RUN, not an agreement.
+
+The `::before` hairline and the 44px boxes are geometry, not announcements: a
+screen reader was not run, `forced-colors: active` was not emulated, browser
+zoom 200% was not exercised, the native WebKitGTK client, its physical audio
+and the Docker runtime were not run (no X server on this host).
+
 ## DR-07 keyboard readable queue drawer — 2026-10-21, second review 2026-10-22
 
 | Check | Paths | Evidence | Status | NOT_RUN |

@@ -19,7 +19,7 @@
 .home-feature {
   position: relative;
   height: 250px;
-  border-radius: 10px;
+  border-radius: 12px;
   overflow: hidden;
   background-image: url("/assets/brand/vela-coast.png");
   background-size: cover;
@@ -196,7 +196,7 @@
 .home-wave {
   position: relative;
   height: 250px;
-  border-radius: 10px;
+  border-radius: 12px;
   overflow: hidden;
   background-image: url("/assets/brand/vela-wave.png");
   background-size: cover;

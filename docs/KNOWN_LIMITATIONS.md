@@ -1,5 +1,140 @@
 # Unsupported and unverified functionality
 
+## DR-04/DR-05/DR-07 audit round — 2026-10-22
+
+The five defects of the independent audit were closed with source changes and
+with measurements of the live document in Chromium and in Firefox: the
+duplicate time formatter is gone, the drawer has no closer of its own, every
+declared rhythm role is consumed with the value it already had, the size map
+and the volume paragraph say the same thing, and the root receipt is a
+permanent live region.
+
+The second audit of the same tree found three more point defects, all closed
+here: the recovery status and the Undo receipt are permanent live regions
+like the ordinary receipt, the drawer and the root share one lookup of the
+drawer's native dialog, and the Now Playing trigger limitation below says
+what the code does. What was *not* measured is stated here:
+
+- No screen reader was run. The live-region claims are DOM facts — the node
+  is in the DOM before the first message, only its text changes, the empty
+  row is out of the flow — and not observed announcements. A person using
+  a screen reader is the only judge of how the rows are actually read.
+- `forced-colors: active` was not emulated. The focus rules are unchanged,
+  but the rendering of the collapsed receipt and of the 44px boxes in forced
+  colors was not observed.
+- Browser zoom 200% was not exercised; the application's own 80/100/150%
+  size was, and the browser zoom is a separate mechanism.
+- The native client's WebKitGTK rendering, its physical audio and the Docker
+  runtime were not run: this host has no X server.
+- The Now Playing sheet does not restore the focus itself: the native
+  dialog's own focus restore hands it back to the element that held the
+  focus when the sheet opened. The application freezes that element only to
+  donate it to the queue drawer, so that the drawer's own exits return the
+  focus to the sheet's opener. The frozen element is whatever held the focus
+  at that moment — the code refuses only the document body — so on a platform
+  where a pointer click does not focus a button the sheet's own opener is
+  *not* the frozen element: the previously focused control is (the player's
+  queue button, for example), and the drawer would hand the focus back to
+  that control instead of to the sheet's opener. The browser's own focus
+  restore is the fallback only when the focus was on the document body
+  before the click. Chromium and Firefox focus a clicked button on Linux,
+  and the path was measured in both; no other platform was measured.
+- The shell is a query container (`container-type: inline-size`). The side
+  effect of that property is narrower than it is often described:
+  `container-type: inline-size` applies **style** and **inline-size**
+  containment, and it does **not** apply layout or paint containment. The
+  shell is therefore *not* the containing block of its `position: fixed`
+  descendants and it does *not* establish a stacking context. This was
+  measured, not assumed: in Chromium a `position: fixed` child of a
+  `container-type: inline-size` element is anchored to the **viewport** (its
+  right edge is the viewport's right edge, not the container's), a negative
+  `z-index` descendant escapes the container and paints below the
+  container's own background, and `getComputedStyle(shell).contain` reads
+  `none` with `container-type: inline-size`. The same probe with
+  `contain: layout style inline-size` behaves differently on both counts
+  (the fixed child is anchored to the container and the negative descendant
+  stays inside it), which is what shows the two cases apart. The root's
+  feedback stack, the mobile track-menu backdrop and panel and the native
+  dialogs with their own fixed panels are therefore fixed layers of the
+  **viewport**, and the shell's own `overflow: hidden` does not clip them.
+  Style containment does scope counters and quotes to the container, which
+  this application does not rely on.
+  The consequence that was measured and is not a defect: the shell is
+  exactly `100dvh / zoom` tall, so at 100% and 150% the container box and the
+  viewport coincide, and the DR-04 and DR-05 measurements found no overlap
+  between the stack, the player and the mobile navigation. A browser with a
+  dynamic toolbar was not measured. `dvh` is the *dynamic* viewport size —
+  it tracks the viewport as the toolbar shows and hides — and it is **not**
+  the largest size in the `vh` family (`lvh` is); the dynamic viewport already
+  accounts for the toolbar, so the visible area is not automatically shorter
+  than the shell, and no claim is made about that case.
+- The shell's container query is evaluated one layout late in Firefox when
+  the app size (a CSS `zoom` on the document root) and the window width
+  change together: at a 150% app size in an 800px window the volume was
+  still drawn until the page was reloaded, while Chromium hid it at once.
+  On a settled layout — a reload with the size kept — both engines agree:
+  the volume yields below 600px of layout width, the queue and the mute
+  stay. The permanent journey measures the settled layout, and the
+  difference is recorded here rather than hidden.
+
+## DR-04 dense desktop control with real 44px targets — 2026-10-22
+
+The package was measured as geometry: the live rectangles of every visible
+control, the intersection area between the desktop transport and the seek
+range, the height of the player band, the navigation step and the type of the
+headings were read from the running document in Chromium and in Firefox. A
+screen reader was not run, so the announcement of the new targets is a
+source-level guarantee, not a measured one. `forced-colors: active` was not
+emulated: the rules that paint the focus ring exist and are unchanged, but the
+forced-colors rendering of the 44px boxes was not observed. Browser zoom
+200% was not exercised; the application's own 80/100/150% size was, and the
+browser zoom is a separate mechanism. The native client's WebKitGTK rendering,
+its physical audio and the Docker runtime were not run: this host has no X
+server.
+
+Three deliberate exceptions to the desktop density are recorded rather than
+hidden:
+
+- The coarse-pointer composition keeps its 8px transport gap and its 19px
+  glyphs. It is the accepted touch adaptation, and the desktop composition
+  owns the 4px gap and the 15/17px glyphs. The two are not the same
+  measurement, and the "236px transport" number belongs to the fine pointer.
+- The card and icon surfaces (the job card, the import preview, the job icon)
+  keep their 9px radius. They are surfaces, not controls, and only the
+  control, input, button and track-row radii moved to 8px.
+- The Home title's fluid `clamp(30px, 3.1vw, 45px)` reaches 45px, which is
+  above the 19–42px range of the design directive. That is a documented source
+  exception and this package did not change it.
+
+The app size also scales the **hit boxes**. The 44px target is a size in the
+layout coordinate system, but `getBoundingClientRect()` returns the scaled
+rectangle, so at an 80% app size a 44x44 layout box measures **35.2x35.2** in
+the viewport. Measured over the 768/1284/1440/1728 windows, at an 80% app
+size **50 of 51** and **52 of 53** visible interactive targets measure below
+44px; at 100% and 150% the count is **0**. The browser zoom is a different
+mechanism - it shrinks the CSS viewport instead of the elements - so at
+80/100/150% browser zoom the count is **0** everywhere. The 44px guarantee
+belongs to the 100% layout; a user who asks for an 80% interface gets smaller
+hit boxes with it, and this package did not change that.
+
+The app size is a CSS `zoom` on the document root. It scales the layout but it
+does not move the viewport media queries, so at a 150% app size in a 1284px
+window the content is laid out in 856px while the breakpoints still answer
+"desktop". This package made the *player* follow the real layout width: the
+shell became a query container, so the transport column is sized by its own
+content below 1100px of layout width and the control intersections are 0. The
+rest of the application still answers to the visual viewport, which is a
+property of the app-size feature and belongs to the package that owns it.
+Below 600px of layout width the player's volume yields first — the queue and
+the mute stay, and the volume remains reachable in the queue drawer and in the
+Now Playing sheet — because the desktop transport and the whole utility zone
+do not fit side by side in that width.
+
+The mobile composition was not redesigned here. At 320px the first track is
+still cut off by the mini-player band; that is DR-06's scope, and this package
+kept the 120px band, the 8px transport gap and the 44px navigation targets
+unchanged.
+
 ## DR-07 keyboard readable queue drawer — 2026-10-21, second review 2026-10-22
 
 The drawer's focus ring, its two rails, their visible names, its Tab order and

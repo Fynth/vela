@@ -567,13 +567,6 @@ impl SleepTimer {
         receipt.set(message);
     }
 
-    /// Drop the message of the last transition. The next open starts from
-    /// an empty line, so a message that was already delivered is never
-    /// repeated.
-    fn clear_status(mut self) {
-        self.status.set(String::new());
-    }
-
     /// Stop the timer and drop its message. The generation retires the
     /// running countdown of the session that is gone.
     fn stop(mut self) {
@@ -1268,6 +1261,12 @@ struct Surfaces {
     command: Signal<u64>,
     reads: client::RequestScope,
     return_focus: Rc<RefCell<Option<web_sys::Element>>>,
+    /// The Now Playing sheet's own trigger. The sheet opens from a control
+    /// in the player bar, and its "View full queue" opens the drawer, so
+    /// the drawer must hand the focus back to the control that opened the
+    /// sheet and not to the button inside the sheet that leaves the DOM
+    /// with it.
+    now_focus: Rc<RefCell<Option<web_sys::Element>>>,
     /// The drawer's own trigger. The drawer and the row menu are two
     /// different surfaces, so they freeze two different controls: the
     /// drawer's focus return is never the row's More button.
@@ -1322,6 +1321,10 @@ impl Surfaces {
     /// inside that surface. The drawer keeps this trigger in its own slot,
     /// so a row menu that is open behind it keeps its own frozen trigger
     /// and never takes the drawer's focus return.
+    ///
+    /// A control inside another open dialog is not a trigger either: that
+    /// surface is closing and its elements leave the DOM with it, so a
+    /// focus restore to one of them would land on the document body.
     fn capture_queue_trigger(&self) {
         if self.queue_focus.borrow().is_some() {
             return;
@@ -1335,7 +1338,51 @@ impl Surfaces {
         if active.tag_name().eq_ignore_ascii_case("BODY") {
             return;
         }
+        if active.closest("dialog[open]").ok().flatten().is_some() {
+            return;
+        }
         *self.queue_focus.borrow_mut() = Some(active);
+    }
+
+    /// Freeze the control that opened the Now Playing sheet. The sheet is
+    /// a native modal dialog: it keeps the focus inside itself, and the
+    /// control that opened it is the one the focus belongs to when the
+    /// sheet closes. The trigger is frozen while it still owns the focus.
+    fn capture_now_trigger(&self) {
+        if self.now_focus.borrow().is_some() {
+            return;
+        }
+        let Some(document) = web_sys::window().and_then(|window| window.document()) else {
+            return;
+        };
+        let Some(active) = document.active_element() else {
+            return;
+        };
+        if active.tag_name().eq_ignore_ascii_case("BODY") {
+            return;
+        }
+        *self.now_focus.borrow_mut() = Some(active);
+    }
+
+    /// Hand the Now Playing sheet's own trigger to the drawer. The sheet's
+    /// "View full queue" is a control inside the sheet, and the sheet
+    /// leaves the DOM with the button, so the drawer freezes the control
+    /// that opened the sheet instead.
+    fn promote_now_trigger(&self) {
+        if self.queue_focus.borrow().is_some() {
+            return;
+        }
+        let trigger = self.now_focus.borrow_mut().take();
+        if let Some(trigger) = trigger {
+            *self.queue_focus.borrow_mut() = Some(trigger);
+        }
+    }
+
+    /// Drop the Now Playing sheet's trigger. The sheet closed without
+    /// opening the drawer, so the control it was opened from is not a
+    /// trigger any more.
+    fn clear_now_trigger(&self) {
+        self.now_focus.borrow_mut().take();
     }
 
     /// Freeze the invoking trigger: the focused control inside this row for a
@@ -1396,7 +1443,9 @@ impl Surfaces {
     /// top layer there and would otherwise pull focus to the document body),
     /// so focus is restored after it instead of racing it. A trigger that is
     /// no longer connected is not focused, and a newer surface generation
-    /// means a later surface owns the focus now.
+    /// means a later surface owns the focus now. A control that already owns
+    /// the focus keeps it: the restore returns a focus that was dropped, and
+    /// it never takes the focus away from whoever took it.
     fn focus_later(&self, target: Option<web_sys::Element>) {
         let Some(element) = target else {
             return;
@@ -1405,10 +1454,21 @@ impl Surfaces {
         let generation = *self.generation.peek();
         wasm_bindgen_futures::spawn_local(async move {
             TimeoutFuture::new(0).await;
-            if *surfaces.generation.peek() == generation
-                && element
-                    .dyn_ref::<web_sys::Node>()
-                    .is_some_and(web_sys::Node::is_connected)
+            if *surfaces.generation.peek() != generation {
+                return;
+            }
+            let active = web_sys::window()
+                .and_then(|window| window.document())
+                .and_then(|document| document.active_element());
+            if let Some(active) = active
+                && !active.tag_name().eq_ignore_ascii_case("BODY")
+                && active.is_connected()
+            {
+                return;
+            }
+            if element
+                .dyn_ref::<web_sys::Node>()
+                .is_some_and(web_sys::Node::is_connected)
                 && let Ok(control) = element.dyn_into::<web_sys::HtmlElement>()
             {
                 let _ = control.focus();
@@ -1513,6 +1573,7 @@ impl Surfaces {
         busy.set(false);
         error.set(String::new());
         self.return_focus.borrow_mut().take();
+        self.now_focus.borrow_mut().take();
         self.queue_focus.borrow_mut().take();
     }
 }
@@ -1520,7 +1581,10 @@ impl Surfaces {
 /// The queue drawer's native dialog. The drawer leaves the top layer
 /// before it leaves the DOM: a modal dialog that is removed while it is
 /// open drops the focus on the document body.
-fn queue_dialog() -> Option<web_sys::HtmlDialogElement> {
+///
+/// This is the one lookup of the element: the drawer module asks the root
+/// for the same dialog instead of keeping a second copy of the lookup.
+pub(crate) fn queue_dialog() -> Option<web_sys::HtmlDialogElement> {
     web_sys::window()?
         .document()?
         .get_element_by_id("queue-drawer-dialog")?
@@ -1794,6 +1858,7 @@ fn App() -> Element {
         command: Signal::new(0),
         reads: client::RequestScope::default(),
         return_focus: Rc::new(RefCell::new(None)),
+        now_focus: Rc::new(RefCell::new(None)),
         queue_focus: Rc::new(RefCell::new(None)),
     });
     // The lean web build has no mounted event, so the active layer is focused
@@ -1873,7 +1938,7 @@ fn App() -> Element {
     let mut favorite_pending = use_signal(|| None::<String>);
     let mut shuffle = use_signal(|| false);
     let mut repeat = use_signal(|| "off".to_string());
-    let mut show_queue = use_signal(|| false);
+    let show_queue = use_signal(|| false);
     // The sleep timer and the surface that can announce it are one unit:
     // the drawer shows the message of a transition while it is open, the
     // root's receipt shows it while it is closed.
@@ -1923,10 +1988,20 @@ fn App() -> Element {
     let mut now_track = use_signal(|| None::<(String, usize)>);
     let now_surfaces = surfaces.clone();
     let now_actions = use_hook(move || now_playing::Actions {
-        close: EventHandler::new(move |_| now.close()),
-        failed: EventHandler::new(move |message| {
-            now.close();
-            error.set(message);
+        close: EventHandler::new({
+            let surfaces = now_surfaces.clone();
+            move |_| {
+                now.close();
+                surfaces.clear_now_trigger();
+            }
+        }),
+        failed: EventHandler::new({
+            let surfaces = now_surfaces.clone();
+            move |message| {
+                now.close();
+                surfaces.clear_now_trigger();
+                error.set(message);
+            }
         }),
         toggle: EventHandler::new(move |_| toggle_playback(playback)),
         previous: EventHandler::new(move |_| advance(Command::Previous, playback)),
@@ -1940,8 +2015,12 @@ fn App() -> Element {
         }),
         retry: EventHandler::new(move |_| engine.peek().resume()),
         queue: EventHandler::new(move |_| {
-            // The sheet leaves the top layer first, so the focus is back on
-            // the sheet's own trigger when the drawer freezes it.
+            // The sheet's own trigger is the drawer's trigger: the button
+            // inside the sheet leaves the DOM with it, so the drawer
+            // freezes the control that opened the sheet.
+            now_surfaces.promote_now_trigger();
+            // The sheet leaves the top layer first, so the drawer never
+            // opens on top of an open native dialog.
             now.close();
             open_queue(show_queue, sleep, &now_surfaces);
         }),
@@ -3110,60 +3189,106 @@ fn App() -> Element {
                    is never hidden under a receipt and an Undo is never lost
                    when a general notice arrives. */
                 div { class: "feedback-stack", role: "group", "aria-label": "Playback feedback",
-                    // The recovery row is the root's projection of the same
+                    // D1: the recovery row is a permanent live region. The node
+                    // is in the DOM before the first failure, so the message is
+                    // a change of the text of a region that was already there
+                    // and never the insertion of the region together with its
+                    // content. The row is the root's projection of the same
                     // status that the open Now Playing and Queue dialogs show
                     // in their own body. While either dialog is open the root
-                    // projection is withheld, so the message is stated once.
-                    // The root state itself is untouched: the recovery row
-                    // returns when the dialog closes.
-                    if !playback_status().is_empty() && !*now.open.read() && !show_queue() { div { class: "alert error playback-status", role: "status",
-                        span { "{playback_status}" }
-                        button { class: "text-button", onclick: move |_| engine.peek().resume(), "Retry playback" } } }
-                    if let Some(undo) = playlist_undo() { div { class: "alert success playlist-undo", role: "status",
-                        div { span { "Added “{undo.title}” to {undo.name}." }
-                            if !playlist_undo_error().is_empty() { p { role: "alert", "{playlist_undo_error}" } }
-                        }
-                        button { class: "button secondary small", disabled: playlist_undo_pending.read().is_some(), onclick: { let surfaces = surfaces.clone(); move |_| {
-                            if playlist_undo_pending.peek().is_some() || playlist_undo.peek().as_ref() != Some(&undo) { return; }
-                            let undo = undo.clone();
-                            playlist_undo_error.set(String::new());
-                            playlist_undo_pending.set(Some(undo.mutation_id.clone()));
-                            let command = surfaces.next_command();
-                            let surfaces_done = surfaces.clone();
-                            spawn_authorized(auth, async move {
-                                // A lost DELETE response retries the same inverse. A late
-                                // receipt may acknowledge its own removal, never erase a
-                                // newer Add receipt or publish an error over its dialog.
-                                let path = format!("/api/playlists/{}/items/{}?revision={}&mutation_id={}", undo.playlist_id, undo.item_id, undo.revision, undo.mutation_id);
-                                let outcome = mutate("DELETE", &path, None, &token(auth)).await;
-                                if playlist_undo_pending.peek().as_ref() == Some(&undo.mutation_id) { playlist_undo_pending.set(None); }
-                                if playlist_undo.peek().as_ref() == Some(&undo) {
-                                    match outcome {
-                                        Ok(()) => {
-                                            playlist_undo.set(None);
-                                            playlist_undo_error.set(String::new());
-                                            if *surfaces_done.command.peek() == command { notice.set("Removed the added track.".into()); }
+                    // projection is withheld: the row stays in the DOM, empty
+                    // and collapsed, so the message is stated once. The root
+                    // state itself is untouched: the message returns when the
+                    // dialog closes.
+                    { let recovery = if *now.open.read() || show_queue() { String::new() } else { playback_status() };
+                      let recovering = !recovery.is_empty();
+                      rsx! {
+                        div { class: if recovering { "alert error playback-status" } else { "alert error playback-status is-empty" },
+                            span { role: "status", "{recovery}" }
+                            if recovering { button { class: "text-button", onclick: move |_| engine.peek().resume(), "Retry playback" } } }
+                      } }
+                    // D1: the Undo receipt is a permanent live region as well.
+                    // The row is in the DOM before the first Add, so the
+                    // message is a change of the text of a region that was
+                    // already there. The row is empty and collapsed while
+                    // there is no receipt, and the actions are rendered only
+                    // while there is something to undo: an empty row is a
+                    // region, never a control. The Undo failure is a permanent
+                    // alert region for the same reason: the region is there
+                    // before the failure, so the failure is announced.
+                    { let undo = playlist_undo();
+                      let undo_error = playlist_undo_error();
+                      let undo_failed = !undo_error.is_empty();
+                      let undo_class = if undo.is_some() { "alert success playlist-undo" } else { "alert success playlist-undo is-empty" };
+                      rsx! {
+                        div { class: undo_class,
+                            div { span { role: "status", if let Some(undo) = undo.as_ref() { "Added “{undo.title}” to {undo.name}." } }
+                                p { class: if undo_failed { "undo-error" } else { "undo-error is-empty" }, role: "alert", "{undo_error}" }
+                            }
+                            if let Some(undo) = undo {
+                                button { class: "button secondary small", disabled: playlist_undo_pending.read().is_some(), onclick: { let surfaces = surfaces.clone(); move |_| {
+                                    if playlist_undo_pending.peek().is_some() || playlist_undo.peek().as_ref() != Some(&undo) { return; }
+                                    let undo = undo.clone();
+                                    playlist_undo_error.set(String::new());
+                                    playlist_undo_pending.set(Some(undo.mutation_id.clone()));
+                                    let command = surfaces.next_command();
+                                    let surfaces_done = surfaces.clone();
+                                    spawn_authorized(auth, async move {
+                                        // A lost DELETE response retries the same inverse. A late
+                                        // receipt may acknowledge its own removal, never erase a
+                                        // newer Add receipt or publish an error over its dialog.
+                                        let path = format!("/api/playlists/{}/items/{}?revision={}&mutation_id={}", undo.playlist_id, undo.item_id, undo.revision, undo.mutation_id);
+                                        let outcome = mutate("DELETE", &path, None, &token(auth)).await;
+                                        if playlist_undo_pending.peek().as_ref() == Some(&undo.mutation_id) { playlist_undo_pending.set(None); }
+                                        if playlist_undo.peek().as_ref() == Some(&undo) {
+                                            match outcome {
+                                                Ok(()) => {
+                                                    playlist_undo.set(None);
+                                                    playlist_undo_error.set(String::new());
+                                                    if *surfaces_done.command.peek() == command { notice.set("Removed the added track.".into()); }
+                                                }
+                                                Err(message) => if *surfaces_done.command.peek() == command { playlist_undo_error.set(message); },
+                                            }
                                         }
-                                        Err(message) => if *surfaces_done.command.peek() == command { playlist_undo_error.set(message); },
-                                    }
-                                }
-                                if let Ok(value) = api::<Vec<PlaylistSummary>>("GET", "/api/playlists", None, "").await
-                                    && *surfaces_done.command.peek() == command {
-                                    playlists.set(value);
-                                }
-                            });
-                        } }, if playlist_undo_pending.read().is_some() { "Undoing…" } else { "Undo" } }
-                        button { class: "icon-button", "aria-label": "Dismiss added-track receipt", onclick: move |_| playlist_undo.set(None), Icon { name: "close" } }
-                    } }
-                    if !notice().is_empty() { div { class: "alert success", role: "status",
-                        span { "{notice}" }
-                        button { "aria-label": "Dismiss notification", onclick: move |_| notice.set(String::new()), Icon { name: "close" } } } }
+                                        if let Ok(value) = api::<Vec<PlaylistSummary>>("GET", "/api/playlists", None, "").await
+                                            && *surfaces_done.command.peek() == command {
+                                            playlists.set(value);
+                                        }
+                                    });
+                                } }, if playlist_undo_pending.read().is_some() { "Undoing…" } else { "Undo" } }
+                                button { class: "icon-button", "aria-label": "Dismiss added-track receipt", onclick: move |_| { playlist_undo.set(None); playlist_undo_error.set(String::new()); }, Icon { name: "close" } }
+                            }
+                        }
+                      } }
+                    // DR-05: the ordinary receipt is a permanent live region.
+                    // The node is in the DOM before the first message, so an
+                    // announcement depends on a change of the text and never
+                    // on the insertion of the region together with its
+                    // content: the same message is not read twice, and a
+                    // message that repeats is not read again. The empty
+                    // receipt is collapsed by its own stylesheet, so it takes
+                    // no space and shows nothing. The dismiss control sits
+                    // outside the live region, so its own name is never read
+                    // with the message.
+                    div { class: if notice().is_empty() { "alert success notice-receipt is-empty" } else { "alert success notice-receipt" },
+                        span { role: "status", "{notice}" }
+                        if !notice().is_empty() { button { "aria-label": "Dismiss notification", onclick: move |_| notice.set(String::new()), Icon { name: "close" } } } }
                 }
 
                 div { class: "player-bar", "aria-label": "Music player",
                     div { class: "player-now",
                         if let Some(track)=current.clone() {
-                            button { class:"now-playing now-playing-trigger","aria-label":"Open now playing","aria-haspopup":"dialog",onclick:move |_|{show_queue.set(false); sleep.clear_status(); now.show();},
+                            button { class:"now-playing now-playing-trigger","aria-label":"Open now playing","aria-haspopup":"dialog",onclick:{ let surfaces = surfaces.clone(); move |_|{
+                                // The drawer leaves the top layer through the one
+                                // common path, so the frozen trigger is handed
+                                // back and the sheet never opens on top of a
+                                // native dialog that is still open.
+                                close_queue(show_queue, sleep, &surfaces);
+                                // The sheet freezes the control that opened it,
+                                // so the drawer can hand the focus back to it.
+                                surfaces.capture_now_trigger();
+                                now.show();
+                            }},
                                 Art {key:"{track.id}-{track.artwork_id:?}",track:track.clone()}
                                 span {class:"now-playing-meta",
                                     span {class:"now-playing-heading",strong {class:"player-title","{track.title}"}
@@ -3235,7 +3360,17 @@ fn App() -> Element {
                             if muted() { MutedIcon {} } else { Icon { name: "volume" } }
                         }
                         input { id:"player-volume", r#type:"range", min:"0", max:"1", step:"0.01", value:"{volume_value}", "aria-label":"Volume", oninput: move |e| { if let Ok(value) = e.value().parse::<f64>() { if *muted.peek() { muted.set(false); } change_volume(value,volume); } } }
-                        button { class:"icon-button player-expand","aria-label":"Expand player","aria-haspopup":"dialog",disabled:current.is_none(),onclick:move |_| {show_queue.set(false); sleep.clear_status(); now.show();}, ExpandIcon {} }
+                        button { class:"icon-button player-expand","aria-label":"Expand player","aria-haspopup":"dialog",disabled:current.is_none(),onclick:{ let surfaces = surfaces.clone(); move |_| {
+                            // The drawer leaves the top layer through the one
+                            // common path, so the frozen trigger is handed back
+                            // and the sheet never opens on top of a native
+                            // dialog that is still open.
+                            close_queue(show_queue, sleep, &surfaces);
+                            // The sheet freezes the control that opened it, so
+                            // the drawer can hand the focus back to it.
+                            surfaces.capture_now_trigger();
+                            now.show();
+                        }}, ExpandIcon {} }
                     }
                 }
                 /* TR07: the add-to-playlist picker is a native modal dialog, so the

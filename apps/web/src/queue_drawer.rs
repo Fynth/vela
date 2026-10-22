@@ -2,50 +2,23 @@
 //! never a second player and never a second copy of the queue.
 use crate::icons::Icon;
 use crate::playback::Projection;
+use crate::queue_dialog;
 use crate::seconds;
 use dioxus::prelude::*;
 use gloo_timers::future::TimeoutFuture;
 use vela_domain::Track;
-use wasm_bindgen::JsCast;
 
-/// The drawer is a native modal dialog: the browser owns the focus trap, the
-/// top layer and the backdrop. This mirrors `now_playing::dialog`; the lean
-/// Dioxus web build has no mounted-event support, so the element is looked up
-/// after the renderer's DOM batch instead.
-fn drawer() -> Option<web_sys::HtmlDialogElement> {
-    web_sys::window()?
-        .document()?
-        .get_element_by_id("queue-drawer-dialog")?
-        .dyn_into()
-        .ok()
-}
-
-/// Format a millisecond duration as `m:ss`.
-fn format_duration(duration_ms: i64) -> String {
-    let total_seconds = if duration_ms > 0 {
-        duration_ms / 1000
-    } else {
-        0
-    };
-    format!("{}:{:02}", total_seconds / 60, total_seconds % 60)
-}
-
-/// Close the drawer. The native dialog leaves the top layer before the
-/// drawer leaves the DOM: a modal dialog that is removed while it is open
-/// drops the focus on the document body. The control that opened the
-/// drawer is frozen by the root together with the surface generation that
-/// retires it, and the root restores the focus through its own guarded
-/// path; this drawer never keeps a second copy of that convention.
-fn closer(onclose: EventHandler<()>) -> impl FnMut() {
-    move || {
-        if let Some(dialog) = drawer()
-            && dialog.open()
-        {
-            dialog.close();
-        }
-        onclose.call(());
-    }
-}
+/// The queue drawer: a projection of the root's order, a native modal
+/// dialog and nothing else.
+///
+/// The drawer has no closer of its own. Every exit — Escape, the close
+/// button and "Open library" — calls the root, and the root closes the
+/// native dialog before the drawer leaves the DOM (a modal dialog that is
+/// removed while it is open drops the focus on the document body), clears
+/// the announcement line and hands the focus back to the connected control
+/// that opened the drawer. The time format is the root's own `seconds()`
+/// helper, the same one the Now Playing sheet uses, so there is one format
+/// in the crate and not a copy per surface.
 
 #[component]
 pub fn QueueDrawer(
@@ -91,7 +64,7 @@ pub fn QueueDrawer(
     use_effect(move || {
         spawn(async move {
             TimeoutFuture::new(0).await;
-            if let Some(dialog) = drawer() {
+            if let Some(dialog) = queue_dialog() {
                 let _ = dialog.show_modal();
             }
         });
@@ -167,7 +140,7 @@ pub fn QueueDrawer(
     // remaining time, so a person who navigates to it still hears that the
     // timer runs and how long is left.
     let sleep_text = if sleep_remaining > 0 {
-        format_duration((sleep_remaining * 1000) as i64)
+        seconds(sleep_remaining as f64)
     } else {
         String::new()
     };
@@ -177,12 +150,10 @@ pub fn QueueDrawer(
     // line; the line changes only on those transitions, never on a tick.
     //
     // Escape, the close button and "Open library" are the same command:
-    // the drawer leaves the top layer before it leaves the DOM, and the
-    // focus goes back to the control that opened it.
-    let mut cancel = closer(onclose);
-    let mut dismiss = closer(onclose);
-    let mut choose = closer(onchoose);
-
+    // the root closes the native dialog before the drawer leaves the DOM
+    // and hands the focus back to the control that opened it. The drawer
+    // keeps no closer of its own, so there is one closing path and not a
+    // copy of it per surface.
     rsx! {
         dialog {
             id: "queue-drawer-dialog",
@@ -192,7 +163,7 @@ pub fn QueueDrawer(
             "aria-label": "Playback queue",
             oncancel: move |event| {
                 event.prevent_default();
-                cancel();
+                onclose.call(());
             },
             div {
                 class: "queue-panel",
@@ -208,7 +179,7 @@ pub fn QueueDrawer(
                         class: "icon-button queue-close",
                         r#type: "button",
                         "aria-label": "Close playback queue",
-                        onclick: move |_| dismiss(),
+                        onclick: move |_| onclose.call(()),
                         Icon { name: "close" }
                     }
                 }
@@ -339,7 +310,7 @@ pub fn QueueDrawer(
                             let title = track.title.clone();
                             let artist = track.artist.clone();
                             let artwork = track.artwork_id.clone();
-                            let duration = format_duration(track.duration_ms);
+                            let duration = seconds(track.duration_ms as f64 / 1000.0);
                             let track_id = track.id.clone();
                             let row_class = if is_current && is_next {
                                 "queue-row current queue-row-next"
@@ -418,7 +389,7 @@ pub fn QueueDrawer(
                             class: "button secondary",
                             r#type: "button",
                             "aria-label": "Open library",
-                            onclick: move |_| choose(),
+                            onclick: move |_| onchoose.call(()),
                             "Open library"
                         }
                     }

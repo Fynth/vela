@@ -294,7 +294,10 @@ test('malicious URL import rejected through UI and small-screen layout remains u
   await page.getByRole('button', { name: 'Add music', exact: true }).first().click();
   await page.locator('#import-url').fill('http://169.254.169.254/latest/meta-data/');
   await page.getByRole('button', { name: 'Preview download →', exact: true }).click();
-  await expect(page.getByRole('alert')).toBeVisible();
+  // The import error is the root's own inline alert. The query is scoped to
+  // the content column: the root's feedback stack owns a permanent alert
+  // region for the Undo failure, so a page-wide alert query is ambiguous.
+  await expect(page.locator('.content-inner').getByRole('alert')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Import to my library', exact: true })).toHaveCount(0);
   await page.setViewportSize({ width: 390, height: 844 });
   const mobile = page.getByRole('navigation', { name: 'Mobile navigation' });
@@ -2625,7 +2628,10 @@ test('private job replies cannot reappear after logout and another account signs
   const favoriteReply=page.waitForResponse(response=>response.url().endsWith('/favorite')&&response.request().method()==='POST');releaseFavorite();await favoriteReply;
   await expect(page.getByRole('dialog',{name:'Now playing',exact:true})).toHaveCount(0);
   await expect(page.getByRole('button',{name:'Open now playing',exact:true})).toHaveCount(0);
-  await expect(page.getByRole('alert')).toHaveCount(0);
+  // The root's own error banner is scoped to the content column: the
+  // feedback stack owns a permanent alert region for the Undo failure, so a
+  // page-wide alert query would match that empty region too.
+  await expect(page.locator('.content-inner').getByRole('alert')).toHaveCount(0);
   const older = page.waitForResponse(response => response.url().includes('/api/jobs?'));
   release();
   await older;

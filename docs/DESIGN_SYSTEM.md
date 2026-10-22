@@ -56,6 +56,137 @@ transport/sliders/track actions use44px targets; the native four-action column i
 Standard page inset24px, web phone16px; component gaps mainly8/12/16/24/32px.
 Inherited minor deviations remain measured rather than disguised as a perfect scale.
 
+## DR-04 density, rhythm roles and the measured size map — 2026-10-22
+
+The density work keeps the interface small and makes the *targets* real. The
+rhythm roles are declared once in the existing `:root` of `apps/web/style.css`,
+before the compatibility aliases, and they name the values the composition
+already used; they are not a second palette, a second scale or a new layer.
+Every role below is consumed through `var(...)` in the file that declares it,
+and the table names the surfaces that consume it:
+
+| Role | Value | Where it is the authority (consumed in `apps/web/style.css`) |
+| --- | --- | --- |
+| `--vela-space-1` | 4px | the desktop transport gap (`.player-buttons`), the player's zone gap below 1100px |
+| `--vela-space-2` | 8px | the mobile and coarse-pointer transport gap |
+| `--vela-space-3` | 12px | the sidebar step gap, the track grid gap |
+| `--vela-space-4` | 16px | the player bar's zone gap below 1100px |
+| `--vela-space-6` | 24px | the sidebar's group gap, the Home track grid gap |
+| `--vela-space-8` | 32px | the Home section margin |
+| `--vela-radius-control` | 8px | the navigation item, the buttons, the icon buttons, the inputs and the selects |
+| `--vela-radius-cover` | 6px | `.artwork`, `.catalog-cover`, `.playlist-art`, the Home artwork |
+| `--vela-radius-panel` | 12px | the Home hero panel |
+| `--vela-target-size` | 44px | the navigation step, the sidebar playlist |
+| `--vela-heading-section` | 20px | the section toolbar heading |
+
+Two surfaces that the earlier version of this table named are **not** the
+source of a role: the editorial feature and the My Wave panels live in
+`apps/web/home-editorial.css` and keep their own 12px literal there, and the
+player's controls are 44px boxes with their own rules rather than a spacing
+step.
+
+Most substitutions replace a literal with the identical value, but not all of
+them, and the differences are deliberate parts of this package. These are the
+surfaces that actually consume a role, with the value each one had before:
+
+| Surface | Role | Before | Now |
+|---|---|---|---|
+| `input`, `select` | `--vela-radius-control` | `border-radius: 9px` | 8px |
+| `.button` | `--vela-radius-control` | `border-radius: 9px` | 8px |
+| `.icon-button` | `--vela-radius-control` | `border-radius: 8px` | 8px (unchanged, now named) |
+| `.sidebar .nav-item` | `--vela-radius-control` | `border-radius: 8px` | 8px (unchanged, now named) |
+| `.artwork` (library cover) | `--vela-radius-cover` | `border-radius: 5px` | 6px |
+| `.home-artwork .artwork`, `.listening-cover .artwork`, `.catalog-cover`, `.playlist-art` | `--vela-radius-cover` | `border-radius: 7px` | 6px |
+| `.home-hero` | `--vela-radius-panel` | `border-radius: 20px` | 12px |
+| `.section-toolbar h2` | `--vela-heading-section` | `font-size: 21px` | 20px |
+| `.sidebar .nav-item` | `--vela-target-size`, `--vela-space-3`, `--vela-radius-control` | `height: 45px`, `gap: 14px`, `border-radius: 8px` | 44px, 12px, 8px |
+| `.sidebar-playlist` | `--vela-target-size` | `min-height: 40px` | 44px |
+
+The other role consumers are the spacing steps, and those are unchanged:
+the sidebar step gap was 13px and is 12px through `--vela-space-3`, the
+transport gap was 17/12/10px and is 4px through `--vela-space-1`, and the
+track grid gap was 13px and is 12px through `--vela-space-3`. The editorial
+feature and My Wave panels live in `apps/web/home-editorial.css` and keep
+their own 12px literal there; the player's controls are 44px boxes with their
+own rules rather than a spacing step.
+
+The visual effect is one pixel on the corners of fields, buttons and covers,
+one pixel on the section heading, one pixel on the sidebar step, and the
+12px → 44px growth of the playlist rows. It was measured, not assumed: the
+live composition's computed radii, font sizes and row heights were read in
+Chromium and in Firefox after the change.
+
+Measured on the live web composition (Chromium and Firefox, 1284×856, 100%
+app size, real account, real uploaded tracks):
+
+| Surface | Measured |
+| --- | --- |
+| Sidebar navigation item | 181×44, step 44px, 12 items = 528px, real 24px between groups |
+| Player band | 88px tall (`y768..856`), the 1px top border replaced by a hairline that takes no vertical space |
+| Transport row | `y768..812`, 44px tall; five 44px controls and four 4px gaps = 236px |
+| Seek row | `y812..856`, 44px tall; the range is 44px, the drawn rail 3px |
+| Play button / face | 44×44 hit box, 32px face |
+| Transport / utility glyphs | 15px and 17px |
+| Volume | 65×44 above 1100px of viewport width, 44×44 from 1100px down to 760px, and not in the player bar below 760px (the mobile composition) or below 600px of layout width (the container query) |
+| Section heading | 20px/600; the general `h2` stays 24px/600 |
+| Page heading | fluid `clamp(28px, 2.7vw, 38px)`/650, measured 34.668px at 1284 |
+| Body / row title / secondary | 14px, 12px/550, 12px |
+
+The intersection area between the Play button, the four transport buttons, the
+three utility buttons, the player's favorite and the seek range is 0 at 768,
+1284, 1440 and 1728px, at the 80/100/150% app sizes and at the 80/100/150%
+browser zoom.
+
+The transport composition follows the width the content really has. The app
+size is a CSS `zoom` on the document root, so the viewport media queries keep
+reporting the visual width while the content is laid out in the narrower
+zoomed width; the shell is therefore a query container
+(`container-type: inline-size`, `container-name: vela-shell`) and the
+transport switches to the content-sized column
+(`minmax(0,1fr) auto minmax(0,1fr)`, `center max-width: none`) below 1100px
+of layout width. Below 600px of layout width the player's volume yields
+first: the queue and the mute stay, and the volume remains reachable in the
+queue drawer and in the Now Playing sheet. The same is true below 760px of
+viewport width, where the mobile composition leaves the whole utility zone
+out of the player bar; the volume is in the drawer and in the sheet there as
+well. Measured: 65×44 at 1284, 44×44 at 1000, and at 900px with a 150% app
+size (600px of layout width) the volume is `display: none` while the queue
+and the mute are still on screen. Chromium and Firefox agree on a settled
+layout; Firefox re-evaluates this container query one layout late when a
+zoomed root is resized, which is recorded in
+[KNOWN_LIMITATIONS](KNOWN_LIMITATIONS.md).
+
+Conscious exceptions, kept because they are optical or platform values rather
+than rhythm values:
+
+- The base cover radius is 6px (`--vela-radius-cover`): the library track
+  cover, the player bar's cover, the catalog cover and the playlist art all
+  measure 6px. The measured exceptions are the Now Playing sheet's cover
+  (16px, 12px below 680px), the album card's cover (7px) and the mobile
+  player bar's cover (5px); the avatar and the vinyl stay at 50% and the
+  modal sheets keep their own radius.
+- The card and icon surfaces (job card, import preview, job icon) keep their
+  9px radius; they are not controls.
+- 1px borders, the 3px seek rail, the 2/5px badge padding and the 8px quality
+  badge stroke are optical values, not members of the whitespace scale.
+- The 44px target is a size, not a step in the whitespace scale; it is never
+  rounded to 32px or 48px.
+- The Home title's fluid `clamp(30px, 3.1vw, 45px)` reaches 45px. That is a
+  documented source exception relative to the 19–42px directive, not a licence
+  to change the other headings.
+- The coarse-pointer composition keeps its own 8px transport gap and 19px
+  glyphs, and the mobile composition keeps its 120px band and 8px transport
+  gap (DR-06). The desktop composition owns the 4px gap and the 15/17px
+  glyphs.
+- The app size is a CSS zoom on the document root: it scales the layout but
+  does not move the viewport media queries. The player's composition follows
+  the layout width through the shell's query container, but the rest of the
+  application still answers to the visual viewport. That is a property of the
+  app-size feature, not of this size map.
+- The `input`/`select` padding is 10px 12px: the horizontal value moved to the
+  scale, the vertical one keeps the ≥44px total target.
+
+
 Web sidebar scrolls as one region on short windows. Native shell is one two-column
 grid with one content scroll owner and one bottom player row; count sidebar width
 once. Web Library starts with real tracks, concise title and real Play action.

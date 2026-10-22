@@ -239,6 +239,28 @@ const COUNTDOWN_BOX = () => {
   };
 };
 
+// The root's ordinary receipt as the browser sees it: the permanent live
+// region, the text it carries and the space the receipt takes. The node is
+// in the DOM before the first message, so an announcement depends on a
+// change of its text and never on the insertion of the region with its
+// content.
+const RECEIPT = () => {
+  const receipt = document.querySelector('.feedback-stack .notice-receipt');
+  const region = receipt ? receipt.querySelector('[role="status"]') : null;
+  const style = receipt ? getComputedStyle(receipt) : null;
+  const stack = document.querySelector('.feedback-stack');
+  return {
+    present: !!receipt,
+    region: !!region,
+    line: region ? region.textContent.trim() : null,
+    collapsed: receipt ? receipt.classList.contains('is-empty') : null,
+    position: style ? style.position : null,
+    height: receipt ? receipt.getBoundingClientRect().height : null,
+    stackHeight: stack ? stack.getBoundingClientRect().height : null,
+    dismiss: !!receipt?.querySelector('button[aria-label="Dismiss notification"]'),
+  };
+};
+
 // The drawer's own announcement surface: the one live region inside the
 // modal, and every live region the page still carries with its text. The
 // region is a permanent node: it is in the DOM before the first transition
@@ -448,6 +470,23 @@ test('DR07 the queue drawer is keyboard readable: ring, named rails, focus retur
     expect(returned.label, 'the focus went back to the queue trigger').toMatch(/^Show playback queue/);
     evidence.escape.push({ scene: 'empty queue', active: returned });
 
+    // --- The drawer's own close button is the same command as Escape. The
+    // drawer has no closer of its own: the root closes the native dialog
+    // before the drawer leaves the DOM and hands the focus back to the
+    // connected trigger.
+    await openQueue(page);
+    await page.locator('#queue-drawer-dialog').getByRole('button', { name: 'Close playback queue', exact: true }).click();
+    await expect(page.locator('#queue-drawer-dialog')).toHaveCount(0);
+    await expect.poll(() => page.evaluate(() => document.activeElement?.getAttribute('aria-label') || '')).toMatch(/^Show playback queue/);
+    const closed = await page.evaluate(() => {
+      const element = document.activeElement;
+      return { label: element?.getAttribute('aria-label'), connected: element?.isConnected === true, tag: element?.tagName };
+    });
+    expect(closed.connected, 'the trigger is still connected').toBe(true);
+    expect(closed.tag, 'the focus is not on the document body').not.toBe('BODY');
+    expect(closed.label, 'the focus went back to the queue trigger').toMatch(/^Show playback queue/);
+    evidence.escape.push({ scene: 'close button', active: closed });
+
     // --- The "Open library" exit leaves the surface for good. The dialog
     // leaves the top layer before it leaves the DOM, so the focus goes back
     // to the control that opened it and the navigation does not strand it
@@ -479,9 +518,58 @@ test('DR07 the queue drawer is keyboard readable: ring, named rails, focus retur
 
     // --- A real queue of the real catalog: two occurrences, nothing played.
     const add = page.getByRole('button', { name: /^Add .* to playback queue$/ });
+
+    // --- The root's ordinary receipt is a permanent live region. It is in
+    // the DOM before the first message, it takes no space while it is
+    // empty, and only its text changes: the message is not read twice,
+    // because the region is not removed and inserted again for it.
+    const emptyReceipt = await page.evaluate(RECEIPT);
+    expect(emptyReceipt.present, 'the receipt is a permanent node').toBe(true);
+    expect(emptyReceipt.region, 'the receipt carries a live region').toBe(true);
+    expect(emptyReceipt.line, 'the receipt starts empty').toBe('');
+    expect(emptyReceipt.collapsed, 'the empty receipt is collapsed').toBe(true);
+    expect(emptyReceipt.position, 'the empty receipt leaves the flow').toBe('absolute');
+    expect(emptyReceipt.height, 'the empty receipt takes no space').toBe(0);
+    expect(emptyReceipt.dismiss, 'an empty receipt has no dismiss control').toBe(false);
+    const emptyStack = emptyReceipt.stackHeight;
+    // The region is marked, so the next message proves that the node is
+    // the same one and that only its text changed.
+    await page.evaluate(() => {
+      const region = document.querySelector('.feedback-stack .notice-receipt [role="status"]');
+      if (region) region.dataset.probe = 'permanent';
+    });
+
     await add.nth(0).click();
+    // The ordinary receipt is named: the Undo row is a permanent row of the
+    // same stack and is empty here, so the query names the receipt itself.
+    await expect(page.locator('.feedback-stack .notice-receipt')).toBeVisible();
+    const arrived = await page.evaluate(RECEIPT);
+    expect(arrived.present, 'the receipt is still the same node').toBe(true);
+    expect(arrived.region, 'the live region is still there').toBe(true);
+    expect(arrived.line, 'the message is in the receipt').toBe('Added to your playback queue.');
+    expect(arrived.collapsed, 'the receipt is not empty any more').toBe(false);
+    expect(arrived.height, 'the receipt takes a line of the stack').toBeGreaterThan(0);
+    expect(arrived.dismiss, 'the receipt can be dismissed').toBe(true);
+    expect(arrived.stackHeight, 'the stack grew with the receipt').toBeGreaterThan(emptyStack);
+    const marked = await page.evaluate(() => document.querySelector('.feedback-stack .notice-receipt [role="status"]')?.dataset.probe);
+    expect(marked, 'the live region was not re-created for the message').toBe('permanent');
+    await page.screenshot({ path: `${output}/receipt-message-1284x856.png`, animations: 'disabled' });
+
+    // The dismiss control empties the receipt, and the empty receipt takes
+    // no space: the stack is exactly as tall as it was before the message.
+    await page.locator('.feedback-stack button[aria-label="Dismiss notification"]').click();
+    await expect.poll(() => page.evaluate(RECEIPT)).toMatchObject({ line: '', collapsed: true, height: 0 });
+    const dismissed = await page.evaluate(RECEIPT);
+    expect(dismissed.stackHeight, 'the empty receipt adds no gap to the stack').toBeCloseTo(emptyStack, 1);
+    // The region is still the same node after the dismissal, so the next
+    // message is a change of its text and not an insertion.
     await add.nth(1).click();
-    await expect(page.locator('.feedback-stack .alert.success')).toBeVisible();
+    await expect.poll(() => page.evaluate(RECEIPT)).toMatchObject({ line: 'Added to your playback queue.' });
+    const reMarked = await page.evaluate(() => document.querySelector('.feedback-stack .notice-receipt [role="status"]')?.dataset.probe);
+    expect(reMarked, 'the live region survived the dismissal').toBe('permanent');
+    evidence.receipt = { empty: emptyReceipt, arrived, dismissed, emptyStack };
+    await page.locator('.feedback-stack button[aria-label="Dismiss notification"]').click();
+    await expect.poll(() => page.evaluate(RECEIPT)).toMatchObject({ line: '' });
 
     for (const theme of ['light', 'dark']) {
       await setTheme(page, theme);
@@ -515,6 +603,14 @@ test('DR07 the queue drawer is keyboard readable: ring, named rails, focus retur
       expect(rails.position.valueText, 'the position announces a real pair').toBe(`0:00 of ${total}`);
       expect(rails.position.valueText).not.toBe('Duration unknown');
       expect(rails.volume.valueText, 'the volume announces a percentage').toMatch(/^\d+%$/);
+      // One time format in the crate: the drawer's rows show the same
+      // `m:ss` the root's own helper produces for the server's real
+      // duration.
+      const rowDurations = await page.evaluate(() => [...document.querySelectorAll('#queue-drawer-dialog .queue-duration')].map(node => node.textContent.trim()));
+      expect(rowDurations.length, 'both queued rows show their duration').toBe(2);
+      const expected = durations.map(duration => mmss(duration / 1000)).sort();
+      expect(rowDurations.slice().sort(), 'the rows show the real m:ss of the real durations').toEqual(expected);
+      for (const value of rowDurations) expect(value, 'a duration is m:ss').toMatch(/^\d+:\d{2}$/);
       evidence.rails[theme] = rails;
       // The two decorative roles of the rows are semantic roles with a value
       // per theme, not a hardcoded pistachio that only reads on the dark

@@ -914,9 +914,31 @@ test('TR03 persistent player projects the root engine with reference geometry an
         };
         const times = [...document.querySelectorAll('.player-time')];
         const volume = document.querySelector('.player-right input[aria-label="Volume"]');
+        const visible = element => {
+          const rect = element.getBoundingClientRect();
+          return rect.width > 0 && rect.height > 0;
+        };
         return {
           innerWidth, innerHeight,
           player: box('.player-bar'), now: box('.player-now'), center: box('.player-center'),
+          buttonsRow: box('.player-buttons'), seekRow: box('.seek-row'),
+          hairline: (() => {
+            const style = getComputedStyle(document.querySelector('.player-bar'), '::before');
+            return {
+              height: style.height, backgroundColor: style.backgroundColor,
+              content: style.content, pointerEvents: style.pointerEvents,
+            };
+          })(),
+          transportButtons: [...document.querySelectorAll('.player-buttons .icon-button')]
+            .filter(visible)
+            .map(element => {
+              const rect = element.getBoundingClientRect();
+              return { label: element.getAttribute('aria-label'), width: rect.width, height: rect.height };
+            }),
+          transportGlyphs: [...document.querySelectorAll('.player-buttons .icon-button .vela-icon')]
+            .filter(visible).map(element => element.getBoundingClientRect().width),
+          utilityGlyphs: [...document.querySelectorAll('.player-right .icon-button .vela-icon')]
+            .filter(visible).map(element => element.getBoundingClientRect().width),
           right: box('.player-right'), artwork: box('.now-playing .artwork'),
           title: box('.now-playing strong.player-title'), artist: box('.now-playing .player-artist'),
           album: box('.now-playing .player-album'), eq: box('.player-eq'),
@@ -961,8 +983,28 @@ test('TR03 persistent player projects the root engine with reference geometry an
         expect.soft(measured.player.paddingLeft, `${width} player gutter`).toBeCloseTo(26, 0.75);
         expect.soft(measured.player.paddingTop, `${width} player vertical padding`).toBeCloseTo(10, 0.75);
         expect.soft(measured.player.backgroundColor, `${width} player surface`).toBe('rgb(16, 19, 15)');
-        expect.soft(measured.player.borderTopWidth, `${width} player top border`).toBeCloseTo(1, 0.75);
-        expect.soft(measured.player.borderTopColor, `${width} player border color`).toBe('rgb(52, 59, 46)');
+        // DR04: the physical 1px top border is replaced by a hairline that does
+        // not take vertical space, so the band still measures 88px and the
+        // transport column can own the whole height.
+        expect.soft(measured.player.borderTopWidth, `${width} the physical player border is gone`).toBe(0);
+        expect.soft(measured.hairline.height, `${width} hairline height`).toBe('1px');
+        expect.soft(measured.hairline.backgroundColor, `${width} hairline color`).toBe('rgb(52, 59, 46)');
+        expect.soft(measured.hairline.pointerEvents, `${width} the hairline never takes a click`).toBe('none');
+        expect.soft(measured.center.top, `${width} the transport column owns the band`).toBeCloseTo(measured.player.top, 0.75);
+        expect.soft(measured.center.bottom, `${width} the transport column owns the band`).toBeCloseTo(measured.player.bottom, 0.75);
+        expect.soft(measured.buttonsRow.height, `${width} the transport row is 44px`).toBeCloseTo(44, 0.75);
+        expect.soft(measured.seekRow.height, `${width} the seek row is 44px`).toBeCloseTo(44, 0.75);
+        expect.soft(measured.buttonsRow.bottom, `${width} the transport row tiles the seek row`).toBeCloseTo(measured.seekRow.top, 0.75);
+        for (const control of measured.transportButtons) {
+          expect.soft(control.width, `${width} ${control.label} hit box width`).toBeGreaterThanOrEqual(44);
+          expect.soft(control.height, `${width} ${control.label} hit box height`).toBeGreaterThanOrEqual(44);
+        }
+        expect.soft(measured.transportGlyphs.every(size => size === 15), `${width} the transport glyphs stay 15px`).toBe(true);
+        expect.soft(measured.utilityGlyphs.every(size => size === 17), `${width} the utility glyphs stay 17px`).toBe(true);
+        if (measured.favorite.display !== 'none') {
+          expect.soft(measured.favorite.width, `${width} favorite hit box width`).toBeGreaterThanOrEqual(44);
+          expect.soft(measured.favorite.height, `${width} favorite hit box height`).toBeGreaterThanOrEqual(44);
+        }
         expect.soft(Math.abs(measured.now.width - measured.right.width), `${width} symmetric side zones`).toBeLessThan(1.5);
         expect.soft(measured.now.left, `${width} left zone at padding`).toBeCloseTo(measured.player.left + 26, 0.75);
         expect.soft(measured.right.right, `${width} right zone at padding`).toBeCloseTo(measured.player.right - 26, 0.75);
@@ -1407,9 +1449,11 @@ test('TR04a Home composes bounded filter views from real DTOs and keeps one root
     expect(brandImages.feature.image).toContain('/assets/brand/vela-coast.png');
     expect(brandImages.feature.position).toBe('60% 53%');
     expect(brandImages.feature.size).toBe('cover');
-    expect(brandImages.feature.radius).toBe('10px');
+    // DR04: the editorial feature and My Wave use the 12px panel radius.
+    expect(brandImages.feature.radius).toBe('12px');
     expect(brandImages.feature.height).toBeCloseTo(250, 0.5);
     expect(brandImages.wave.image).toContain('/assets/brand/vela-wave.png');
+    expect(brandImages.wave.radius).toBe('12px');
     expect(brandImages.wave.height).toBeCloseTo(250, 0.5);
     // One real target means exactly one indicator: no dead dots.
     const indicators = feature.locator('.home-indicator');
@@ -1867,7 +1911,9 @@ test('TR07c keyboard row menu and the real searchable add-to-playlist picker', a
 
     // --- Undo is a real inverse of the acknowledged add.
     await receipt.getByRole('button', { name: 'Undo', exact: true }).click();
-    await expect(receipt).toHaveCount(0);
+    // The Undo receipt is a permanent live region: it stays in the DOM and
+    // is empty and collapsed while there is nothing to undo.
+    await expect(receipt).toBeHidden();
     // The ordinary receipt is the root's own notice in the feedback stack.
     await expect(page.locator('.feedback-stack > .alert.success:not(.playlist-undo)')).toContainText('Removed the added track.');
     await expect.poll(async () => (await playlistItems(destination.id)).length).toBe(0);
@@ -2245,7 +2291,9 @@ test('REVIEW01 playlist commands are single-flight, survive a dismissed picker a
     await expect(picker).toBeHidden();
     expect(attempts[1]).toEqual(attempts[0]);
     expect((await detail()).items).toHaveLength(5);
-    await expect(page.locator('.playlist-undo')).toHaveCount(0);
+    // The Undo receipt is a permanent live region: with no confirmed entry
+    // there is nothing to undo, so the row is empty and takes no space.
+    await expect(page.locator('.playlist-undo')).toBeHidden();
     await expect(page.getByRole('status').filter({ hasText: 'Undo is unavailable' })).toBeVisible();
     await page.unroute(endpoint, lostResponse);
     expect(await page.locator('audio').count()).toBe(1);
@@ -2366,7 +2414,7 @@ test('REVIEW02 Undo is single-flight, retries the same inverse and cannot erase 
     await expect(page.locator('.playlist-undo').getByRole('button', { name: 'Undo', exact: true })).toBeEnabled();
     expect((await detail()).items).toHaveLength(0);
     await page.locator('.playlist-undo').getByRole('button', { name: 'Undo', exact: true }).click();
-    await expect(page.locator('.playlist-undo')).toHaveCount(0);
+    await expect(page.locator('.playlist-undo')).toBeHidden();
     expect(deletes).toHaveLength(3);
     expect(deletes[2]).toBe(deletes[1]);
     expect((await detail()).items).toHaveLength(0);

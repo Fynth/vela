@@ -131,6 +131,44 @@ const STACK_RECTS = () => {
   };
 };
 
+// One permanent row of the root's feedback stack, as the browser sees it:
+// the node, the live region it carries, the text of that region and the
+// space the row takes. A row with no message is in the DOM, is empty, leaves
+// the flow and takes no space: the announcement is a change of the text of a
+// region that was already there and never the insertion of the region
+// together with its content.
+const REGION = (selector) => {
+  const row = document.querySelector(selector);
+  const region = row ? row.querySelector('[role="status"]') : null;
+  const style = row ? getComputedStyle(row) : null;
+  const stack = document.querySelector('.feedback-stack');
+  return {
+    present: !!row,
+    region: !!region,
+    line: region ? region.textContent.trim() : null,
+    collapsed: row ? row.classList.contains('is-empty') : null,
+    position: style ? style.position : null,
+    height: row ? row.getBoundingClientRect().height : null,
+    controls: row ? row.querySelectorAll('button').length : 0,
+    stackHeight: stack ? stack.getBoundingClientRect().height : null,
+  };
+};
+
+// The Undo failure is its own permanent alert region inside the Undo row:
+// the node is in the DOM before the failure, the failure is a change of its
+// text, and the empty region takes no space.
+const ALERT = () => {
+  const node = document.querySelector('.feedback-stack .playlist-undo p[role="alert"]');
+  const style = node ? getComputedStyle(node) : null;
+  return {
+    present: !!node,
+    line: node ? node.textContent.trim() : null,
+    collapsed: node ? node.classList.contains('is-empty') : null,
+    position: style ? style.position : null,
+    height: node ? node.getBoundingClientRect().height : null,
+  };
+};
+
 test('DR05 empty cards are readable and the root feedback never overlaps itself', async ({ page }) => {
   test.setTimeout(240000);
   const output = process.env.VELA_DR05_EVIDENCE || 'test-results/dr05-states';
@@ -255,5 +293,150 @@ test('DR05 empty cards are readable and the root feedback never overlaps itself'
       await page.screenshot({ path: `${output}/feedback-stack-${width}x${height}.png`, animations: 'disabled' });
     }
     await writeFile(`${output}/stack-state.json`, JSON.stringify(await page.evaluate(STACK_RECTS), null, 2));
+  } finally { await runtime.close(); }
+});
+
+test('DR05 the recovery status and the Undo receipt are permanent live regions', async ({ page }) => {
+  test.setTimeout(240000);
+  const output = process.env.VELA_DR05_EVIDENCE || 'test-results/dr05-states';
+  await mkdir(output, { recursive: true });
+  const runtime = await isolatedServer(output);
+  try {
+    await expect.poll(async () => {
+      try { return (await page.request.get(runtime.origin + '/health', { timeout: 1000 })).ok(); }
+      catch { return false; }
+    }).toBeTruthy();
+    const setup = await page.request.post(runtime.origin + '/api/setup', {
+      headers: { Origin: runtime.origin }, data: { username: 'regions', password: 'private dr05 regions fixture password' },
+    });
+    expect(setup.ok()).toBeTruthy();
+    const me = await setup.json();
+    const headers = { 'X-CSRF-Token': me.csrf_token, Origin: runtime.origin };
+    for (const [name, mime] of [['signal.flac', 'audio/flac'], ['beacon.mp3', 'audio/mpeg']]) {
+      const upload = await page.request.post(runtime.origin + '/api/upload', {
+        headers, multipart: { file: { name, mimeType: mime, buffer: await readFile(resolve(root, 'crates/media/tests/fixtures/' + name)) } },
+      });
+      expect(upload.ok(), name).toBeTruthy();
+    }
+    const created = await page.request.post(runtime.origin + '/api/playlists', { headers, data: { name: 'Region signals' } });
+    expect(created.ok()).toBeTruthy();
+
+    await page.goto(runtime.origin);
+    await expect(page.locator('.auth-card, .app-shell')).toBeVisible();
+    if (await page.locator('.app-shell').count() === 0) {
+      await page.locator('#username').fill('regions');
+      await page.locator('#password').fill('private dr05 regions fixture password');
+      await page.getByRole('button', { name: /sign in|create your music space/i }).first().click();
+    }
+    await expect(page.locator('.app-shell')).toBeVisible();
+    await navigate(page, 'Library');
+    await expect(page.locator('.track-row').first()).toBeVisible();
+
+    // --- Before any message both rows are in the DOM, empty and collapsed.
+    //     A live region that arrives with its content is not announced by
+    //     most screen readers, so the node has to be there first.
+    const recoveryBefore = await page.evaluate(REGION, '.feedback-stack .playback-status');
+    expect(recoveryBefore.present, 'the recovery row is a permanent node').toBe(true);
+    expect(recoveryBefore.region, 'the recovery row carries a live region').toBe(true);
+    expect(recoveryBefore.line, 'the recovery region starts empty').toBe('');
+    expect(recoveryBefore.collapsed, 'the empty recovery row is collapsed').toBe(true);
+    expect(recoveryBefore.position, 'the empty recovery row leaves the flow').toBe('absolute');
+    expect(recoveryBefore.height, 'the empty recovery row takes no space').toBe(0);
+    expect(recoveryBefore.controls, 'an empty recovery row owns no control').toBe(0);
+    expect(recoveryBefore.stackHeight, 'the empty stack takes no space').toBe(0);
+
+    const undoBefore = await page.evaluate(REGION, '.feedback-stack .playlist-undo');
+    expect(undoBefore.present, 'the Undo row is a permanent node').toBe(true);
+    expect(undoBefore.region, 'the Undo row carries a live region').toBe(true);
+    expect(undoBefore.line, 'the Undo region starts empty').toBe('');
+    expect(undoBefore.collapsed, 'the empty Undo row is collapsed').toBe(true);
+    expect(undoBefore.position, 'the empty Undo row leaves the flow').toBe('absolute');
+    expect(undoBefore.height, 'the empty Undo row takes no space').toBe(0);
+    expect(undoBefore.controls, 'an empty Undo row owns no control').toBe(0);
+
+    // The regions are marked, so the messages below prove that the text
+    // arrives in the same node and that the node is not re-created for it.
+    await page.evaluate(() => {
+      for (const selector of ['.feedback-stack .playback-status [role="status"]', '.feedback-stack .playlist-undo [role="status"]']) {
+        const node = document.querySelector(selector);
+        if (node) node.dataset.probe = 'permanent';
+      }
+    });
+
+    // --- The real Undo receipt: a real track added to a real playlist.
+    await page.locator('[id^="track-menu-trigger-"]').last().click();
+    await page.getByRole('menuitem', { name: 'Add to playlist…', exact: true }).click();
+    const picker = page.locator('#playlist-picker');
+    await expect(picker).toBeVisible();
+    await picker.getByRole('option').first().click();
+    await picker.locator('#playlist-picker-add').click();
+    await expect(page.locator('.feedback-stack .playlist-undo')).toBeVisible();
+    const undoAfter = await page.evaluate(REGION, '.feedback-stack .playlist-undo');
+    expect(undoAfter.line, 'the Undo message is in the region').toContain('Added “');
+    expect(undoAfter.collapsed, 'the Undo row is not empty any more').toBe(false);
+    expect(undoAfter.position, 'the Undo row is back in the flow').toBe('static');
+    expect(undoAfter.height, 'the Undo row takes a line of the stack').toBeGreaterThan(0);
+    expect(undoAfter.controls, 'the Undo row owns its two controls').toBe(2);
+    expect(undoAfter.stackHeight, 'the stack grew with the Undo receipt').toBeGreaterThan(0);
+    expect(await page.evaluate(() => document.querySelector('.feedback-stack .playlist-undo [role="status"]')?.dataset.probe),
+      'the Undo live region was not re-created for the message').toBe('permanent');
+    await page.screenshot({ path: `${output}/feedback-stack-undo-receipt-1284x856.png`, animations: 'disabled' });
+
+    // --- The real Undo failure: the DELETE never reaches the server, so the
+    //     failure has to arrive in the permanent alert region of the row.
+    const failureBefore = await page.evaluate(ALERT);
+    expect(failureBefore.present, 'the Undo failure region is a permanent node').toBe(true);
+    expect(failureBefore.line, 'the Undo failure region starts empty').toBe('');
+    expect(failureBefore.collapsed, 'the empty Undo failure region is collapsed').toBe(true);
+    expect(failureBefore.position, 'the empty Undo failure region leaves the flow').toBe('absolute');
+    expect(failureBefore.height, 'the empty Undo failure region takes no space').toBe(0);
+    await page.evaluate(() => {
+      const node = document.querySelector('.feedback-stack .playlist-undo p[role="alert"]');
+      if (node) node.dataset.probe = 'permanent';
+    });
+    await page.route('**/api/playlists/*/items/*', async route => { await route.abort('connectionreset'); });
+    await page.locator('.feedback-stack .playlist-undo').getByRole('button', { name: 'Undo', exact: true }).click();
+    await expect.poll(() => page.evaluate(ALERT).then(state => state.line), { timeout: 30000 }).toContain('Connection interrupted');
+    const failureAfter = await page.evaluate(ALERT);
+    expect(failureAfter.collapsed, 'the Undo failure region is not empty any more').toBe(false);
+    expect(failureAfter.position, 'the Undo failure region is back in the flow').toBe('static');
+    expect(failureAfter.height, 'the Undo failure region takes a line of the row').toBeGreaterThan(0);
+    expect(await page.evaluate(() => document.querySelector('.feedback-stack .playlist-undo p[role="alert"]')?.dataset.probe),
+      'the Undo failure region was not re-created for the failure').toBe('permanent');
+    await page.screenshot({ path: `${output}/feedback-stack-undo-failure-1284x856.png`, animations: 'disabled' });
+    await page.unroute('**/api/playlists/*/items/*');
+
+    // --- The dismissal empties the region and the row takes no space again:
+    //     the stack is exactly as tall as it was before the message, and the
+    //     failure leaves the row with it.
+    await page.locator('.feedback-stack button[aria-label="Dismiss added-track receipt"]').click();
+    await expect.poll(() => page.evaluate(REGION, '.feedback-stack .playlist-undo')).toMatchObject({ line: '', collapsed: true, height: 0 });
+    const dismissed = await page.evaluate(REGION, '.feedback-stack .playlist-undo');
+    expect(dismissed.stackHeight, 'the empty stack is as tall as it was before the message').toBeCloseTo(0, 1);
+    expect(await page.evaluate(() => document.querySelector('.feedback-stack .playlist-undo [role="status"]')?.dataset.probe),
+      'the Undo live region survived the dismissal').toBe('permanent');
+    const failureDismissed = await page.evaluate(ALERT);
+    expect(failureDismissed.line, 'the dismissed receipt takes its failure with it').toBe('');
+    expect(failureDismissed.collapsed, 'the Undo failure region is collapsed again').toBe(true);
+    expect(failureDismissed.height, 'the empty Undo failure region takes no space again').toBe(0);
+
+    // --- The real recovery status: the transport fails for real.
+    await page.route('**/api/tracks/*/stream', async route => { await route.abort('connectionreset'); });
+    await page.locator('.track-play').first().click();
+    await expect.poll(() => page.evaluate(REGION, '.feedback-stack .playback-status').then(state => state.line), { timeout: 30000 })
+      .toContain('Connection interrupted');
+    const recoveryAfter = await page.evaluate(REGION, '.feedback-stack .playback-status');
+    expect(recoveryAfter.collapsed, 'the recovery row is not empty any more').toBe(false);
+    expect(recoveryAfter.position, 'the recovery row is back in the flow').toBe('static');
+    expect(recoveryAfter.height, 'the recovery row takes a line of the stack').toBeGreaterThan(0);
+    expect(recoveryAfter.controls, 'the recovery row owns its retry control').toBe(1);
+    expect(recoveryAfter.stackHeight, 'the stack grew with the recovery status').toBeGreaterThan(0);
+    expect(await page.evaluate(() => document.querySelector('.feedback-stack .playback-status [role="status"]')?.dataset.probe),
+      'the recovery live region was not re-created for the message').toBe('permanent');
+    await page.screenshot({ path: `${output}/feedback-stack-recovery-1284x856.png`, animations: 'disabled' });
+
+    await writeFile(`${output}/stack-regions.json`, JSON.stringify({
+      recoveryBefore, undoBefore, undoAfter, failureBefore, failureAfter, dismissed, failureDismissed, recoveryAfter,
+    }, null, 2));
   } finally { await runtime.close(); }
 });

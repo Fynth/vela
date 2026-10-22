@@ -1,5 +1,343 @@
 # Verified progress
 
+## Second DR-04/DR-05/DR-07 audit round: three point fixes — 2026-10-22
+
+The second independent audit of the same slice rejected it on three defects
+and one wrong limitation, and asked for one honest limitation to be
+recorded. All of it is closed here. Nothing in the audio, the queue, the
+session or the owner-scoped data paths changed; no asset, no allowlist
+entry and no manifest was touched.
+
+**D1 — the recovery status and the Undo receipt are permanent live regions.**
+Two rows of the root's feedback stack still inserted their live region
+together with its text: the recovery status and the Undo receipt, both
+`role="status"`. A live region that arrives in the DOM with its content is
+not announced by most screen readers, so the recovery error and the Undo
+confirmation were silent while their neighbour in the same stack was read.
+Both rows are now permanent nodes, exactly like the ordinary receipt this
+slice had already established: the node is in the DOM before the first
+message, only its text changes, and the empty row leaves the flow and is
+clipped to nothing. The `role="status"` moved from the row to the text
+element inside it, so the Retry and Undo controls sit outside the live
+region and their own names are never read with the message; the Undo
+failure (`role="alert"`) is a permanent node for the same reason. The
+recovery row is still withheld while the Now Playing sheet or the queue
+drawer is open — the node stays in the DOM, empty and collapsed, so the
+message is stated once — and the actions are rendered only while there is
+something to recover or to undo: an empty row is a region, never a control.
+
+Measured in the live document: before any message both regions are present
+with an empty text, `position: absolute`, a height of 0 and no control, and
+the stack is 0px tall. The Undo message "Added “Signal” to Region signals."
+arrives in the same node (the node carries a marker that survives the
+arrival and the dismissal), the row becomes `position: static` and 70px
+tall, the stack grows to 70px, and the dismissal empties the text and
+returns the stack to 0px. The real Undo failure — a DELETE that never
+reaches the server — arrives in the permanent `role="alert"` region of the
+same row ("Connection interrupted. Please try again.", 19.5px), and the
+dismissal takes the failure with the receipt, exactly as it did before the
+row became permanent. The recovery message "Connection interrupted.
+Reconnecting…" arrives in the same node; the row becomes 74px tall with its
+one Retry control. The permanent coverage is the new journey in
+`tests/browser/dr05-states.spec.mjs`.
+
+**D2 — one lookup of the queue drawer's native dialog.** The drawer module
+and the root each carried their own copy of the `get_element_by_id` lookup
+of the same element. The root's `queue_dialog()` is now `pub(crate)` and the
+drawer calls it; the copy is gone. There is one lookup of the element and
+not one per module, and the root stays the parent of the drawer module.
+
+**D3 — the Now Playing trigger limitation now says what the code does.** The
+frozen trigger is the control that holds the focus when the sheet opens, and
+the code refuses only the document body: it never checks that this control
+is the sheet's own opener. The old wording claimed that on a platform where
+a pointer click does not focus a button the sheet's own opener "is not
+frozen" and that the drawer "falls back to the browser's own focus restore".
+The first half was wrong — the previously focused control is frozen instead,
+so the drawer hands the focus back to that control and not to the opener —
+and the second half was true only for the document-body case. The sheet
+itself never restored the focus; the native dialog's own focus restore did,
+and the application only froze the element to donate it to the drawer. The
+limitation now states all of that.
+
+**U1 — the shell's `container-type` side effect is recorded, and it is
+narrower than it was first described.** `container-type: inline-size` applies
+**style** and **inline-size** containment. It does **not** apply layout or
+paint containment, so the shell is *not* the containing block of its
+`position: fixed` descendants and it does *not* establish a stacking
+context. That was measured in Chromium, not assumed: a `position: fixed`
+child of a `container-type: inline-size` element is anchored to the
+**viewport** (its right edge is the viewport's right edge, not the
+container's), a negative `z-index` descendant escapes the container and
+paints below the container's own background, and
+`getComputedStyle(shell).contain` reads `none`. The same probe with
+`contain: layout style inline-size` anchors the fixed child to the container
+and keeps the negative descendant inside it, which is what shows the two
+cases apart. The feedback stack, the mobile track menu and the native
+dialogs are therefore fixed layers of the **viewport**; the shell's
+`overflow: hidden` does not clip them. What the shell's own box does is
+`100dvh / zoom` tall, so at 100% and 150% the container box and the viewport
+coincide — that is the measured, neutral case, and the DR-04 and DR-05
+measurements found no overlap between the stack, the player and the mobile
+navigation. `dvh` is the *dynamic* viewport size: it tracks the viewport as
+a mobile browser's toolbar shows and hides, and it is **not** the largest
+size in the `vh` family (`lvh` is). The dynamic viewport already accounts
+for the toolbar, so the visible area is not automatically shorter than the
+shell; a mobile browser with a dynamic toolbar was not measured and nothing
+is claimed about it.
+
+Executed on this change: `cargo fmt --all -- --check` (exit 0); `cargo clippy
+--locked --workspace --all-targets -- -D warnings` (exit 0, with a real
+recompile of `vela-web` after touching both changed sources); `cargo test
+--locked --workspace -- --test-threads=2` (380 passed, 0 failed, 3 ignored);
+`cargo build --locked -p vela-web --target wasm32-unknown-unknown --release`
+(exit 0); `scripts/build-web.sh` (wasm-bindgen 0.2.129) into `dist/` (exit
+0, `vela_web_bg.wasm` 3 654 861 B); and the Playwright suite in Chromium (68
+passed, 1 skipped — the opt-in live import, 4.7m) and in Firefox (68 passed,
+1 skipped, 6.0m), both including the new permanent-live-region journey and
+the permanent `dr04-density.spec.mjs` (5 journeys). Firefox advances media
+time on this host because the PulseAudio null sink `vela_ci` is up; while the
+daemon was refusing connections the same audio assertions failed on an
+unchanged tree, which is the environment and not the package. The stack was
+also measured in both engines at 1284×856, 1440×900, 1728×1000, 390×844,
+360×800 and 320×700: 0px² with the player bar, 0px² with the mobile
+navigation, 0px of document overflow and 0 visible targets with a side below
+44px, with the screenshots and the numbers in
+`target/checks/dr05-permanent-regions/`.
+
+One host problem was found and fixed, and it was not the application: the
+first Firefox run failed every playback test with `audio.currentTime` stuck
+at 0 while the same build passed in Chromium. An isolated probe outside the
+application reproduced it — Firefox's media element reported a decode error
+on a plain data-URI WAV that Chromium played — and the cause was the host's
+PulseAudio: the root server with the `vela_ci` null sink had died and left a
+stale socket. The null sink was started again exactly as the CI workflow
+does, and the Firefox suite then passed in full.
+
+A screen reader was not run, and neither were the native client's WebKitGTK
+rendering, its physical audio and the Docker runtime: this host has no X
+server. The measurements are in [QA_EVIDENCE](QA_EVIDENCE.md) and the
+remaining limits in [KNOWN_LIMITATIONS](KNOWN_LIMITATIONS.md).
+
+## DR-04/DR-05/DR-07 audit round: one time format, one closer, one permanent receipt — 2026-10-22
+
+The independent audit of the DR-04, DR-05 and DR-07 slices found no broken
+architectural contract and no broken function, but it rejected the slice on
+five defects: two documentation claims that the code did not support, a
+comment that denied what the code did, a design-system table that named
+authorities no surface consumed, and a root receipt whose announcement
+depended on the insertion of the region instead of a change of its text. All
+five are closed here, and the three optional improvements of the same audit
+are closed with them. Nothing in the audio, the queue, the session or the
+owner-scoped data paths changed.
+
+**One time format (D1).** The drawer had two formatters: the root's
+`seconds()` for the seek rail and a local `format_duration()` for the queue
+rows and the sleep countdown. The local copy is gone. The rows now show
+`seconds(track.duration_ms as f64 / 1000.0)` and the countdown
+`seconds(sleep_remaining as f64)`, which is the same `m:ss` the old copy
+printed: the old helper divided the milliseconds by 1000 and formatted
+`m:ss`, and the root's helper truncates the same number of seconds. The
+output did not change, and the two claims in the DR-07 round-three entry
+that said the duplication was closed are corrected: it was still open there
+and it is closed here.
+
+**One closer (D2).** The drawer had a `closer()` of its own that closed the
+native dialog and then called the root, while the root's `close_queue()`
+closed the same dialog again, cleared the announcement line and restored the
+focus. The drawer's copy is gone: Escape, the close button and "Open
+library" call the root's handler, which closes the native dialog before the
+drawer leaves the DOM, clears the announcement line and hands the focus back
+to the connected trigger. There is one closing path and not a copy of it per
+surface, and the comment now says what the code does.
+
+**The rhythm roles are the authority they claim (D3).** Every one of the
+eleven roles declared in `:root` is now consumed through `var(...)` in the
+file that declares it: the desktop transport gap
+(`--vela-space-1`), the mobile and coarse-pointer transport gap
+(`--vela-space-2`), the sidebar step gap and the track grid gap
+(`--vela-space-3`), the player bar's zone gap below 1100px
+(`--vela-space-4`), the sidebar group gap and the Home track grid gap
+(`--vela-space-6`), the Home section margin (`--vela-space-8`), the
+navigation item, the buttons, the icon buttons, the inputs and the selects
+(`--vela-radius-control`), the artwork, the catalog cover and the playlist
+art (`--vela-radius-cover`), the Home hero (`--vela-radius-panel`), the
+navigation step and the sidebar playlist (`--vela-target-size`) and the
+section toolbar heading (`--vela-heading-section`). The two surfaces the
+earlier table named — the editorial feature and the My Wave panels — live in
+`apps/web/home-editorial.css` and keep their own 12px literal there; the
+table says so instead of claiming a role that file does not consume. The
+"covers stay at 6px" line is replaced by the measured radii: the library
+cover and the player bar's cover are 6px, the Now Playing sheet's cover is
+16px (12px below 680px), the album card's cover is 7px and the mobile player
+bar's cover is 5px.
+
+**One statement about the volume (D4).** The size map and the paragraph
+below it disagreed about the volume. Both now say the same thing and it is
+what the code does: 65×44 above 1100px of viewport width, 44×44 from 1100px
+down to 760px, not in the player bar below 760px, and hidden below 600px of
+layout width while the queue and the mute stay. Measured: 65×44 at 1284,
+44×44 at 1000, `display: none` at 900px with a 150% app size, in Chromium
+and in Firefox on a settled layout. Firefox re-evaluates that container
+query one layout late when a zoomed root is resized; the difference is
+recorded in [KNOWN_LIMITATIONS](KNOWN_LIMITATIONS.md).
+
+**The root receipt is a permanent live region (D5).** The root's ordinary
+receipt was inserted into the DOM together with its text, so an
+announcement depended on the insertion and the same message was read again
+whenever the region came back. It is now a permanent node: the live region
+is in the DOM before the first message and only its text changes, so a
+message is announced once and a repeated message is not read twice. The
+empty receipt leaves the flow and is clipped to nothing, so it takes no
+space in the feedback stack and shows nothing; the dismiss control sits
+outside the live region, so its own name is never read with the message.
+The drawer keeps its own permanent line, so the two surfaces still never
+announce the same message at once.
+
+**The three improvements (U1, U2, U3).** The drawer's trigger is no longer
+whatever happened to be focused: a control inside another open dialog is
+not a trigger, because that surface is closing and its elements leave the
+DOM with it, and the Now Playing sheet freezes the control that opened it
+and hands it to the drawer, so "View full queue" no longer depends on the
+browser's own focus restore. The guarded restore no longer takes the focus
+away from a control that already owns it. The player's own now-playing
+controls close the drawer through the one common path, so the native dialog
+never leaves the DOM open and the frozen trigger is never left in its slot.
+
+Executed on this change: `cargo fmt --all -- --check` (exit 0); `cargo clippy
+--locked --workspace --all-targets -- -D warnings` (exit 0); `cargo test
+--locked --workspace -- --test-threads=2` (380 passed, 0 failed, 3 ignored);
+`cargo build --locked -p vela-web --target wasm32-unknown-unknown --release`
+(exit 0); `scripts/build-web.sh` (wasm-bindgen 0.2.129) into `dist/` (exit
+0); `cargo build --locked -p vela-server` (exit 0); and the Playwright suite
+in Chromium (67 passed, 1 skipped — the opt-in live import, 5.3m) and in
+Firefox (67 passed, 1 skipped, 6.9m), both including the extended
+`tests/browser/dr07-a11y.spec.mjs` and `tests/browser/dr04-density.spec.mjs`
+with its new size-map journey. A screen reader was not run, and neither were
+the native client's WebKitGTK rendering, its physical audio and the Docker
+runtime: this host has no X server. The measurements are in
+[QA_EVIDENCE](QA_EVIDENCE.md) and the remaining limits in
+[KNOWN_LIMITATIONS](KNOWN_LIMITATIONS.md).
+
+## DR-04 dense desktop control with real 44px targets — 2026-10-22
+
+The density package makes the desktop control *targets* real without making
+the interface bigger. The glyphs stay small, the page stays dense, and the
+hit boxes become 44px: the audit had measured twenty visible interactive
+targets with a side below 44px in the Library at 1284×856, and it had measured
+a 12px overlap between the Play button and the seek range.
+
+The rhythm roles are declared once in the existing `:root` of
+`apps/web/style.css`, before the compatibility aliases:
+`--vela-space-1..8` (4/8/12/16/24/32px), `--vela-radius-control` (8px),
+`--vela-radius-cover` (6px), `--vela-radius-panel` (12px),
+`--vela-target-size` (44px) and `--vela-heading-section` (20px). They name
+the values the composition already used; no number was replaced by a regular
+expression and no second palette or scale was introduced. The surfaces that
+consume them are listed in the audit round above. Most of the substitutions
+replace a literal with the identical value; the exceptions are the ones the
+size map in `docs/DESIGN_SYSTEM.md` now lists explicitly — the field, button
+and cover radii, the Home hero radius, the section heading, the sidebar step
+and the playlist rows each moved by one pixel or to the 44px target.
+
+The sidebar step is the item itself: `.sidebar .nav-item` is 44px tall with
+`margin: 0`, a 12px gap and an 8px radius, and its width is the sidebar's
+own content width (measured 181×44 at 1284×856, because the rule sets
+`width: 100%`). The 24px group gap is the real
+spacing between the groups, so twelve entries occupy exactly 528px instead of
+525px plus a margin on every entry, and Account and Settings are reached by
+scrolling the one sidebar region. The sidebar playlist is 44px tall.
+
+The desktop transport is 236px wide: five 44px controls (shuffle, previous,
+Play, next, repeat) and four 4px gaps, with the 15px transport glyph, the
+17px utility glyph and the 32px Play face unchanged inside them. The right
+zone's queue, mute and expand controls and the player's favorite are 44×44 in
+every desktop override, including the one below 1100px that previously
+restored a 30px box; the volume stays 65px wide and becomes 44px below
+1100px. Between 761 and 1100px the transport column is sized by its own
+content, so the 236px no longer starves the title and the utility zone.
+
+DV-15 is closed on the desktop composition. The physical `border-top` of the
+player band is gone and a 1px hairline (`::before`, `pointer-events: none`)
+draws the same edge without taking vertical space, so the band still measures
+88px. The transport column owns the whole band with `height:
+var(--vela-player-height)` and `margin-block: -10px`; the 44px transport row
+and the 44px seek row tile it, so the Play button and the seek range no
+longer overlap. The mobile composition keeps its own 120px band (DR-06).
+
+The transport composition follows the width the content really has. The app
+size is a CSS `zoom` on the document root, so the viewport media queries keep
+reporting the visual width while the content is laid out in the narrower
+zoomed width — at a 1284px window and a 150% app size the layout is 856px,
+but the media queries still answered "desktop". The shell is therefore a
+query container (`container-type: inline-size`, `container-name:
+vela-shell`), and below 1100px of layout width the transport column is sized
+by its own content again, so the title and the utility zone keep the
+remaining width. Below 600px of layout width the player's volume yields
+first: the queue and the mute stay, and the volume remains reachable in the
+queue drawer and in the Now Playing sheet.
+
+The typography keeps its fluid roles: the section heading is 20px/600, the
+general `h2` stays 24px/600 and the page heading is still the fluid
+`clamp(28px, 2.7vw, 38px)`/650 (measured 34.668px at 1284). Manrope, the 14px
+base, the 12px/550 row title and the 12px secondary text are untouched. The
+radii follow the roles: the control, input and button surfaces take the 8px
+role and the covers the 6px role. The card surfaces keep their own 8px
+literal, the editorial feature and My Wave their own 12px literal in
+`home-editorial.css`, the job card, the import preview and the job icon
+their 9px, and the modal sheets their own radius, as documented exceptions.
+
+Measured on the live composition (Chromium, 1284×856, 100% app size, a real
+account with real uploaded tracks), before → after:
+
+| Surface | Before | After |
+| --- | --- | --- |
+| Visible targets with a side < 44px | 20 | 0 |
+| Sidebar navigation item | 181×41 | 181×44 |
+| Twelve navigation items | 525px | 528px |
+| Transport control | 28×28 | 44×44 |
+| Utility control | 32×32 | 44×44 |
+| Player favorite | 32×36 | 44×44 |
+| Play ↔ seek range intersection | 12px tall (779..823 vs 811..855) | 0px² (768..812 vs 812..856) |
+| Player band | 88px, physical 1px border | 88px, 1px hairline, no vertical cost |
+| Section heading | 21px/600 | 20px/600 |
+
+The same zero holds at 1440×900, 1728×1000, 768×1024, 390×844 and 320×700.
+At the 80%, 100% and 150% app sizes and at the 80%, 100% and 150% browser
+zoom, over the 768/1284/1440/1728 windows, the document overflow is 0 and the
+control intersections are 0. The 320px and 390px compositions are unchanged:
+the same 120px band, the same 8px transport gap and the same 44px navigation
+targets.
+
+The count of targets below 44px is **not** zero at every app size, and the
+difference is a mechanism, not a defect. The 44px target is a size in the
+layout coordinate system; the app size is a CSS `zoom` on the document root,
+so `getBoundingClientRect()` returns the scaled rectangle and a 44×44 layout
+box measures 35.2×35.2 at an 80% app size. Measured in the live document: at
+an 80% app size **50 of 51** (768×1024) and **52 of 53** (the three wider
+windows) visible interactive targets measure below 44px, while at 100% and
+150% the count is **0**. The browser zoom is the other mechanism — it shrinks
+the CSS viewport instead of the elements — so at 80/100/150% browser zoom the
+count is **0** at every window. The 44px guarantee belongs to the 100% layout;
+a user who asks for an 80% interface gets smaller hit boxes with it, and this
+package did not change that. The measurement is in
+`target/checks/dr04-density/dr04-density-matrix.json`.
+
+Executed on this change: `cargo fmt --all -- --check` (exit 0); `cargo clippy
+--locked --workspace --all-targets -- -D warnings` (exit 0); `cargo test
+--locked --workspace -- --test-threads=2` (380 passed, 0 failed, 3 ignored);
+`cargo build --locked -p vela-web --target wasm32-unknown-unknown --release`;
+`scripts/build-web.sh` (wasm-bindgen 0.2.129) into `dist/`; `cargo build
+--locked -p vela-server`; and the Playwright suite in Chromium (66 passed, 1
+skipped, 5.3m) and in Firefox (66 passed, 1 skipped, 6.9m), both including the
+new permanent `tests/browser/dr04-density.spec.mjs` with its four journeys.
+The design review's TR03 and TR04a were updated where the contract itself
+changed: the physical border is gone, so the test now asserts the 1px
+hairline, the tiled 44px transport and seek rows, the 44px control boxes and
+the unchanged 15/17px glyphs, and the editorial feature and My Wave use the
+12px panel radius. The measurements are in [QA_EVIDENCE](QA_EVIDENCE.md); the
+remaining limits are in [KNOWN_LIMITATIONS](KNOWN_LIMITATIONS.md).
+
 ## DR-07 review fixes, round three: a permanent live region and the drawer's own trigger — 2026-10-22
 
 The second review of the DR-07 slice left five code remarks and three
@@ -7,10 +345,11 @@ documentation ones. The drawer's announcement line existed only after the
 first transition, the drawer shared one frozen trigger with the row menu, the
 account change closed the drawer outside the common path, one time format was
 written twice, and two hardcoded pistachio values were left in the drawer's
-own stylesheet. All five are closed in this round. The two documentation
-inaccuracies — the root seek's `aria-valuetext` in this file and the row
-reference in QA_EVIDENCE — are corrected there, and the team-lead backlog
-now says that the review verdict was received.
+own stylesheet. Four of the five are closed in this round; the duplicated
+time format was still open here and is closed in the audit round below. The
+two documentation inaccuracies — the root seek's `aria-valuetext` in this
+file and the row reference in QA_EVIDENCE — are corrected there, and the
+team-lead backlog now says that the review verdict was received.
 
 **The live region is a permanent node.** The drawer's `role="status"` line is
 now in the DOM before the first transition and only its text changes, so an
@@ -48,10 +387,13 @@ the drawer leaves the DOM. The player's own now-playing buttons keep their
 own line: the drawer is a modal, so the background is inert while it is open
 and those buttons cannot reach the drawer in that state.
 
-**One time format.** The drawer's own `m:ss` helper was a copy of the root's
-`seconds()`; the drawer now uses the root's helper, the same one the Now
-Playing sheet already uses. There is no cycle: the root's helper is a plain
-function in the crate root.
+**One time format — still open in this round.** The drawer's own `m:ss`
+helper was a copy of the root's `seconds()`, but the copy was still there:
+the drawer's own rows and its sleep countdown used the local helper while
+the seek rail used the root's. The duplication is removed in the audit round
+below, where the drawer uses the root's helper, the same one the Now Playing
+sheet already uses. There is no cycle: the root's helper is a plain function
+in the crate root.
 
 **Two semantic roles instead of two hardcoded pistachios.** The current row's
 tint and the next occurrence's outline now use the project's own roles,
