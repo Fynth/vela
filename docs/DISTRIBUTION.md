@@ -1,9 +1,12 @@
-# Distribution (0.12.8)
+# Distribution (0.12.9)
 
-[Public v0.12.8](https://github.com/Fynth/vela/releases/tag/v0.12.8) and
-[AUR vela-music-bin 0.12.8-1](https://aur.archlinux.org/packages/vela-music-bin)
-are published; `yay -Si vela-music-bin` resolves the package. All release jobs passed.
-Exact source, hashes and evidence: [release ledger](RELEASE_LEDGER_0.12.8.md).
+The 0.12.9 candidate is tagged; its release workflow builds and verifies the
+complete artifact set and publishes the GitHub Release, then the AUR update.
+The previously published [v0.12.8](https://github.com/Fynth/vela/releases/tag/v0.12.8)
+and [AUR vela-music-bin 0.12.8-1](https://aur.archlinux.org/packages/vela-music-bin)
+remain the last fully published set, and `yay -Si vela-music-bin` resolves that
+package until the 0.12.9 AUR job succeeds.
+Exact source, hashes and evidence for the published 0.12.8: [release ledger](RELEASE_LEDGER_0.12.8.md).
 
 The release workflow runs on main pushes, pull requests, version tags and manual
 requests. Its reusable quality and packages workflows build with the tracked lock
