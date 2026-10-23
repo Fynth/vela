@@ -121,8 +121,29 @@ session, a package/installer build, Docker and every non-Linux target are
 web file changed in this increment: `cargo build --locked -p vela-web --target
 wasm32-unknown-unknown --release` exit 0, `scripts/build-web.sh` exit 0
 ("Web assets built in dist/"), and `npx playwright test` in `tests/browser`
-**90 passed / 1 skipped (6.9m), exit 0** in Chromium. Firefox was not run in
-this increment.
+**90 passed / 1 skipped (6.9m), exit 0** in Chromium and **90 passed / 1
+skipped (7.9m), exit 0** in Firefox (`--browser=firefox`, evidence
+`target/checks/dr08-r3-final/playwright-firefox.log`, `FF_EXIT=0`). Both counts
+are re-runs the team lead executed himself; earlier attempts that died on
+`ENOSPC` at 100% disk or were cut off when a cycle ended are recorded as
+failures and are not counted as this result.
+
+### Team-lead re-verification after the corrections
+
+Every gate was re-run on one tree after the review corrections landed:
+`cargo fmt --all -- --check` exit 0; strict Clippy for `--workspace
+--all-targets` and for `-p vela-desktop --all-targets --features native-qa`
+exit 0; `cargo test --locked --workspace -- --test-threads=2` **392 passed, 0
+failed, 3 ignored** (129 desktop tests inside); wasm release,
+`scripts/build-web.sh` and `cargo build -p vela-server` exit 0. The X11 native
+QA with `--test-peer --test-preparation` exited 0 with **314 checks, 24
+screenshots, 0 temporary originals**, and the separate reduced-motion window
+reported its 8 checks with its frame keeping its `layout`, so the pixel gate
+could measure it. `python3 scripts/native_band_contrast.py` exited 0 with
+verdict `PASS` over **28 measured glass band frames** (48 band frames in total,
+the other 20 being the deliberately opaque compact and preparation frames), 0
+failures, 0 skipped, the worst glass pixel **12.775:1**. The logs are in
+`target/checks/dr08-r2-native/` and `target/checks/dr08-r2-final/`.
 
 ## DR-06 the music in the first phone screen — 2026-10-22
 

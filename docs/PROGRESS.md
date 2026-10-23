@@ -89,6 +89,39 @@ temporary originals, the pixel contrast script PASS over 26 glass frames, and
 the same glass numbers as the accepted run. Evidence:
 `target/checks/dr08-review-fixed/`.
 
+**Team-lead re-verification on the final tree (2026-10-23).** Every gate was
+re-run by the team lead after the review corrections landed, on one tree:
+`cargo fmt --all -- --check` exit 0; strict Clippy for `--workspace
+--all-targets` and for `-p vela-desktop --all-targets --features native-qa`
+exit 0; `cargo test --locked --workspace -- --test-threads=2` 392 tests
+(129 desktop included), 0 failed, 3 ignored; wasm release and
+`scripts/build-web.sh` exit 0; `cargo build -p vela-server` exit 0. The X11
+native QA with `--test-peer --test-preparation` exited 0 with **314 checks,
+24 screenshots and 0 temporary originals**; the separate reduced-motion window
+reported its 8 checks and its frame kept its `layout`, so the pixel gate could
+measure it. `python3 scripts/native_band_contrast.py` exited 0 with verdict
+PASS over **28 measured glass band frames** (48 band frames in total; 20 are
+the deliberately opaque compact/preparation ones), 0 failures, 0 skipped, the
+worst glass pixel 12.775:1. Playwright Chromium **90 passed / 1 skipped**
+(6.7m, exit 0) and Firefox **90 passed / 1 skipped** (7.9m, exit 0) against the
+unchanged web client: no web file is part of this slice. Evidence:
+`target/checks/dr08-r2-native/`, `target/checks/dr08-r2-final/`; both browser
+sets were then re-run on this exact tree and their logs are
+`target/checks/dr08-r3-final/playwright-chromium.log` (`PW_CHROMIUM=0`, 90
+passed / 1 skipped, 6.7m) and `.../playwright-firefox.log` (`FF_EXIT=0`, 90
+passed / 1 skipped, 7.9m).
+
+Two failures were seen and diagnosed as environment, not regression, during
+that re-verification: `music.spec.mjs` G08/G09 failed once inside the full
+Chromium set (`boundingBox()` returned null) and then passed 43/1 in the whole
+music file on its own run; the first Firefox set died on `ENOSPC: no space
+left on device` while the root filesystem was at 100%, and the same file set
+passed after the disk was released. Neither is counted as a passing gate for
+the failed attempt: the counts above are the re-runs' own output. The second
+Firefox attempt was cut short at test 78 of 91 with no failure, because the
+cycle it belonged to ended; the completed run above is a third attempt on the
+freed disk and it is the only Firefox count this document claims.
+
 ## DR-03 the short answer that never delays the command — 2026-10-23
 
 The command and its visual answer had drifted apart: a button lifted itself
