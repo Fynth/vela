@@ -3007,12 +3007,12 @@ uploaded tracks — the details and the artifacts are in
   filter): Chromium 1284×856 on SwiftShader reads **598 frames, 3 over
   33ms (0.50 %)**, median 16.7ms, longest 33.4ms with the glass and **602
   frames, 0 over 33ms**, longest 16.8ms with the fallback → **+0.50
-  points**; Firefox reads **602/0** and **603/0** with a 17.06ms median in
-  both → **0.00 points**. Both are inside the plan's 5-point budget. The
-  measurement runs in a browser process the test runner does not
-  instrument, and each run records the surface it really painted, so the
-  gate fails if the fallback is not opaque. The renderer here is
-  SwiftShader, so a GPU-backed stand is NOT_RUN.
+  points**; Firefox reads **602/0** and **603/0** with a 17.06ms median and
+  a 17.16/17.48ms longest frame in both → **0.00 points**. Both are inside
+  the plan's 5-point budget. The measurement runs in a browser process the
+  test runner does not instrument, and each run records the surface it
+  really painted, so the gate fails if the fallback is not opaque. The
+  renderer here is SwiftShader, so a GPU-backed stand is NOT_RUN.
 
 The permanent gate is `tests/browser/dr02-glass.spec.mjs` (7 journeys) and
 the frame budget's own helper `tests/browser/dr02-frame-budget.mjs`. The

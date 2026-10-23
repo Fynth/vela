@@ -3,9 +3,11 @@
 ## DR-02 the glass frame budget (2026-10-22)
 
 The two floating bands (the player and the topbar) are the only surfaces of
-the product that carry a `backdrop-filter`. This entry is the local budget
-for that filter: what the product costs when the catalog scrolls under the
-two bands, against the same scroll with the opaque fallback.
+the shell that carry a `backdrop-filter`. (The two dialogs blur their own
+`::backdrop` while they are open, which this budget does not measure — the
+scroll under the bands is the cost of the shell itself.) This entry is the
+local budget for those two filters: what the product costs when the catalog
+scrolls under the bands, against the same scroll with the opaque fallback.
 
 **Stand.** Headless Chromium 156.0.8078.4 and Firefox on Linux x86_64,
 viewport 1284×856, no display server. Chromium's compositor renderer is
@@ -65,9 +67,10 @@ surfaces it painted (glass `rgba(19, 21, 19, 0.85)` + `blur(16px)`/`blur(12px)`
 | whole suite | Firefox | 601 / 0 | 602 / 0 | 0.00 points |
 | whole suite (final) | Chromium | 602 / 0 | 602 / 0 | 0.00 points |
 
-The median frame is 16.7 ms in Chromium and 17.06 ms in Firefox in both
-modes; the longest frame is 16.8 ms everywhere except the one Chromium glass
-run (33.4 ms, three frames). So the honest reading is **0.00 to +0.50 points
+The median frame is 16.7 ms in Chromium and 17.06–17.08 ms in Firefox in both
+modes. The longest frame is 16.8 ms in Chromium except the one glass run
+(33.4 ms, three frames) and 17.16–17.50 ms in Firefox, which composites on a
+different clock. So the honest reading is **0.00 to +0.50 points
 across five runs**, inside the 5-point budget the DR-02 plan sets — and the
 single three-frame sample is not reproducible: three later runs of the same
 gate read zero. On this stand the filter does not set the cadence of the
