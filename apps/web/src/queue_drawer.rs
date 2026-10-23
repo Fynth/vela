@@ -19,6 +19,22 @@ use vela_domain::Track;
 /// that opened the drawer. The time format is the root's own `seconds()`
 /// helper, the same one the Now Playing sheet uses, so there is one format
 /// in the crate and not a copy per surface.
+///
+/// DR-03: the receipt of one successful move.
+///
+/// The order has already changed when the receipt is published; the receipt
+/// only says so. `generation` is the edit generation of the root, `at` is
+/// the row that has just moved and `direction` is the way it came
+/// (`-1` up, `1` down). `focus` says that the move control owned the focus,
+/// so the root can hand the focus to the same control of the destination
+/// row after the renderer rebuilt it.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct QueueMoveReceipt {
+    pub generation: u64,
+    pub at: usize,
+    pub direction: i8,
+    pub focus: bool,
+}
 
 #[component]
 pub fn QueueDrawer(
@@ -37,6 +53,7 @@ pub fn QueueDrawer(
     sleep_minutes: String,
     sleep_remaining: u64,
     sleep_status: String,
+    receipt: Option<QueueMoveReceipt>,
     onclose: EventHandler<()>,
     onselect: EventHandler<usize>,
     onremove: EventHandler<usize>,
@@ -53,6 +70,7 @@ pub fn QueueDrawer(
     onretry: EventHandler<()>,
     onsleep: EventHandler<String>,
     onchoose: EventHandler<()>,
+    onsealed: EventHandler<u64>,
 ) -> Element {
     // The drawer is a native modal dialog: the browser owns the focus
     // trap, the top layer and the backdrop. The element is looked up
@@ -321,8 +339,31 @@ pub fn QueueDrawer(
                             } else {
                                 "queue-row"
                             };
+                            // DR-03: the row that has just moved settles for
+                            // a moment. The order changed before the effect
+                            // started, and the effect only says so.
+                            let settle = receipt.filter(|receipt| receipt.at == at);
+                            let settle_class = if settle.is_some() {
+                                format!("{row_class} queue-row-settle")
+                            } else {
+                                row_class.to_string()
+                            };
+                            let settle_from = settle
+                                .map(|receipt| if receipt.direction < 0 { "-4px" } else { "4px" })
+                                .unwrap_or_default();
+                            let settle_generation = settle.map(|receipt| receipt.generation);
                             rsx! {
-                                div { class: row_class, key: "{at}-{track_id}",
+                                div { class: settle_class, key: "{at}-{track_id}",
+                                    style: if settle_from.is_empty() { String::new() } else { format!("--queue-settle-from: {settle_from}") },
+                                    onanimationend: {
+                                        let onsealed = onsealed;
+                                        move |event: Event<AnimationData>| {
+                                            if event.animation_name() != "vela-queue-settle" { return; }
+                                            if let Some(generation) = settle_generation {
+                                                onsealed.call(generation);
+                                            }
+                                        }
+                                    },
                                     button {
                                         class: "queue-track",
                                         r#type: "button",
@@ -346,6 +387,7 @@ pub fn QueueDrawer(
                                     }
                                     div { class: "queue-row-actions",
                                         button {
+                                            id: "queue-move-up-{at}",
                                             class: "icon-button",
                                             r#type: "button",
                                             "aria-label": "Move track up",
@@ -354,6 +396,7 @@ pub fn QueueDrawer(
                                             Icon { name: "up" }
                                         }
                                         button {
+                                            id: "queue-move-down-{at}",
                                             class: "icon-button",
                                             r#type: "button",
                                             "aria-label": "Move queue occurrence {at + 1} down",

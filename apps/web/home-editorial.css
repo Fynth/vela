@@ -312,7 +312,6 @@
   color: #332739;
   display: grid;
   place-items: center;
-  transition: transform 0.15s;
 }
 .home-wave-play .vela-icon {
   width: 16px;
@@ -322,6 +321,10 @@
   .home-wave-play:hover {
     transform: scale(1.08);
   }
+}
+.home-wave-play:active:not(:disabled) {
+  transform: scale(.97);
+  transition-duration: var(--vela-motion-instant);
 }
 .home-wave-play:disabled {
   background: #4a4152;
@@ -435,8 +438,10 @@
   .home-feature-arrow,
   .home-wave-open {
     transition: none;
+    animation: none;
   }
   .home-wave-play:hover,
+  .home-wave-play:active:not(:disabled),
   .home-feature-arrow:hover,
   .home-wave-open:hover {
     transform: none;
@@ -492,4 +497,14 @@
   .home-wave-empty .home-wave-note p {
     overflow-wrap: anywhere;
   }
+}
+
+/* DR03: the wave control answers in the quick role and its press in the
+   instant role, so the button never waits for its own effect. The rule
+   carries the same `html[data-theme]` authority the shell uses for the
+   theme transition, and it stands after the coarse-pointer block on
+   purpose: the size of the control is that block's business, not this
+   rule's. */
+html[data-theme] .home-wave-play {
+  transition: transform var(--vela-motion-quick) var(--vela-ease-state);
 }

@@ -29,7 +29,7 @@ dialog.queue-drawer[open] {
   display: flex;
 }
 
-.queue-panel {
+html[data-theme] .queue-panel {
   /* The legacy popover was a fixed overlay; inside the modal dialog the
      panel is the dialog's own child, so the fixed offsets are reset. */
   position: relative;
@@ -48,6 +48,18 @@ dialog.queue-drawer[open] {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  /* DR03: the drawer answers in the panel role. The panel moves by four
+     pixels, not by the width of the drawer, and the exit is immediate: the
+     dialog leaves the top layer in the tick that closes it. The
+     `html[data-theme]` authority is the one the shell uses for the theme
+     transition, so this rule is the property the panel really has. */
+  transition-property: transform, opacity;
+  animation: vela-drawer-enter var(--vela-motion-panel) var(--vela-ease-enter);
+}
+
+@keyframes vela-drawer-enter {
+  from { opacity: 0; transform: translateX(4px); }
+  to { opacity: 1; transform: none; }
 }
 
 .queue-header {
@@ -238,6 +250,17 @@ dialog.queue-drawer[open] {
   border-radius: 8px;
 }
 
+/* DR03: a successful move settles the row that has already moved. The
+   order changed before the effect started, and the effect only says so. */
+.queue-row-settle {
+  animation: vela-queue-settle var(--vela-motion-reorder) var(--vela-ease-state);
+}
+
+@keyframes vela-queue-settle {
+  from { transform: translateY(var(--queue-settle-from, 4px)); }
+  to { transform: none; }
+}
+
 /* DR-07: the current row and the next occurrence are marked with the
    project's semantic roles, not with a hardcoded pistachio that only reads
    on the dark panel. Each role has its own value per theme. */
@@ -338,9 +361,15 @@ dialog.queue-drawer[open] {
   }
 }
 
+/* DR03: the drawer keeps its geometry and loses every movement. The settle
+   of a moved row is cancelled with it, so no row is left half moved. */
 @media (prefers-reduced-motion:reduce) {
   * {
     transition: none !important;
+    animation: none !important;
+  }
+  .queue-row-settle {
+    transform: none !important;
   }
 }
 

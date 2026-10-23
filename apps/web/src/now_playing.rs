@@ -45,6 +45,8 @@ pub fn NowPlaying(
     favorite_busy: bool,
     queue: Signal<Vec<Track>>,
     cursor: usize,
+    owner: String,
+    lifetime: u64,
     actions: Actions,
 ) -> Element {
     let favorite = track.clone();
@@ -91,7 +93,7 @@ pub fn NowPlaying(
                     button {class:"icon-button np-close","aria-label":"Close now playing","data-dialog-dismiss":"",onclick:move |_|actions.close.call(()),Icon{name:"close"}}
                 }
                 section {class:"np-main","aria-label":"Current track",
-                    div {class:"np-artwork",Art {key:"{track.id}-{track.artwork_id:?}",track:track.clone(),large:true}}
+                    div {class:"np-artwork",crate::cover_fade::CoverFade {track:track.clone(),large:true,owner:owner.clone(),lifetime}}
                     div {class:"np-title-row",
                         div {class:"np-title",h1 {"{track.title}"} p {class:"np-artist","{track.artist}"} if !track.album.is_empty() {p {class:"np-album","{track.album}"}}}
                         button {class:if track.favorite {"icon-button selected"} else {"icon-button"},"aria-label":if track.favorite {"Remove current track from favorites"} else {"Favorite current track"},"aria-pressed":track.favorite,disabled:favorite_busy,onclick:move |_|actions.favorite.call(favorite.clone()),Icon{name:"heart"}}

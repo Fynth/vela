@@ -244,16 +244,16 @@ colours:
 | `--vela-glass-highlight` | `#ffffff0f` (dark) / `#ffffffb3` (light) | `apps/web/style.css:94` / `:219` | the top-edge inset highlight of both bands (DR-02) |
 | `--vela-glass-shadow` | `0 18px 50px #00000059` (dark) / `0 18px 50px #21372924` (light) | `apps/web/style.css:95` / `:220` | the one soft outer shadow of the player band (DR-02) |
 | `--vela-glass-text` | `var(--vela-text)` | `apps/web/style.css:96` | the captions of both bands (DR-02) |
-| `--vela-motion-instant` | `80ms` | `apps/web/style.css:97` | none yet — DR-03 |
-| `--vela-motion-quick` | `120ms` | `apps/web/style.css:98` | none yet — DR-03 |
-| `--vela-motion-overlay` | `140ms` | `apps/web/style.css:99` | none yet — DR-03 |
-| `--vela-motion-exit` | `100ms` | `apps/web/style.css:100` | none yet — DR-03 |
-| `--vela-motion-panel` | `180ms` | `apps/web/style.css:101` | none yet — DR-03 |
-| `--vela-motion-skeleton` | `1800ms` | `apps/web/style.css:102` | none yet — DR-03 |
-| `--vela-motion-reorder` | `150ms` | `apps/web/style.css:103` | none yet — DR-03 |
-| `--vela-motion-artwork` | `140ms` | `apps/web/style.css:104` | none yet — DR-03 |
-| `--vela-ease-enter` | `ease-out` | `apps/web/style.css:105` | none yet — DR-03 |
-| `--vela-ease-state` | `ease-in-out` | `apps/web/style.css:106` | none yet — DR-03 |
+| `--vela-motion-instant` | `80ms` | `apps/web/style.css:97` | the pressed control — `.button`, `.icon-button`; the pressed card — `.catalog-card`, `.listening-card`, `.playlist-card`; the row's own opacity — `.track-row`; the pressed wave control — `.home-wave-play:active` (DR-03) |
+| `--vela-motion-quick` | `120ms` | `apps/web/style.css:98` | the covers that answer a hover — `.catalog-card .catalog-cover`, `.playlist-card .playlist-art`, `.listening-card .listening-cover`, `.home-album-card .catalog-cover` and the cover images inside them; the row menu and the touch sheet — `.track-menu-panel`; the wave control's hover — `.home-wave-play` (DR-03) |
+| `--vela-motion-overlay` | `140ms` | `apps/web/style.css:99` | the Now Playing sheet's entrance — `.now-playing-dialog[open]`; the transport's hover — `.now-playing-dialog .np-toggle`; the one placeholder entrance — `.track-skeleton-card .track-skeleton-art` (DR-03) |
+| `--vela-motion-exit` | `100ms` | `apps/web/style.css:100` | **no consumer** — the exit of an overlay is 0ms by design: the dialog leaves the top layer in the tick that closes it, and the outgoing cover layer belongs to the artwork crossfade (DR-03) |
+| `--vela-motion-panel` | `180ms` | `apps/web/style.css:101` | the queue drawer's entrance — `.queue-panel` (DR-03) |
+| `--vela-motion-skeleton` | `1800ms` | `apps/web/style.css:102` | **no consumer** — the placeholder is a static surface (DV-14) and the one entrance it has reads the overlay role; this stays the reserved budget of a real long pending (DR-03) |
+| `--vela-motion-reorder` | `150ms` | `apps/web/style.css:103` | the settle of a moved queue row — `.queue-row-settle` (DR-03) |
+| `--vela-motion-artwork` | `140ms` | `apps/web/style.css:104` | the artwork crossfade — `.cover-fade-layer.is-ready` and `.cover-fade-layer.is-leaving` (DR-03) |
+| `--vela-ease-enter` | `ease-out` | `apps/web/style.css:105` | every entrance — the row menu, the touch sheet, the Now Playing sheet, the queue drawer, the incoming cover layer, the placeholder entrance (DR-03) |
+| `--vela-ease-state` | `ease-in-out` | `apps/web/style.css:106` | every state change — the pressed control and card, the row, the hovering cover, the transport hover, the outgoing cover layer, the queue settle (DR-03) |
 
 The eight durations are zeroed for `prefers-reduced-motion: reduce` in one
 block at the end of the same file (`apps/web/style.css:1889–1900`): the
@@ -286,13 +286,16 @@ not a contrast claim.** The declared background is `#131513d9` and
 state. This says nothing about legibility over artwork, and the contrast
 over an image is DR-02's work — it is not claimed here.
 
-**The glass roles now have two consumers; the motion roles still have none.**
-DR-02 (below) reads `--vela-glass-*` for the two floating bands — the player
-and the topbar — inside one `@supports` block. A grep over `apps/web/*.css`
-and `apps/web/src/**/*.rs` still finds **no** reader of `--vela-motion-*` or
-`--vela-ease-*`: the only occurrences are the declarations themselves and
-the permanent specs that read them back. DR-01's result is the vocabulary,
-and DR-02 is the first surface built on it.
+**The glass roles have two consumers; the motion roles have their first
+consumers in DR-03.** DR-02 (below) reads `--vela-glass-*` for the two
+floating bands — the player and the topbar — inside one `@supports` block.
+DR-03 reads the eight `--vela-motion-*` durations and the two
+`--vela-ease-*` curves for the short answers of the web surfaces: the
+pressed control, the hovering cover, the row menu, the Now Playing sheet,
+the queue drawer, the artwork crossfade and the settle of a moved queue
+row. Two roles still have **no** consumer and say so in the table above:
+`--vela-motion-exit` (the exit of an overlay is 0ms by design) and
+`--vela-motion-skeleton` (the placeholder is a static surface).
 
 The [ADR0023](DECISIONS/0023-contrast-and-listening-layout.md) decisions
 stay in force and are not revisited here: the contrast-qualified roles are
@@ -377,6 +380,71 @@ the player and are dismissible, without moving the collection. Mobile track acti
 use a second row: the increased height is deliberate to retain accessible targets.
 Dark/light colors change atomically; only transform/opacity/shadow feedback animates.
 Respect reduced motion and existing modal/focus/player lifecycles.
+
+## DR-03 the short answer that never delays the command — 2026-10-23
+
+DR-03 is the first consumer of the eight motion roles. It changes **how a
+surface answers**, not what a surface does: every command, every state
+change, every focus move and every audio command happens in the tick that
+carries the event, and the effect is a separate, short moment on top of it.
+No playback, queue, session or ownership rule changed.
+
+**The durations are the DR-01 roles, and every effect moves `transform` or
+`opacity` only.**
+
+| Surface | Effect | Role |
+| --- | --- | --- |
+| `.button`, `.icon-button` pressed | `scale(.97)` on the control | `instant` 80ms |
+| `.catalog-card`, `.listening-card`, `.playlist-card` pressed | `scale(.97)` on the card | `instant` 80ms |
+| `.track-row` | its own opacity | `instant` 80ms |
+| the cover inside a card (fine pointers only) | `translateY(-2px)`, the cover image `scale(1.03)` | `quick` 120ms |
+| `.track-menu-panel` (desktop) | the panel fades in, the content `opacity 0→1`, `scale(.98→1)`, origin `top right` | `quick` 120ms |
+| `.track-menu-panel` (touch sheet, ≤760px) | the panel fades in, the content `opacity 0→1`, `translateY(4px→0)` | `quick` 120ms |
+| `.now-playing-dialog[open]` | `np-enter`: `opacity 0→1`, `translateY(4px→0)` | `overlay` 140ms |
+| `dialog.queue-drawer[open] .queue-panel` | `opacity 0→1`, `translateX(4px→0)` | `panel` 180ms |
+| `.cover-fade-layer` | the artwork crossfade, opacity only | `artwork` 140ms |
+| `.queue-row-settle` | the settle of a row that has already moved, `translateY(±4px→0)` | `reorder` 150ms |
+| `.player-eq i` | the equalizer: a fixed 10px box, `scaleY` only | 800ms, state-bound |
+
+**The exit of an overlay is 0ms.** `dialog.close()`, the release of the
+inertness and the return of the focus are not deferred: the sheet leaves
+the top layer in the tick that closes it. This is a deliberate deviation
+from the usual modal fade-out — the lifecycle and the focus contract of the
+application are older than the effect, and a copied dialog is not an
+acceptable way to keep one.
+
+**A card is a hit box and it does not travel.** The cover inside it is
+what answers, and only under `(hover: hover) and (pointer: fine)`, so a
+touch device has no stuck hover. A pressed control answers with a scale
+that does not move layout. The button's old hover lift is gone with it: a
+control that moves under the pointer is a control the reader aims at by
+mistake, so the hit box stays still and the answer is the press.
+
+**The row menu keeps the space the shell reserved for it.** The panel
+fades in and its content answers inside it (a scale on the desktop, a
+four-pixel rise on the touch sheet), so the sheet still ends exactly at
+the player's top edge and never covers the transport — not even for a
+frame. The panel's own box is the anchor, and the anchor does not move.
+
+**The equalizer and the placeholder are state, not decoration.** The
+equalizer keeps one 10px box per bar and animates `scaleY` only, so it
+never changes a layout; the placeholder is a static surface with one
+140ms opacity entrance, and the `background-position` shimmer is gone
+(DV-14).
+
+**The artwork crossfade keeps two layers and one request.** The picture
+changes only after the new one is really there, the outgoing layer leaves
+with the same role, and the state lives in the component: an account change
+or a sign-out drops it with the component, so a previous account's picture
+can never reach the screen.
+
+**A moved queue row settles, and the focus follows it.** The order changes
+in the tick of the command; the receipt that says so is a presentation
+fact, it dies with the next structural edit, and the focus that the
+rebuilt row lost is handed to the same control of the destination row.
+
+The measured evidence is in [QA_EVIDENCE](QA_EVIDENCE.md) and the permanent
+gate is `tests/browser/dr03-motion.spec.mjs`.
 
 ## Earlier visual baseline and proposals
 

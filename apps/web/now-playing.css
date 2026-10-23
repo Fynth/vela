@@ -46,8 +46,12 @@
   backdrop-filter: blur(14px);
 }
 
+/* DR03: the sheet answers in the overlay role and moves by four pixels at
+   most. The entrance is bound to the open state, so a track change inside
+   the open sheet never replays it. */
 .now-playing-dialog[open] {
-  animation: np-enter 180ms ease-out;
+  transition-property: transform, opacity;
+  animation: np-enter var(--vela-motion-overlay) var(--vela-ease-enter);
 }
 
 .np-layout {
@@ -239,14 +243,13 @@
   background: var(--accent);
   color: var(--accent-text);
   box-shadow: 0 6px 20px #0002;
-  transition: transform 140ms ease, filter 140ms ease;
+  transition: transform var(--vela-motion-overlay) var(--vela-ease-state);
 }
 
 .now-playing-dialog .np-toggle:hover:not(:disabled) {
   background: var(--accent);
   color: var(--accent-text);
   transform: scale(1.045);
-  filter: brightness(1.06);
 }
 
 .now-playing-dialog .np-toggle .vela-icon {
@@ -565,7 +568,7 @@
 }
 
 @keyframes np-enter {
-  from { opacity: 0; transform: translateY(10px); }
+  from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
@@ -623,14 +626,22 @@
   .np-details { column-gap: 12px; }
 }
 
+/* DR03: reduced motion keeps the sheet, its transport and its artwork, and
+   drops every movement. The cover layers are named here as well, so the
+   artwork of the sheet is in the same state as the rest of the surface. */
 @media (prefers-reduced-motion: reduce) {
   .now-playing-trigger,
   .now-playing-dialog[open],
   .now-playing-dialog .icon-button,
   .now-playing-dialog .np-toggle,
-  .np-queue-item {
+  .np-queue-item,
+  .np-artwork .cover-fade,
+  .np-artwork .cover-fade-layer,
+  .np-artwork .cover-fade-layer::before,
+  .np-artwork .cover-fade-layer::after {
     animation: none;
     transition: none;
   }
   .now-playing-dialog .np-toggle:hover:not(:disabled) { transform: none; }
+  .np-artwork .cover-fade-layer.is-pending { opacity: 1; }
 }

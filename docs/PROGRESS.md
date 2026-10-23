@@ -1,5 +1,113 @@
 # Verified progress
 
+## DR-03 the short answer that never delays the command — 2026-10-23
+
+The command and its visual answer had drifted apart: a button lifted itself
+by a pixel on hover and shrank by 4% on press, a card jumped as a whole, a
+cover took 350ms to scale, a menu and a drawer opened without an entrance of
+their own, the equalizer animated the **layout** property `height`, the
+placeholders moved a `background-position` forever, and the Now Playing
+toggle kept a `filter: brightness()` alive. The user saw the effect late and
+sometimes saw it instead of the answer.
+
+DR-03 gives every surface a **short answer that never delays the command**.
+Nothing about playback, the queue, the session, the ownership rules or the
+dialog lifecycle changed: the state, the focus move and the audio happen in
+the tick that carries the event, and the effect is a separate moment on top
+of it.
+
+**What changed.**
+
+- `apps/web/style.css` — one new **DR03** section at the end of the file is
+  the single authority for the motion of these surfaces. The rules it
+  replaces are gone, not overridden: the hover lift and the press scale of
+  `.button`/`.icon-button`, the `transform` transition and the hover lift of
+  `.catalog-card`/`.listening-card`/`.playlist-card`, the 350ms cover scale
+  of `.home-album-card`, the `background-position` shimmer of the three
+  placeholder families and the `height` keyframe of the equalizer.
+  The equalizer keeps one 10px box per bar and animates `scaleY` only
+  (DV-14); the placeholder is a static surface with one 140ms opacity
+  entrance; the row menu, the touch sheet, the covers that answer a hover
+  and the pressed controls read the eight DR-01 roles.
+- `apps/web/now-playing.css` — the sheet enters in the overlay role
+  (140ms) and moves four pixels instead of ten; the transport's `filter`
+  and its filtered transition are gone.
+- `apps/web/home-editorial.css` — the wave control answers in the quick
+  role and its press in the instant role.
+- `apps/web/queue-drawer.css` — the drawer enters in the panel role
+  (180ms) and moves four pixels instead of the whole width; the moved row
+  settles in the reorder role (150ms).
+- The row menu keeps the space the shell reserved for it: the panel fades
+  in and its **content** answers inside it (a scale on the desktop, a
+  four-pixel rise on the touch sheet), so the touch sheet still ends
+  exactly at the player's top edge and never covers the transport — not
+  even for a frame. The panel's own box is the anchor, and the anchor
+  does not move.
+- `apps/web/src/cover_fade.rs` — **new**. The artwork crossfade of the root
+  player and the Now Playing sheet: two layers at most, one generation at a
+  time and no timer. The outgoing picture stays until the incoming one is
+  really there, a load result is accepted only when its generation, its
+  account and its session still match, and the state lives in the component
+  — an account change or a sign-out drops it with the component, so a
+  previous account's picture can never reach the screen.
+- `apps/web/src/main.rs` — `Art` takes an optional `onready`; the root
+  player and the Now Playing sheet use the crossfade; the queue edit
+  publishes a **receipt** (`generation`, `at`, `direction`, `focus`) that
+  dies with the next structural edit, with the session and with the
+  drawer; a moved row hands the focus back to the same control of the
+  destination row after the renderer rebuilt it.
+- `apps/web/src/now_playing.rs`, `apps/web/src/queue_drawer.rs` — the sheet
+  uses the crossfade; the drawer renders the receipt, settles the row that
+  has already moved and reports the end of the effect.
+- `tests/browser/dr03-motion.spec.mjs` — **new**, permanent: six journeys
+  on a real server, a real account and real uploaded originals.
+
+**What stayed the same.** The exit of an overlay is still **0ms**: the
+dialog leaves the top layer in the tick that closes it, the inertness is
+released at once and the focus goes back to the connected trigger. There is
+no `allow-discrete`, no `setTimeout(close, 100)`, no copied dialog and no
+DOM snapshot. The one audio element, the source, the generation, the
+occurrence, the selection and the current row are untouched by every
+effect.
+
+**The numbers.** Measured in Chromium against the real application, a real
+account and real uploaded originals (the tracked `bright-cover.flac` and a
+second real FLAC whose picture block carries the tracked `cover.png`, so two
+tracks really have two different artworks):
+
+- the durations: the button and the icon button **80ms** (`transform,
+  opacity`), the row **80ms** (`opacity`), the covers that answer a hover
+  **120ms** (`transform`), the row menu **120ms** (the panel fades with
+  `vela-menu-fade`, its content enters with `vela-menu-enter`), the
+  Now Playing sheet **140ms** (`np-enter`), the queue drawer **180ms**
+  (`vela-drawer-enter`), the artwork crossfade **140ms**, the settle of a
+  moved row **150ms**; the equalizer keeps its **10px** box and animates
+  `scaleY` only;
+- the event-to-paint: the row menu is on the screen **34.3ms** after the
+  click, with the entrance at `currentTime 16.6ms`; the Play/Pause command
+  with the menu open is answered in **18.3ms** — in the same frame, while
+  the entrance is still running;
+- the decoration: the audio element is the same node, its `src` and its
+  `data-source-generation` are unchanged; the exit of the sheet is **0ms**
+  (the `cancel` listener already reads `dialog.open === false` in the tick
+  of the event);
+- the crossfade: **2** layers while it runs, **1** at the end, the
+  resource timeline grows by exactly **1** entry (the request for the new
+  cover — the outgoing picture is not fetched again), **1** `<audio>`
+  element; three changes in a row never exceed **2** layers and never
+  replace the audio element;
+- a moved queue row: the order changes in the click's own tick, the
+  destination settles with `--queue-settle-from: -4px`, the focus lands on
+  "Move track up" of the destination row, the `src` and the generation are
+  unchanged and the three occurrences of the same track stay three rows;
+- reduced motion: **0** animations, **0** durations and **0** running
+  animations on every changed selector and its pseudo-elements, the
+  equalizer keeps its own height, and Play, Escape and the drawer still
+  work.
+
+The permanent gate is `tests/browser/dr03-motion.spec.mjs`; the evidence is
+in `target/checks/dr03-motion/<engine>/`.
+
 ## DR-06 the music in the first phone screen — 2026-10-22
 
 The mobile composition spent its first screen on its pre-list. On a 320×700

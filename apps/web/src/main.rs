@@ -1,6 +1,7 @@
 mod audible;
 mod browser_player;
 mod client;
+mod cover_fade;
 mod experience;
 mod filters;
 mod home_editorial;
@@ -196,6 +197,12 @@ struct PlaybackUi {
     shuffle: Signal<bool>,
     repeat: Signal<String>,
     auth: Signal<Option<AuthResponse>>,
+    /// DR-03: the receipt of the last successful move. The order has
+    /// already changed when it is published; the receipt only says so.
+    receipt: Signal<Option<queue_drawer::QueueMoveReceipt>>,
+    /// DR-03: the generation of the last structural edit. Every edit ends
+    /// the receipt of the one before it.
+    edit: Signal<u64>,
 }
 impl PlaybackUi {
     fn snapshot(self) -> Option<SavedSession> {
@@ -266,6 +273,38 @@ fn counted(count: i64, singular: &str) -> String {
         format!("{count} {singular}s")
     }
 }
+/// DR-03: one structural edit of the queue ends the receipt of the one
+/// before it. The drawer never settles a row that is not the result of the
+/// last edit, and the generation tells a late end of an effect that the
+/// root has already replaced.
+fn queue_edit_bump(ui: PlaybackUi) -> u64 {
+    let mut edit = ui.edit;
+    let next = edit.peek().wrapping_add(1);
+    edit.set(next);
+    let mut receipt = ui.receipt;
+    receipt.set(None);
+    next
+}
+
+/// Whether the move control owns the focus. A move that was started from
+/// the keyboard keeps the focus on the same control of the destination row;
+/// a move that was started with the pointer does not move the focus.
+fn move_control_has_focus(direction: i8) -> bool {
+    let Some(element) = web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| document.active_element())
+    else {
+        return false;
+    };
+    let Some(label) = element.get_attribute("aria-label") else {
+        return false;
+    };
+    if direction < 0 {
+        label == "Move track up"
+    } else {
+        label.starts_with("Move queue occurrence") && label.ends_with(" down")
+    }
+}
 fn enqueue_track(track: Track, next: bool, mut ui: PlaybackUi, mut notice: Signal<String>) {
     synchronize_order(ui);
     if ui.queue.peek().len() >= playback::MAX_QUEUE {
@@ -281,6 +320,7 @@ fn enqueue_track(track: Track, next: bool, mut ui: PlaybackUi, mut notice: Signa
         return;
     }
     ui.queue.write().insert(at, track);
+    queue_edit_bump(ui);
     persist_queue(&ui.queue.peek(), ui.auth);
     notice.set(
         if next {
@@ -301,6 +341,15 @@ fn move_queue_up(at: usize, mut ui: PlaybackUi) {
         ui.index.set(current);
     }
     persist_queue(&ui.queue.peek(), ui.auth);
+    // DR-03: the order has changed; the receipt only says so.
+    let generation = queue_edit_bump(ui);
+    let mut receipt = ui.receipt;
+    receipt.set(Some(queue_drawer::QueueMoveReceipt {
+        generation,
+        at: at - 1,
+        direction: -1,
+        focus: move_control_has_focus(-1),
+    }));
 }
 fn move_queue_down(at: usize, mut ui: PlaybackUi) {
     synchronize_order(ui);
@@ -314,6 +363,15 @@ fn move_queue_down(at: usize, mut ui: PlaybackUi) {
         ui.index.set(current);
     }
     persist_queue(&ui.queue.peek(), ui.auth);
+    // DR-03: the order has changed; the receipt only says so.
+    let generation = queue_edit_bump(ui);
+    let mut receipt = ui.receipt;
+    receipt.set(Some(queue_drawer::QueueMoveReceipt {
+        generation,
+        at: next,
+        direction: 1,
+        focus: move_control_has_focus(1),
+    }));
 }
 fn remove_queued(at: usize, mut ui: PlaybackUi) {
     synchronize_order(ui);
@@ -324,6 +382,7 @@ fn remove_queued(at: usize, mut ui: PlaybackUi) {
     if let Some(current) = ui.order.peek().current() {
         ui.index.set(current);
     }
+    queue_edit_bump(ui);
     persist_queue(&ui.queue.peek(), ui.auth);
 }
 fn has_upcoming(queue_length: usize, cursor: usize) -> bool {
@@ -356,6 +415,7 @@ fn clear_upcoming(mut ui: PlaybackUi) {
     if let Some(current) = ui.order.peek().current() {
         ui.index.set(current);
     }
+    queue_edit_bump(ui);
     // The order model was edited alongside every removal; this no-op check
     // proves it still describes the final queue. No audio call happens here.
     synchronize_order(ui);
@@ -582,6 +642,11 @@ impl SleepTimer {
 /// are the one meaningful message of each transition.
 const SLEEP_CANCELED: &str = "Sleep timer canceled.";
 const SLEEP_EXPIRED: &str = "Sleep timer reached zero and paused playback.";
+
+/// The upper bound of one queue settle. The settle reads the reorder role
+/// (150ms); this bound is only the safety net for an effect that is
+/// cancelled and therefore never sends an end event.
+const SETTLE_BOUND_MS: u32 = 400;
 
 /// Start, replace or cancel the sleep timer. The start, the cancel and the
 /// expiry are one meaningful message each, and the message is written by
@@ -915,14 +980,18 @@ async fn upload_files(
 }
 
 #[component]
-fn Art(track: Track, #[props(default = false)] large: bool) -> Element {
+fn Art(
+    track: Track,
+    #[props(default = false)] large: bool,
+    onready: Option<EventHandler<()>>,
+) -> Element {
     let mut failed = use_signal(|| false);
     let class = if large {
         "artwork artwork-large"
     } else {
         "artwork"
     };
-    rsx! { div { class, if let Some(id) = track.artwork_id.filter(|_| !failed()) { img { src: "/api/artwork/{id}", alt: "", loading: "lazy", onerror: move |_| failed.set(true) } } else { span { Icon { name: "music" } } } } }
+    rsx! { div { class, if let Some(id) = track.artwork_id.filter(|_| !failed()) { img { src: "/api/artwork/{id}", alt: "", loading: "lazy", onerror: move |_| { failed.set(true); if let Some(handler) = onready { handler.call(()); } }, onload: move |_| { if let Some(handler) = onready { handler.call(()); } } } } else { span { Icon { name: "music" } } } } }
 }
 
 // Every asynchronous UI action is bound to the session that started it.
@@ -1950,6 +2019,10 @@ fn App() -> Element {
         drawer_open: show_queue,
     };
     let mut playback_order = use_signal(PlaybackOrder::default);
+    // DR-03: the lifetime of the current session. It changes with the
+    // account, so a load result of an earlier session can never paint over
+    // the picture of the current one.
+    let mut session_lifetime = use_signal(|| 0_u64);
     let playback_status = use_signal(String::new);
     let mut playback_expired = use_signal(|| false);
     let context = use_signal(PlaybackContext::default);
@@ -1978,6 +2051,11 @@ fn App() -> Element {
         shuffle,
         repeat,
         auth,
+        // DR-03: the receipt of the last move and the generation of the
+        // last structural edit. The drawer renders the receipt; the root
+        // owns it.
+        receipt: use_signal(|| None),
+        edit: use_signal(|| 0_u64),
     };
     let now = NowPlayingUi {
         open: use_signal(|| false),
@@ -2058,6 +2136,76 @@ fn App() -> Element {
             now.invalidate();
             now_track.set(current);
         }
+    });
+    // DR-03: the receipt belongs to the open drawer. When the drawer
+    // closes, the receipt dies with it, so a later open never settles a row
+    // that was moved in an earlier session of the drawer.
+    use_effect(move || {
+        if !*show_queue.read() {
+            let mut receipt = playback.receipt;
+            if receipt.peek().is_some() {
+                receipt.set(None);
+            }
+        }
+    });
+    // DR-03: a moved row is a new DOM node, so the focus of the move
+    // control is gone with it. The root hands the focus to the same control
+    // of the destination row after the renderer's batch, and only when the
+    // focus was really lost. The audio, the selection and the current
+    // occurrence are not touched.
+    use_effect(move || {
+        let Some(receipt) = *playback.receipt.read() else {
+            return;
+        };
+        if !receipt.focus {
+            return;
+        }
+        spawn(async move {
+            TimeoutFuture::new(0).await;
+            // The receipt the effect started for is still the receipt of the
+            // last edit: a later structural edit, a closed drawer or another
+            // account has already ended it, and then nobody moves the focus.
+            let still_current = playback
+                .receipt
+                .peek()
+                .is_some_and(|current| current.generation == receipt.generation);
+            if !still_current {
+                return;
+            }
+            let active = web_sys::window()
+                .and_then(|window| window.document())
+                .and_then(|document| document.active_element());
+            let lost = active
+                .as_ref()
+                .map(|element| element.tag_name().eq_ignore_ascii_case("BODY"))
+                .unwrap_or(true);
+            if !lost {
+                return;
+            }
+            let control = if receipt.direction < 0 { "up" } else { "down" };
+            focus_by_id(&format!("queue-move-{control}-{}", receipt.at));
+        });
+    });
+
+    // DR-03: the settle ends with its own end event, and this bound is the
+    // safety net. A cancelled effect (a reader who turns reduced motion on
+    // while a row settles) sends no end at all, and a receipt that waited
+    // for one would keep the class for good. The timer ends only its own
+    // generation, so a later edit is never touched.
+    use_effect(move || {
+        let Some(receipt) = *playback.receipt.read() else {
+            return;
+        };
+        spawn(async move {
+            TimeoutFuture::new(SETTLE_BOUND_MS).await;
+            let mut signal = playback.receipt;
+            if signal
+                .peek()
+                .is_some_and(|current| current.generation == receipt.generation)
+            {
+                signal.set(None);
+            }
+        });
     });
 
     // Device-scoped presentation preferences (app size + theme). They are never
@@ -2256,6 +2404,11 @@ fn App() -> Element {
             // leaves the top layer through the same closer as every other exit.
             surfaces.reset();
             close_queue(show_queue, sleep, &surfaces);
+            // DR-03: a new session starts a new lifetime, and the receipt of
+            // the last move dies with the account it belonged to.
+            let next_lifetime = session_lifetime.peek().wrapping_add(1);
+            session_lifetime.set(next_lifetime);
+            queue_edit_bump(playback);
             playback_order.write().reset(0, 0);
             shuffle.set(false);
             repeat.set("off".into());
@@ -2596,6 +2749,15 @@ fn App() -> Element {
         .clone()
         .map(|name| format!("Add to {name}"))
         .unwrap_or_else(|| "Add to playlist".to_string());
+    // DR-03: the artwork surfaces know which account they belong to and
+    // which session they are drawn in. A load result of an earlier session
+    // is dropped instead of painting over the picture of the current one.
+    let owner = auth
+        .read()
+        .as_ref()
+        .map(|account| account.user.id.clone())
+        .unwrap_or_default();
+    let lifetime = *session_lifetime.peek();
 
     rsx! {
         if booting() { div { class: "boot-screen", div { class: "brand-mark", "V" } p { "Opening your music space…" } } }
@@ -3289,7 +3451,7 @@ fn App() -> Element {
                                 surfaces.capture_now_trigger();
                                 now.show();
                             }},
-                                Art {key:"{track.id}-{track.artwork_id:?}",track:track.clone()}
+                                cover_fade::CoverFade { track: track.clone(), owner: owner.clone(), lifetime }
                                 span {class:"now-playing-meta",
                                     span {class:"now-playing-heading",strong {class:"player-title",title:track.title.clone(),"{track.title}"}
                                         span {class:"player-eq","data-state":player_state,"aria-hidden":"true",i{}i{}i{}i{}}
@@ -3570,6 +3732,7 @@ fn App() -> Element {
                     sleep_minutes: (sleep.minutes)(),
                     sleep_remaining: (sleep.remaining)(),
                     sleep_status: (sleep.status)(),
+                    receipt: *playback.receipt.read(),
                     onclose: { let surfaces = surfaces.clone(); move |_| close_queue(show_queue, sleep, &surfaces) },
                     onselect: move |at| select_queued(at, playback),
                     onremove: move |at| remove_queued(at, playback),
@@ -3594,10 +3757,18 @@ fn App() -> Element {
                         close_queue(show_queue, sleep, &surfaces);
                         actions.navigate.call("library".into());
                     } },
+                    // DR-03: the end of the settle ends the receipt, but only
+                    // when it is still the receipt of the last edit.
+                    onsealed: move |generation| {
+                        let mut receipt = playback.receipt;
+                        if receipt.peek().is_some_and(|receipt| receipt.generation == generation) {
+                            receipt.set(None);
+                        }
+                    },
                 } }
                 if *now.open.read() {
                     if let Some(track)=current.clone(){now_playing::NowPlaying {
-                        track,context:context(),playing:playing(),requested:requested_play,position:position(),duration:duration(),volume:volume_value,shuffle:shuffle(),repeat:repeat(),status:playback_status(),error:(now.error)(),favorite_busy:(now.busy)(),queue,cursor:index(),actions:now_actions,
+                        track,context:context(),playing:playing(),requested:requested_play,position:position(),duration:duration(),volume:volume_value,shuffle:shuffle(),repeat:repeat(),status:playback_status(),error:(now.error)(),favorite_busy:(now.busy)(),queue,cursor:index(),owner:owner.clone(),lifetime,actions:now_actions,
                     }}
                 }
                 if let Some(editing) = editing_track.read().clone() {

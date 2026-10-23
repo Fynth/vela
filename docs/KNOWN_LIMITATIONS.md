@@ -1,5 +1,48 @@
 # Unsupported and unverified functionality
 
+## DR-03 the short answer that never delays the command — 2026-10-23
+
+The package gives the web surfaces a short answer and keeps every command
+immediate. The measurements are in [QA_EVIDENCE](QA_EVIDENCE.md); what was
+**not** measured is here.
+
+- **The event-to-paint number is a browser number on this host, not a device
+  latency claim.** It is the time from the click to the first frame that
+  carries the effect, measured in headless Chromium and Firefox with the
+  software rasteriser. It says nothing about a phone on a real GPU, and it
+  is not a statement about the time a reader perceives — the perception
+  needs a human and a device, and neither was measured.
+- **A GPU-backed stand is NOT_RUN.** The renderer on this host is
+  SwiftShader in every launch mode, so the cost of the crossfade, the
+  entrance and the settle was not measured on a compositing GPU. The
+  DR-02 frame budget is the only frame measurement on this host and it does
+  not cover these effects.
+- **The native client is NOT_RUN.** There is no X server on this host. The
+  Linux client has its own stylesheet (`apps/desktop/style.css`) and its own
+  motion; the web package changed neither. The native surface was not
+  rendered, and its WebKitGTK rendering of the crossfade is not claimed.
+- **No screen reader was run.** The DOM contract of the new surfaces was
+  checked in the document: the outgoing cover layer is `aria-hidden="true"`
+  and `pointer-events: none`, the artwork keeps its empty `alt`, and the
+  permanent live regions of the drawer and the receipt are untouched. What a
+  screen reader says about a crossfade or a settle was not observed.
+- **`forced-colors` and `prefers-reduced-transparency` were not emulated
+  in this package.** DR-03 adds no colour, no shadow and no blur, so the
+  modes keep the surfaces they had; the modes themselves were exercised in
+  the DR-02 package, not here.
+- **The physical output was not part of the evidence.** The effect never
+  touches the audio path, and the playback evidence is a real browser
+  against the null sink of this host — not a physical speaker, a real room
+  or a real device.
+- **The two covers of the crossfade are the stored pictures.** The media
+  crate stores a re-encoded thumbnail of the embedded artwork, so the two
+  covers the journey measures are the stored JPEGs, not the original bytes
+  of the file. The two originals are real and different; what the reader
+  sees is the stored picture of each.
+- **The settle of a moved row is a presentation fact, not a frame budget.**
+  Its duration is the reorder role. Whether 150ms reads as "the row moved"
+  on every device was not measured with a person.
+
 ## DR-02 the underlap and the two glass bands — 2026-10-22
 
 The package lets the catalog run under the topbar and the player and paints
