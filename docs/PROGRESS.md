@@ -3003,17 +3003,22 @@ uploaded tracks — the details and the artifacts are in
   analytical one.
 - Scrolling, the theme and the queue keep the same media element, the
   same source, the same generation and a position that never rewinds.
-- The frame budget: with the glass, 602 frames in ten seconds, the median
-  frame 16.7ms, the longest 16.8ms and **zero** frames over 33ms — the
-  same numbers as the opaque fallback, so the glass costs **0.00 points**
-  against the plan's 5-point budget. The measurement runs in a browser
-  process the test runner does not instrument: the same page, browser,
-  driver, server and session read 15.7–24.4 points inside the runner, and
-  the difference is the harness, not the product. The renderer here is
+- The frame budget, against the **opaque** roles (not just a removed
+  filter): Chromium 1284×856 on SwiftShader reads **598 frames, 3 over
+  33ms (0.50 %)**, median 16.7ms, longest 33.4ms with the glass and **602
+  frames, 0 over 33ms**, longest 16.8ms with the fallback → **+0.50
+  points**; Firefox reads **602/0** and **603/0** with a 17.06ms median in
+  both → **0.00 points**. Both are inside the plan's 5-point budget. The
+  measurement runs in a browser process the test runner does not
+  instrument, and each run records the surface it really painted, so the
+  gate fails if the fallback is not opaque. The renderer here is
   SwiftShader, so a GPU-backed stand is NOT_RUN.
 
 The permanent gate is `tests/browser/dr02-glass.spec.mjs` (7 journeys) and
 the frame budget's own helper `tests/browser/dr02-frame-budget.mjs`. The
+bright-cover fixture is tracked in the repository
+(`crates/media/tests/fixtures/bright-cover.flac`), so the contrast journey
+cannot silently skip; `VELA_DR02_BRIGHT_COVER` still overrides the path. The
 geometric assertions of the older suites that described the
 *non-overlapping* siblings were updated to the new contract — the scroller
 now ends at the viewport bottom and the content is measured against the
@@ -3030,10 +3035,15 @@ touched): `cargo fmt --all -- --check` exit 0; `cargo clippy --locked
 `cmp apps/web/style.css dist/style.css` is identical — the CSS is
 repackaged by the existing build, and no new static path was added.
 
-The whole browser suite is green in both engines: Chromium **89 passed,
-1 skipped** (the opt-in live import), 6.2m; Firefox **89 passed, 1
-skipped**, 7.5m. The seven new DR-02 journeys alone: Chromium 7/7 and
-Firefox 7/7.
+The whole browser suite is green in both engines, re-run by the team lead
+after the review round: Chromium **89 passed, 1 skipped** (the opt-in live
+import), 6.2m; Firefox **89 passed, 1 skipped**, 7.6m. The seven new DR-02
+journeys alone: Chromium 7/7 (57.5s) and Firefox 7/7 (1.1m). The review
+round's three blockers were closed before this run: the contrast of a
+`backdrop-filter` surface is now bounded by the sRGB extremes, the bright
+cover is a tracked repository fixture that cannot be skipped, and the frame
+budget's fallback paints the opaque roles and is asserted to differ from
+the glass.
 
 ## DR-01 one glass and motion vocabulary (2026-10-22)
 

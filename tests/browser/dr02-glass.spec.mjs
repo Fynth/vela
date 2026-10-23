@@ -62,9 +62,10 @@ import { navigate, settle, startServer } from './dr04-density.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const output = resolve(root, process.env.VELA_DR02_EVIDENCE || 'target/checks/dr02-glass');
-/** The bright cover fixture: a real FLAC with an embedded 800x800 cover. */
+/** The bright cover fixture: a real FLAC with an embedded 800x800 cover.
+    It is a tracked repository fixture, so the contrast journey always runs. */
 const brightCover = process.env.VELA_DR02_BRIGHT_COVER
-  || '/root/.hermes/profiles/vela/cache/scratch/vela-tl/dr02/bright-cover.flac';
+  || resolve(root, 'crates/media/tests/fixtures/bright-cover.flac');
 
 /* ------------------------------------------------------------------ colour */
 
@@ -115,8 +116,9 @@ function pcmWave(duration, frequency) {
 }
 
 /**
- * A real account with real originals. The bright cover is optional: when the
- * fixture file is missing the caller skips its own journey and says why.
+ * A real account with real originals. The bright cover is a tracked repository
+ * fixture: the contrast journey is mandatory, so a missing file fails the test
+ * instead of skipping it.
  */
 async function setupAccount(page, runtime, { tracks = 12, cover = null, long = false } = {}) {
   const setup = await page.request.post(runtime.origin + '/api/setup', {
@@ -564,8 +566,10 @@ test('DR02 the labels on the glass stay readable over a real cover and over the 
   const engine = page.context().browser().browserType().name();
   const engineOutput = join(output, engine);
   await mkdir(engineOutput, { recursive: true });
-  const fixture = await readFile(brightCover).catch(() => null);
-  test.skip(fixture === null, `the bright cover fixture is missing: ${brightCover}`);
+  const fixture = await readFile(brightCover).catch(error => {
+    throw new Error(`the bright cover fixture is unreadable: ${brightCover}: ${error.message}`);
+  });
+  expect(fixture.length, 'the bright cover fixture is a real FLAC').toBeGreaterThan(1000);
   const runtime = await startServer(engineOutput);
   const evidence = { engine, cover: brightCover, cases: [] };
   try {
@@ -1013,6 +1017,18 @@ test.describe('DR02 the frame budget', () => {
 
       const glass = measured.runs.find(run => run.mode === 'glass');
       const opaque = measured.runs.find(run => run.mode === 'opaque');
+      // The two runs must really differ in what they paint: a fallback that
+      // only removed the filter would keep the translucent background and
+      // compare the glass with itself.
+      expect(glass.painted.player.filter, 'the glass run blurs its backdrop').toMatch(/blur\(/);
+      expect(opaque.painted.player.filter, 'the fallback run has no filter').toBe('none');
+      expect(opaque.painted.topbar.filter, 'the fallback topbar has no filter').toBe('none');
+      expect(glass.painted.player.background, 'the glass run paints the glass role')
+        .toMatch(/rgba\(/);
+      expect(opaque.painted.player.background, 'the fallback run paints an opaque role')
+        .toMatch(/^rgb\(/);
+      expect(opaque.painted.topbar.background, 'the fallback topbar paints an opaque role')
+        .toMatch(/^rgb\(/);
       expect(glass.frames, 'the glass run produced frames').toBeGreaterThan(100);
       expect(opaque.frames, 'the opaque run produced frames').toBeGreaterThan(100);
       expect(glass.range, 'both runs covered the same scroll range').toBe(opaque.range);

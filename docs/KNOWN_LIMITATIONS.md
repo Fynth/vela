@@ -9,19 +9,31 @@ those two bands with the DR-01 glass roles. The measurements are in
 
 - **The frame budget is a software-raster number, and a GPU-backed stand is
   NOT_RUN.** The renderer on this host is SwiftShader in every launch mode
-  (`WEBGL_debug_renderer_info`), so the 0.00 points the glass costs here say
-  nothing about a browser that composites on a GPU. The plan's 5-point
-  budget is met on this stand and is not claimed for any other device.
-- **The same measurement reads two very different numbers, and the cause
-  was not isolated.** In a plain process the glass costs 0.00 points of
-  frames over 33ms (602 frames, the median 16.7ms, the longest 16.8ms); the
-  same page, browser, driver, server and session inside the Playwright test
-  runner read 15.7–24.4 points. The difference is the process, not the page:
-  the painted filters, the scroll range and the element count are identical
-  in both. The budget is gated on the plain-process number because that is
-  the environment a reader's browser is in, and the higher number is
-  published next to it. A reader whose raster threads are busy may see
-  something closer to the higher number.
+  (`WEBGL_debug_renderer_info`), so the +0.50 points (Chromium) and 0.00
+  points (Firefox) the glass costs here say nothing about a browser that
+  composites on a GPU. The plan's 5-point budget is met on this stand and is
+  not claimed for any other device. The Chromium gate run read three frames
+  over 33ms in a ten-second scroll; one sample cannot say whether they
+  belong to the filter or to the software rasteriser.
+- **The runner-vs-plain-process difference was measured against the
+  filter-only fallback, not the opaque one.** The diagnostic run of
+  2026-10-22 read 0.00 points in a plain process (602 frames, the median
+  16.7ms, the longest 16.8ms) and 15.7–24.4 points inside the Playwright
+  test runner for the same page, browser, driver, server and session. Its
+  fallback column removed only `backdrop-filter`, so that A/B isolates the
+  harness, not glass against opaque. The budget gate itself now compares
+  the glass with the opaque roles and asserts the two painted surfaces
+  differ.
+- **The contrast in `design.spec.mjs` is a bound, not a sample.** For a
+  surface that carries a `backdrop-filter` the suite composites the text's
+  own stack over **white and over black** (the extremes of sRGB) and asserts
+  the worse of the two, because any cover can scroll under the band; for
+  every other surface it keeps the original reading against the first opaque
+  ancestor. The real-artwork measurement is the separate journey in
+  `dr02-glass.spec.mjs`, which uploads a real FLAC with a real 800×800 cover,
+  reads the artwork's own colour and also samples the painted pixels under a
+  hidden band. A colour outside the sRGB extremes (a wide-gamut image) is
+  not modelled by either.
 - **The opaque fallback is not automatic.** It is what a reader with
   `prefers-reduced-transparency: reduce` or `forced-colors: active` gets,
   what `print` gets, and what an engine without `backdrop-filter` gets. No

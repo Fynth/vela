@@ -168,26 +168,52 @@ test('DESIGN01 high contrast, responsive music surfaces and navigation retain ac
             return [parts[0] || 0, parts[1] || 0, parts[2] || 0, parts[3] ?? 1];
           };
           const background = element => {
-            // DR02: a translucent band is not the surface of its first
+            // DR02: a translucent surface is not the surface of its first
             // opaque ancestor. The translucent backgrounds between the element
             // and that ancestor are composited in overlay order, so the
             // measured contrast is the one of the text on the real surface.
+            // A surface that carries a `backdrop-filter` is the exception: it
+            // samples whatever content scrolls under it, so its backdrop is
+            // arbitrary user artwork, not the page behind the shell.
             const layers = [];
             let base = null;
+            let floating = false;
             for (let parent = element; parent; parent = parent.parentElement) {
-              const color = rgb(getComputedStyle(parent).backgroundColor);
-              if (color[3] === 0) continue;
+              const style = getComputedStyle(parent);
+              const color = rgb(style.backgroundColor);
+              const filter = style.backdropFilter || style.webkitBackdropFilter || 'none';
+              if (color[3] > 0) layers.push(color);
+              if (parent !== element && filter !== 'none') { floating = true; break; }
               if (color[3] === 1) { base = color; break; }
-              layers.push(color);
             }
-            if (!base) base = rgb(getComputedStyle(document.body).backgroundColor);
-            let result = base;
-            for (const layer of layers.reverse()) {
-              result = [0, 1, 2]
-                .map(at => layer[at] * layer[3] + result[at] * (1 - layer[3]))
-                .concat(1);
-            }
-            return result;
+            if (!base && !floating) base = rgb(getComputedStyle(document.body).backgroundColor);
+            const composite = under => {
+              let result = under;
+              for (const layer of [...layers].reverse()) {
+                result = [0, 1, 2]
+                  .map(at => layer[at] * layer[3] + result[at] * (1 - layer[3]))
+                  .concat(1);
+              }
+              return result;
+            };
+            if (!floating) return { surface: composite(base), floating: false };
+            // A cover is user content: any sRGB image can scroll under the
+            // band, so the honest bound over that content is the two extremes
+            // of the colour space, not the page that happens to sit behind the
+            // shell.
+            const extremes = [[255, 255, 255, 1], [0, 0, 0, 1]];
+            const candidates = extremes.map(composite);
+            const luminanceOf = channels => channels.slice(0, 3).map(value => value / 255)
+              .map(value => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4)
+              .reduce((total, value, at) => total + value * [.2126, .7152, .0722][at], 0);
+            const foreground = luminanceOf(rgb(getComputedStyle(element).color));
+            const worst = candidates
+              .map(surface => {
+                const back = luminanceOf(surface);
+                return (Math.max(foreground, back) + .05) / (Math.min(foreground, back) + .05);
+              })
+              .reduce((low, value) => Math.min(low, value), Infinity);
+            return { surface: candidates[0], floating: true, worst, overWorst: candidates[candidates.length - 1] };
           };
           const luminance = channels => channels.slice(0, 3).map(value => value / 255)
             .map(value => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4)
@@ -198,8 +224,20 @@ test('DESIGN01 high contrast, responsive music surfaces and navigation retain ac
               if (!element.checkVisibility() || element.matches(':disabled')) continue;
               const style = getComputedStyle(element);
               const a = luminance(rgb(style.color));
-              const b = luminance(background(element));
-              readings.push({ selector, label: element.textContent.trim().slice(0, 60), foreground: style.color, background: background(element), ratio: (Math.max(a, b) + .05) / (Math.min(a, b) + .05), font: parseFloat(style.fontSize) });
+              const resolved = background(element);
+              // A floating surface is read against the worst backdrop it can
+              // really float over; a surface with an opaque ancestor is read
+              // against that ancestor, exactly as before.
+              const b = luminance(resolved.surface);
+              const ratio = resolved.floating
+                ? resolved.worst
+                : (Math.max(a, b) + .05) / (Math.min(a, b) + .05);
+              readings.push({
+                selector, label: element.textContent.trim().slice(0, 60),
+                foreground: style.color, background: resolved.surface,
+                floating: resolved.floating, ratio,
+                font: parseFloat(style.fontSize),
+              });
             }
           }
           return { width: innerWidth, overflow: document.documentElement.scrollWidth - innerWidth, readings };

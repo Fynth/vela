@@ -86,12 +86,37 @@ const scrollFor = async (milliseconds) => await page.evaluate(async (ms) => {
 }, milliseconds);
 
 const runs = [];
-runs.push({ mode: 'glass', ...(await scrollFor(10000)) });
+const run = async mode => {
+  const paintedSurface = await page.evaluate(() => {
+    const read = selector => {
+      const style = getComputedStyle(document.querySelector(selector));
+      return {
+        background: style.backgroundColor,
+        filter: style.backdropFilter || style.webkitBackdropFilter || 'none',
+        shadow: style.boxShadow,
+      };
+    };
+    return { player: read('.player-bar'), topbar: read('.topbar') };
+  });
+  return { mode, painted: paintedSurface, ...(await scrollFor(10000)) };
+};
+runs.push(await run('glass'));
+// The fallback is the surface the product itself shows without blur: the two
+// opaque roles, no filter and no shadow. Removing only the filter would keep
+// the translucent background and compare the glass with itself.
 await page.addStyleTag({
-  content: '.player-bar,.topbar{backdrop-filter:none !important;-webkit-backdrop-filter:none !important;}',
+  content: `
+    .player-bar { background: var(--vela-player-bg) !important; }
+    .topbar { background: var(--vela-bg) !important; }
+    .player-bar, .topbar {
+      backdrop-filter: none !important;
+      -webkit-backdrop-filter: none !important;
+      box-shadow: none !important;
+    }
+  `,
 });
 await page.waitForTimeout(300);
-runs.push({ mode: 'opaque', ...(await scrollFor(10000)) });
+runs.push(await run('opaque'));
 
 const renderer = await page.evaluate(() => {
   const canvas = document.createElement('canvas');
@@ -105,6 +130,5 @@ console.log(JSON.stringify({
   engine, origin, painted, runs, renderer,
   userAgent: await page.evaluate(() => navigator.userAgent).catch(() => 'unknown'),
 }));
-
 await context.close();
 await browser.close();

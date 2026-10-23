@@ -7,8 +7,8 @@ the product that carry a `backdrop-filter`. This entry is the local budget
 for that filter: what the product costs when the catalog scrolls under the
 two bands, against the same scroll with the opaque fallback.
 
-**Stand.** Headless Chromium 156.0.8078.4 on Linux x86_64, viewport
-1284×856, no display server. The compositor's renderer is
+**Stand.** Headless Chromium 156.0.8078.4 and Firefox on Linux x86_64,
+viewport 1284×856, no display server. Chromium's compositor renderer is
 `ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero)), SwiftShader
 driver)` — **software rasterisation**; `/dev/dri` exists on this host but no
 GPU-backed browser is available here, so **a GPU-backed stand is NOT_RUN**.
@@ -18,39 +18,66 @@ is the real Library with the real shell.
 **Method.** `tests/browser/dr02-frame-budget.mjs` launches the browser,
 opens the Library and scrolls for ten seconds with the page's own animation
 clock (a sine over the whole scroll range, so the backdrop under both bands
-changes on every frame). It then repeats the same ten seconds with
-`backdrop-filter: none` on the two bands — the opaque fallback — in the same
-viewport, on the same page, in the same browser.
+changes on every frame). It then repeats the same ten seconds with the
+**opaque** roles painted on the two bands — `var(--vela-player-bg)` on the
+player and `var(--vela-bg)` on the topbar, `backdrop-filter: none` and no
+shadow — in the same viewport, on the same page, in the same browser. Each
+run records the computed background, filter and shadow it really painted,
+and the gate asserts that the two runs differ: a fallback that removed only
+the blur would keep the 0.851 background and compare the glass with itself.
+Measured: the glass run paints `rgba(19, 21, 19, 0.85)` with `blur(16px)` /
+`blur(12px)`; the fallback run paints `rgb(16, 19, 15)` and `rgb(19, 21, 19)`
+with `filter: none` and `shadow: none`.
 
 **The measurement runs in a process of its own, and that matters.** The
 Playwright test runner attaches to every browser it starts: its client, its
 trace agent and its own machinery sit next to the renderer while a
 measurement runs. On this host the *same* page, browser, driver, server and
-session read:
+session read (diagnostic run of 2026-10-22, `perf-diagnostics` /
+`target/checks/dr02-glass/perf-diagnostics.json`):
 
-| Where the measurement runs | glass: frames > 33ms | opaque: frames > 33ms | difference |
+| Where the measurement runs | glass: frames > 33ms | fallback: frames > 33ms | difference |
 | --- | ---: | ---: | ---: |
-| A plain process (the product's own environment) | **0 of 602 (0.00 %)** | 0 of 602 (0.00 %) | **0.00 points** |
+| A plain process (the product's own environment) | 0 of 602 (0.00 %) | 0 of 602 (0.00 %) | 0.00 points |
 | Inside the Playwright test runner | 96–122 of ~500 (15.7–24.4 %) | 0 of 602 (0.00 %) | 15.7–24.4 points |
 
 The two rows are the same code, the same page (the same 1321px scroll range,
 the same 888 elements, the same `blur(16px)` on the player and `blur(12px)`
 on the topbar) and the same server; only the process that owns the browser
-differs. The runner's row is the harness's cost, not the product's, so the
-budget is measured in the plain process and the permanent gate
-(`tests/browser/dr02-glass.spec.mjs`) runs it there.
+differs. **The runner row was taken before the fallback was opaque** — its
+second column is the filter-only variant, so the 15.7–24.4 points are the
+harness cost of the glass run, not a measured glass-vs-opaque delta. The
+runner's cost is not the product's, so the budget is measured in the plain
+process and the permanent gate (`tests/browser/dr02-glass.spec.mjs`) runs it
+there, against the opaque roles.
 
-**Result.** With the glass: 602 frames in ten seconds, the median frame
-16.7 ms (60 fps), the longest frame 16.8 ms, **zero** frames over 33 ms.
-With the opaque fallback: the same 602 frames, the same median, the same
-longest frame. The glass costs **0.00 points** of frames over 33 ms against
-the opaque fallback on this stand — inside the 5-point budget the DR-02 plan
-sets. The median frame does not move either, so the filter is not what sets
-the cadence of the scroll.
+**Result (the gate's own numbers, 2026-10-22, five runs of the same gate,
+`target/checks/dr02-glass/budget-runs.json`).** Every run recorded the two
+surfaces it painted (glass `rgba(19, 21, 19, 0.85)` + `blur(16px)`/`blur(12px)`
++ shadow vs fallback `rgb(16, 19, 15)`/`rgb(19, 21, 19)`, `filter: none`,
+`shadow: none`), so the comparison is glass against opaque in all five.
+
+| Run | Engine | Glass: frames / over 33 ms | Opaque: frames / over 33 ms | Difference |
+| --- | --- | ---: | ---: | ---: |
+| DR-02 spec alone | Chromium | 598 / 3 (0.50 %) | 602 / 0 | **+0.50 points** |
+| DR-02 spec alone | Firefox | 602 / 0 | 603 / 0 | 0.00 points |
+| whole suite | Chromium | 601 / 0 | 602 / 0 | 0.00 points |
+| whole suite | Firefox | 601 / 0 | 602 / 0 | 0.00 points |
+| whole suite (final) | Chromium | 602 / 0 | 602 / 0 | 0.00 points |
+
+The median frame is 16.7 ms in Chromium and 17.06 ms in Firefox in both
+modes; the longest frame is 16.8 ms everywhere except the one Chromium glass
+run (33.4 ms, three frames). So the honest reading is **0.00 to +0.50 points
+across five runs**, inside the 5-point budget the DR-02 plan sets — and the
+single three-frame sample is not reproducible: three later runs of the same
+gate read zero. On this stand the filter does not set the cadence of the
+scroll; a single ten-second sample cannot resolve a half-point difference
+from the software rasteriser's own noise, and this document does not claim
+it does.
 
 **What this is not.** It is a local budget on a software rasteriser, not a
-promise about any other device: the number says that the two glass bands
-cost nothing measurable here, and it says nothing about a GPU-backed
+promise about any other device: the number says the two glass bands cost at
+most half a point here, and it says nothing about a GPU-backed
 browser, a phone, a laptop on battery, or a machine whose raster threads
 are busy. A GPU-backed stand is NOT_RUN on this host. The opaque fallback
 stays implemented and reachable (`prefers-reduced-transparency: reduce`,
@@ -63,16 +90,18 @@ two bands blurred, with no blur at all, with only the player blurred, with
 only the topbar blurred and with both blurred at 4px and at 8px
 (`target/checks/dr02-glass/perf-diagnostics.json`): all six read 602 frames,
 a 16.7 ms median, a 16.8 ms longest frame and **0 %** frames over 33 ms.
-The blur radius is therefore not what costs anything on this stand — the
-whole filter is free here — which is why the shipped radii (16px for the
-desktop player, 12px for the topbar and the mobile player) are the ones the
-DR-01 roles declare.
+That run also used the filter-only fallback, so it compares blur radii and
+not glass against opaque. The blur radius is therefore not what costs
+anything on this stand — the whole filter is free here — which is why the
+shipped radii (16px for the desktop player, 12px for the topbar and the
+mobile player) are the ones the DR-01 roles declare.
 
 **Reproduce.**
 
 ```bash
 cd tests/browser
-npx playwright test dr02-glass.spec.mjs --grep "frame budget"
+npx playwright test dr02-glass.spec.mjs --grep "frame budget"            # chromium
+npx playwright test dr02-glass.spec.mjs --grep "frame budget" --browser=firefox
 # the raw numbers: target/checks/dr02-glass/<engine>/performance.json
 ```
 
