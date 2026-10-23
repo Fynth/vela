@@ -846,6 +846,26 @@ try {
     assert(button('Cancel audio preparation') && !button('Cancel audio preparation').disabled,
       'Pending player offers an explicit enabled Cancel action');
     assert(near(box('.native-player').height, idleHeight), 'Preparation preserves the approved desktop player height');
+    // DR08: a pending preparation is one of the two scenes that must never be
+    // a glass band. The band carries a live byte-progress caption and a Cancel
+    // action there, so it keeps the opaque role and the original geometry and
+    // the scroller still ends above it.
+    const preparationBand = el('.native-player');
+    const preparationStyle = getComputedStyle(preparationBand);
+    const preparationScroll = el('.native-scroll');
+    const preparationBandRect = preparationBand.getBoundingClientRect();
+    const preparationScrollRect = preparationScroll.getBoundingClientRect();
+    const preparationLayers = backdropLayers();
+    assert(preparationLayers.length === 0
+      && (preparationStyle.backdropFilter || preparationStyle.webkitBackdropFilter || 'none') === 'none',
+      `DR08 the pending preparation has no backdrop layer (${preparationLayers.map(node => describeNode(node)).join(', ') || 'none'}, filter "${preparationStyle.backdropFilter}")`);
+    assert(sameColor(parseColor(preparationStyle.backgroundColor), parseColor(cssToken(el('.native-app'), '--vela-player-bg')))
+      && sameColor(parseColor(getComputedStyle(el('.native-topbar')).backgroundColor), parseColor(cssToken(el('.native-app'), '--vela-bg'))),
+      `DR08 the pending preparation keeps the opaque band roles (player ${preparationStyle.backgroundColor}, topbar ${getComputedStyle(el('.native-topbar')).backgroundColor})`);
+    assert(near(preparationScrollRect.bottom, preparationBandRect.top)
+      && cssPx(preparationScroll, 'marginTop') === 0 && cssPx(preparationScroll, 'paddingTop') === 0,
+      `DR08 the pending preparation keeps the original scroller geometry (scroll bottom ${preparationScrollRect.bottom}, band top ${preparationBandRect.top}, margin ${cssPx(preparationScroll, 'marginTop')}px, padding ${cssPx(preparationScroll, 'paddingTop')}px)`);
+    checks.push(`DR08 pending preparation: ${preparationLayers.length} backdrop layer(s), player ${preparationStyle.backgroundColor} over "${preparationStyle.backdropFilter}", topbar ${getComputedStyle(el('.native-topbar')).backgroundColor}, scroll bottom ${Math.round(preparationScrollRect.bottom)} = band top ${Math.round(preparationBandRect.top)}`);
     assert(!['Playing', 'Paused'].includes(phase()) && position() === 0,
       'A partially transferred original never reaches the decoder');
     await capture('preparation-dark');

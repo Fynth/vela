@@ -170,7 +170,7 @@ def main():
     module = subprocess.check_output(['pactl', 'load-module', 'module-null-sink', f'sink_name={SINK}', 'sink_properties=device.description=Vela-isolated-QA'], text=True).strip()
     if not module.isdecimal():
         raise RuntimeError('Invalid owned Pulse module identity')
-    server = driver = peer_process = peer2_process = None
+    server = driver = peer_process = peer2_process = reduced_driver = None
     session_service = None
     preparation_proxy = None
     try:
@@ -444,27 +444,32 @@ def main():
                 # the stylesheet's own reduce block applies to the two bands. The
                 # desktop settings of this machine are never changed. The run
                 # happens before the main fixture, because the main fixture stops
-                # the fixture server for its own offline scenario.
-                reduced_config = private / 'reduced-config'
-                (reduced_config / 'gtk-3.0').mkdir(parents=True, exist_ok=True)
-                (reduced_config / 'gtk-3.0' / 'settings.ini').write_text('[Settings]\ngtk-enable-animations=0\n')
-                reduced_report = evidence / 'reduced-report.json'
-                reduced_environment = {**environment,
-                    'XDG_CONFIG_HOME': str(reduced_config),
-                    'XDG_DATA_HOME': str(reduced_config / 'data'),
-                    'XDG_CACHE_HOME': str(reduced_config / 'cache'),
-                    'VELA_NATIVE_QA_SESSION_PHASE': 'reduced',
-                    'VELA_NATIVE_QA_REPORT': str(reduced_report)}
-                with (evidence / 'reduced-window.log').open('wb') as reduced_log:
-                    reduced_driver = subprocess.Popen([str(args.driver.resolve())], env=reduced_environment, stdout=reduced_log, stderr=subprocess.STDOUT)
-                    reduced_driver.wait(timeout=240)
-                if reduced_driver.returncode or not reduced_report.exists():
-                    raise RuntimeError('Reduced-motion native process failed')
-                reduced = json.loads(reduced_report.read_text())
-                if not reduced['result']['ok']:
-                    raise RuntimeError(f"Reduced-motion native window failed: {reduced['result'].get('failure')}")
-                if not all(image['passed'] for image in reduced['screenshots']):
-                    raise RuntimeError('Reduced-motion native window left a failed screenshot capture')
+                # the fixture server for its own offline scenario. It is a full
+                # window flow, so the `--window-only` mode (the Wayland gate)
+                # never runs it: a window-only smoke test must not depend on a
+                # second full journey.
+                reduced = None
+                if not args.window_only:
+                    reduced_config = private / 'reduced-config'
+                    (reduced_config / 'gtk-3.0').mkdir(parents=True, exist_ok=True)
+                    (reduced_config / 'gtk-3.0' / 'settings.ini').write_text('[Settings]\ngtk-enable-animations=0\n')
+                    reduced_report = evidence / 'reduced-report.json'
+                    reduced_environment = {**environment,
+                        'XDG_CONFIG_HOME': str(reduced_config),
+                        'XDG_DATA_HOME': str(reduced_config / 'data'),
+                        'XDG_CACHE_HOME': str(reduced_config / 'cache'),
+                        'VELA_NATIVE_QA_SESSION_PHASE': 'reduced',
+                        'VELA_NATIVE_QA_REPORT': str(reduced_report)}
+                    with (evidence / 'reduced-window.log').open('wb') as reduced_log:
+                        reduced_driver = subprocess.Popen([str(args.driver.resolve())], env=reduced_environment, stdout=reduced_log, stderr=subprocess.STDOUT)
+                        reduced_driver.wait(timeout=240)
+                    if reduced_driver.returncode or not reduced_report.exists():
+                        raise RuntimeError('Reduced-motion native process failed')
+                    reduced = json.loads(reduced_report.read_text())
+                    if not reduced['result']['ok']:
+                        raise RuntimeError(f"Reduced-motion native window failed: {reduced['result'].get('failure')}")
+                    if not all(image['passed'] for image in reduced['screenshots']):
+                        raise RuntimeError('Reduced-motion native window left a failed screenshot capture')
                 driver = subprocess.Popen([str(args.driver.resolve())], env=environment, stdout=window_log, stderr=subprocess.STDOUT)
                 while driver.poll() is None:
                     if stop_request.exists():
@@ -491,8 +496,13 @@ def main():
                 result['reduced_motion'] = {'checks': reduced['result']['checks'],
                     'screenshots': [image['name'] for image in reduced['screenshots']]}
                 result['result']['checks'] = result['result']['checks'] + reduced['result']['checks']
+                # The pixel validator reads the band rectangle and the live text
+                # colours out of each screenshot's `layout`; a merged frame that
+                # dropped it would be silently skipped there. The reduced-motion
+                # frame therefore carries its layout across unchanged.
                 result['screenshots'] = result['screenshots'] + [
-                    {'name': image['name'], 'passed': image['passed'], 'error': image['error']}
+                    {'name': image['name'], 'passed': image['passed'], 'error': image['error'],
+                     'layout': image.get('layout')}
                     for image in reduced['screenshots']]
                 report.write_text(json.dumps(result, indent=2) + '\n')
                 offline_audio = list((private / 'home' / 'vela' / 'offline').glob('*/*/*.audio'))
@@ -642,7 +652,7 @@ def main():
             preparation_proxy.release.set()
             preparation_proxy.shutdown()
             preparation_proxy.server_close()
-        for process in (driver, server, peer_process, peer2_process):
+        for process in (driver, reduced_driver, server, peer_process, peer2_process):
             if process is not None and process.poll() is None:
                 process.send_signal(signal.SIGTERM)
                 try:

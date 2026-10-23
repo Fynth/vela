@@ -243,16 +243,23 @@ def main() -> int:
     report = json.loads(report_path.read_text())
     frames = []
     failures = []
+    glass_frames = 0
+    skipped = []
     for screenshot in report.get("screenshots") or []:
         name = screenshot.get("name")
         if not name or not screenshot.get("passed", True):
             continue
         bands = frame_bands(screenshot)
         if not bands:
+            # A frame that carries no band layout cannot be measured. It is
+            # recorded, never silently dropped: a run whose frames all lost
+            # their layout must not read as a passing contrast gate.
+            skipped.append(f"{name}: no band layout")
             continue
         layout = screenshot.get("layout") or {}
         image_path = evidence / f"native-{name}.png"
         if not image_path.is_file():
+            failures.append(f"{name}: {image_path.name} is missing")
             continue
         try:
             image = load_frame(image_path)
@@ -269,6 +276,8 @@ def main() -> int:
             measurement["app_scale"] = bands.get("appScale")
             measurement["viewport"] = layout.get("viewport")
             frames.append(measurement)
+            if measurement["glass"]:
+                glass_frames += 1
             if measurement["verdict"] == "FAIL":
                 failures.append(f"{name}/{band_name}: {measurement['worst']['contrast']}:1 below {TEXT_CONTRAST_MIN}:1")
     result = {
@@ -276,7 +285,9 @@ def main() -> int:
         "reader": "Pillow" if PIL_AVAILABLE else "stdlib zlib+struct PNG reader",
         "text_threshold": TEXT_CONTRAST_MIN,
         "frames": frames,
-        "verdict": "PASS" if frames and not failures else ("FAIL" if failures else "NOT_MEASURED"),
+        "glass_frames": glass_frames,
+        "skipped": skipped,
+        "verdict": "PASS" if frames and glass_frames and not failures else ("FAIL" if failures else "NOT_MEASURED"),
         "failures": failures,
     }
     print(json.dumps(result, indent=2))

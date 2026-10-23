@@ -21,6 +21,8 @@ server, the domain API and the web client are untouched.
 | `cargo build --locked -p vela-server` | exit 0 |
 | `DISPLAY=:99 python3 scripts/verify_native_client.py --backend x11 --server target/debug/vela-server --test-peer --evidence target/checks/dr08-native` | **exit 0** — `report.json` `ok=true`, **300 checks**, **21 screenshots**, 0 temporary originals; the separate reduced-motion window `reduced-report.json` `ok=true`, 8 checks, `native-reduced-glass-dark.png` |
 | `python3 scripts/native_band_contrast.py --evidence target/checks/dr08-native --report report.json` | **exit 0** — verdict `PASS`, 0 failures, 26 glass frames measured |
+| review run: `DISPLAY=:99 python3 scripts/verify_native_client.py --backend x11 --server target/debug/vela-server --test-preparation --evidence target/checks/dr08-review-fixed` | **exit 0** — `report.json` `ok=true`, **314 checks**, **24 screenshots**, 0 temporary originals; the same glass scene still measures `blur(16px)`/`blur(12px)` with exactly 2 backdrop layers, and the pending preparation now measures 0 backdrop layers with the opaque band roles and the original scroller geometry |
+| review run: `python3 scripts/native_band_contrast.py --evidence target/checks/dr08-review-fixed --report report.json` | **exit 0** — verdict `PASS`, 0 failures, 26 glass frames measured (46 frames in total, the extra ones are the opaque preparation and compact frames) |
 
 The pre-change baseline is preserved and was not overwritten:
 `target/checks/dr08-baseline-native/` (263 checks, 15 PNG). The new evidence is
@@ -55,6 +57,13 @@ The pre-change baseline is preserved and was not overwritten:
   (`rgb(255, 255, 255)` / `rgb(244, 247, 243)`), `scroll bottom 537px = player
   top 537px`, the content keeps its own 24px bottom inset, and every control
   stays reachable.
+- **The pending preparation is the other honest fallback.** In the
+  `--test-preparation` journey the band carries a live byte-progress caption
+  and a Cancel action, so it must not be a glass band. Measured at 1280×840:
+  **0** backdrop layers, `backdrop-filter: none`, the opaque player and canvas
+  roles (`rgb(16, 19, 15)` / `rgb(19, 21, 19)`), the original scroller geometry
+  (`scroll bottom 727.98px = band top 727.98px`, `margin-top 0px`,
+  `padding-top 0px`) and the unchanged band height.
 - **The reduced-motion branch is a separate real window process** with GTK
   animations disabled for that process only: `matchMedia('(prefers-reduced-motion:
   reduce)')` is true, the eight duration roles read `0ms`, both bands report
@@ -78,6 +87,31 @@ The failure was reproduced once in this session and is preserved as
 `target/checks/dr08-native-final/report.json` (`failure: "Argument 1
 ('element') to Window.getComputedStyle must be an instance of Element"`, 33
 checks).
+
+### Review corrections (2026-10-23, reviewer pass)
+
+Three defects were found in the review of the accepted slice and fixed in the
+same branch. The evidence above was reproduced independently by the reviewer
+before and after the fixes.
+
+1. **The preparation exclusion of the glass condition was dead code.** The
+   positive condition named `.preparation-progress`, a class the native client
+   never renders: the band renders the preparation caption as
+   `.native-source-preparation` (`apps/desktop/src/ui.rs`). The pending
+   preparation therefore received the glass band and the underlap, while the
+   documented contract says that scene keeps the opaque, non-overlapping band.
+   `apps/desktop/style.css` now conditions on `.native-source-preparation`, and
+   `apps/desktop/examples/native-ui-qa.js` measures the scene: 0 backdrop
+   layers, the opaque band roles and the original scroller geometry.
+2. **The reduced-motion sub-run was coupled to the Wayland window-only gate.**
+   `scripts/verify_native_client.py` spawned the second, full reduced-motion
+   window unconditionally and aborted the whole run when it failed, so the
+   documented `--backend wayland --window-only` gate could not run without a
+   second full journey. The sub-run is now scoped to the non-window-only mode.
+3. **Two documented counts did not match the measured report.** The
+   `PLATFORM_MATRIX` table row and the backlog row said 299 checks and 7
+   reduced-motion checks; `report.json` carries **300** checks and the
+   reduced-motion report carries **8**. Both numbers were corrected.
 
 ### What was not run
 

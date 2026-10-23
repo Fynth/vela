@@ -688,8 +688,11 @@ img.neutral-cover {
      - the app size must be 100% (`data-app-scale="100"` or an absent
        attribute), because an enlarged app divides the viewport and the fixed
        band would no longer fit;
-     - a player error or a pending preparation makes the band grow, so those
-       two scenes keep the opaque, non-overlapping band.
+     - a player error or a pending preparation changes the band, so those two
+       scenes keep the opaque, non-overlapping band. The pending preparation is
+       the `.native-source-preparation` caption of the native band; the legacy
+       `.preparation-progress` class is never rendered by this client, so it
+       must not be used as the condition.
 
    Every other scene keeps the original geometry: the main column is grid row
    1, the scroller starts below the topbar and ends above the player, and the
@@ -704,14 +707,14 @@ img.neutral-cover {
   @media (min-width:1101px) {
     /* The main column spans both grid rows, so the single scroller reaches
        under the topbar and behind the player band. */
-    .native-app:is(:not([data-app-scale]),[data-app-scale="100"]):not(:has(.player-error)):not(:has(.preparation-progress)) .native-main {
+    .native-app:is(:not([data-app-scale]),[data-app-scale="100"]):not(:has(.player-error)):not(:has(.native-source-preparation)) .native-main {
       grid-row:1/-1;
     }
     /* The scroller moves up by exactly the topbar height and takes the same
        amount back as padding, so the first heading keeps its y and the first
        frame does not jump. `scroll-padding` keeps a focused target inside the
        effective rectangle between the two bands. */
-    .native-app:is(:not([data-app-scale]),[data-app-scale="100"]):not(:has(.player-error)):not(:has(.preparation-progress)) .native-scroll {
+    .native-app:is(:not([data-app-scale]),[data-app-scale="100"]):not(:has(.player-error)):not(:has(.native-source-preparation)) .native-scroll {
       margin-top:calc(-1 * var(--vela-topbar-height));
       padding-top:var(--vela-topbar-height);
       scroll-padding-top:calc(var(--vela-topbar-height) + 8px);
@@ -721,12 +724,12 @@ img.neutral-cover {
     /* The one bottom reserve belongs to the content: the last row can always
        be scrolled above the player band. The side gutter and the current top
        inset are untouched. */
-    .native-app:is(:not([data-app-scale]),[data-app-scale="100"]):not(:has(.player-error)):not(:has(.preparation-progress)) .native-scroll-inner {
+    .native-app:is(:not([data-app-scale]),[data-app-scale="100"]):not(:has(.player-error)):not(:has(.native-source-preparation)) .native-scroll-inner {
       padding-bottom:calc(var(--vela-player-height) + 32px);
     }
     /* The topbar floats over the scroller: a translucent band, a 1px hairline
        and the top edge highlight. It carries no outer shadow. */
-    .native-app:is(:not([data-app-scale]),[data-app-scale="100"]):not(:has(.player-error)):not(:has(.preparation-progress)) .native-topbar {
+    .native-app:is(:not([data-app-scale]),[data-app-scale="100"]):not(:has(.player-error)):not(:has(.native-source-preparation)) .native-topbar {
       position:relative; z-index:5;
       background:var(--vela-glass-bg); color:var(--vela-glass-text);
       -webkit-backdrop-filter:blur(var(--vela-glass-blur-topbar));
@@ -736,7 +739,7 @@ img.neutral-cover {
     }
     /* The player band floats over the scroller with the same vocabulary and
        the one soft outer shadow of the shell. */
-    .native-app:is(:not([data-app-scale]),[data-app-scale="100"]):not(:has(.player-error)):not(:has(.preparation-progress)) .native-player {
+    .native-app:is(:not([data-app-scale]),[data-app-scale="100"]):not(:has(.player-error)):not(:has(.native-source-preparation)) .native-player {
       position:relative; z-index:40;
       background:var(--vela-glass-bg); color:var(--vela-glass-text);
       -webkit-backdrop-filter:blur(var(--vela-glass-blur));
@@ -747,14 +750,14 @@ img.neutral-cover {
     /* A caption on a glass band cannot use the quiet or the muted role: over a
        bright cover it falls below the text threshold. The hierarchy is carried
        by the size and the weight, never by the opacity of the text. */
-    .native-app:is(:not([data-app-scale]),[data-app-scale="100"]):not(:has(.player-error)):not(:has(.preparation-progress)) .native-player .player-sub,
-    .native-app:is(:not([data-app-scale]),[data-app-scale="100"]):not(:has(.player-error)):not(:has(.preparation-progress)) .native-player .player-time,
-    .native-app:is(:not([data-app-scale]),[data-app-scale="100"]):not(:has(.player-error)):not(:has(.preparation-progress)) .native-player .player-artist,
-    .native-app:is(:not([data-app-scale]),[data-app-scale="100"]):not(:has(.player-error)):not(:has(.preparation-progress)) .native-player .player-album,
-    .native-app:is(:not([data-app-scale]),[data-app-scale="100"]):not(:has(.player-error)):not(:has(.preparation-progress)) .native-player .player-kind,
-    .native-app:is(:not([data-app-scale]),[data-app-scale="100"]):not(:has(.player-error)):not(:has(.preparation-progress)) .native-player .player-source-label,
-    .native-app:is(:not([data-app-scale]),[data-app-scale="100"]):not(:has(.player-error)):not(:has(.preparation-progress)) .native-player .player-source-value,
-    .native-app:is(:not([data-app-scale]),[data-app-scale="100"]):not(:has(.player-error)):not(:has(.preparation-progress)) .native-topbar small {
+    .native-app:is(:not([data-app-scale]),[data-app-scale="100"]):not(:has(.player-error)):not(:has(.native-source-preparation)) .native-player .player-sub,
+    .native-app:is(:not([data-app-scale]),[data-app-scale="100"]):not(:has(.player-error)):not(:has(.native-source-preparation)) .native-player .player-time,
+    .native-app:is(:not([data-app-scale]),[data-app-scale="100"]):not(:has(.player-error)):not(:has(.native-source-preparation)) .native-player .player-artist,
+    .native-app:is(:not([data-app-scale]),[data-app-scale="100"]):not(:has(.player-error)):not(:has(.native-source-preparation)) .native-player .player-album,
+    .native-app:is(:not([data-app-scale]),[data-app-scale="100"]):not(:has(.player-error)):not(:has(.native-source-preparation)) .native-player .player-kind,
+    .native-app:is(:not([data-app-scale]),[data-app-scale="100"]):not(:has(.player-error)):not(:has(.native-source-preparation)) .native-player .player-source-label,
+    .native-app:is(:not([data-app-scale]),[data-app-scale="100"]):not(:has(.player-error)):not(:has(.native-source-preparation)) .native-player .player-source-value,
+    .native-app:is(:not([data-app-scale]),[data-app-scale="100"]):not(:has(.player-error)):not(:has(.native-source-preparation)) .native-topbar small {
       color:var(--vela-glass-text);
     }
   }

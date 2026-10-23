@@ -381,6 +381,14 @@ window.
   `backdrop-filter: none` on both bands, the opaque player and canvas roles,
   `scroll bottom 537px = player top 537px`, the content keeps its own 24px
   bottom inset, and every control stays reachable.
+- The pending preparation at 1280×840 is the second honest fallback: the band
+  carries a live byte-progress caption and a Cancel action there, so it keeps
+  the opaque roles (`rgb(16, 19, 15)` / `rgb(19, 21, 19)`), carries no
+  backdrop layer and keeps the original scroller geometry
+  (`scroll bottom 727.98px = player top 727.98px`, `margin-top 0px`,
+  `padding-top 0px`) and the unchanged band height. The condition names
+  `.native-source-preparation`, the class the native band really renders; the
+  legacy `.preparation-progress` class is never rendered by this client.
 - The reduced-motion branch is a separate real window process with GTK
   animations disabled for that process only: `matchMedia('(prefers-reduced-motion: reduce)')`
   is true, the eight duration roles read `0ms`, both bands report

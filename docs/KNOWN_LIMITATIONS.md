@@ -42,6 +42,13 @@ Xvfb display. What was **not** measured is here.
   background is the band itself, and those frames are reported as
   `FALLBACK_OPAQUE` rather than as a glass verdict. The glass frames — the
   scope of this package — are all at or above 12.775:1.
+- **The legacy `.preparation-progress` selectors are dead in the native
+  client.** The native band renders the preparation caption as
+  `.native-source-preparation`; the `.preparation-progress` class survives only
+  in the older stylesheet rules. The DR-08 glass condition therefore names the
+  class the client really renders, and the dead half of the legacy rules was
+  left untouched because the native band deliberately keeps its height during a
+  preparation (the driver asserts that height is preserved).
 - **The frame names of the older native captures are historical.** The
   driver names a frame after the scene it expects; after the theme toggle
   the frames `playlists-dark`, `albums-dark`, `public-dark` and

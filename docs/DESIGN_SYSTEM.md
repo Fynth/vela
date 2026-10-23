@@ -481,7 +481,8 @@ The frameless window controls (44px) and the drag region did not move.
 **The underlap is strictly conditional.** The positive condition is
 simultaneous: `@media (min-width:1101px)`, the app size at 100%
 (`[data-app-scale="100"]` or an absent attribute), no `.player-error` and no
-`.preparation-progress`, and `@supports ((backdrop-filter:blur(1px)) or
+`.native-source-preparation` (the class the native band really renders for a
+pending preparation), and `@supports ((backdrop-filter:blur(1px)) or
 (-webkit-backdrop-filter:blur(1px)))`. Inside it:
 
 | Rule | Value | Why |

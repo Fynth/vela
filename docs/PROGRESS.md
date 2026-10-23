@@ -73,6 +73,22 @@ session, a background session, a package/installer build, Docker and every
 non-Linux target. `forced-colors`, `print` and `prefers-reduced-transparency`
 are not claimed for the native shell.
 
+**Review corrections (2026-10-23).** The review of this slice found and fixed
+three defects before it was accepted. The glass condition named
+`.preparation-progress`, a class the native client never renders — the band
+renders `.native-source-preparation` — so the pending preparation wrongly got
+the glass band and the underlap; the condition now names the real class and
+the driver measures that scene (0 backdrop layers, the opaque band roles, the
+original scroller geometry, `scroll bottom 727.98px = band top 727.98px`).
+The reduced-motion sub-run of `scripts/verify_native_client.py` was coupled to
+the Wayland `--window-only` gate and is now scoped out of that mode. Two
+documented counts (299 checks, 7 reduced-motion checks) did not match the
+measured reports (300 and 8) and were corrected. The review reproduced the
+whole native journey independently: exit 0, 314 checks, 24 screenshots, 0
+temporary originals, the pixel contrast script PASS over 26 glass frames, and
+the same glass numbers as the accepted run. Evidence:
+`target/checks/dr08-review-fixed/`.
+
 ## DR-03 the short answer that never delays the command — 2026-10-23
 
 The command and its visual answer had drifted apart: a button lifted itself
