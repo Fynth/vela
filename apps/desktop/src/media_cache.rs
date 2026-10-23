@@ -52,7 +52,7 @@ const FULL: &str = "The playback cache is full.";
 
 /// Identity of one cached representation. The origin is the canonical origin string
 /// (with its trailing `/`), never a user-supplied spelling of the same server.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct CacheKey {
     origin: String,
     account_id: String,

@@ -246,6 +246,25 @@ pinned offline copies live elsewhere and are never evicted. ADR
 [DECISIONS/0022](DECISIONS/0022-native-media-cache.md). Real-process body
 counters, ENOSPC and production-budget eviction remain NOT_RUN.
 
+**The warm-up is off the path to the decoder.** Once the exact size and the
+whole-file BLAKE3 have matched the origin ETag, `prepare` returns the verified
+lease immediately and the cache copy runs in a background task that holds the
+`Arc<PreparedAudio>` lease, so the copied bytes are the verified bytes. The
+publication observes the client `lifetime` token: a sign-out stops it, its
+staging file is removed and no half-published entry survives. The caller's
+per-selection cancel token is deliberately *not* observed — the UI cancels it
+as soon as another track is selected, and aborting the warm-up of the track that
+just played would break the one-body-per-track guarantee.
+
+A bounded registry of running publications (keyed by `media_cache::CacheKey`, at
+most 32 in flight) makes a second `prepare` of the same track wait for the
+running publication instead of starting another GET, and then re-check the
+cache. A publication that failed leaves the cache cold and the next `prepare`
+falls back to the ordinary verified GET. At the registry limit the publication
+stays inside `prepare` (the previous synchronous behaviour) instead of growing
+an unbounded number of background copies. ADR
+[DECISIONS/0026](DECISIONS/0026-native-warm-cache-publication.md).
+
 ## Opt-in saved session
 
 Sign-in offers an explicit **Remember this session on this device** checkbox (default

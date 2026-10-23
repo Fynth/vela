@@ -1,5 +1,77 @@
 # Verified progress
 
+## TL-01 step 1 — the warm cache no longer delays the first sound (native) — 2026-10-23
+
+`VelaClient::prepare` verified the original and then *synchronously awaited* the
+cache copy, so a second full read+write+`fsync` of the same bytes stood between
+the verified lease and the first audible sample. The cache is an optimization,
+not a condition of playback, so the copy now runs **after** the lease is handed
+out. ADR
+[DECISIONS/0026](DECISIONS/0026-native-warm-cache-publication.md).
+
+**What changed.**
+
+- `apps/desktop/src/client.rs` — `prepare` returns the verified lease as soon
+  as the exact size and the whole-file BLAKE3 match the origin ETag. The
+  publication runs in a background task that holds the `Arc<PreparedAudio>`
+  lease, so the copied bytes are exactly the bytes the decoder received, and it
+  holds the client `lifetime` token: a sign-out stops it between blocks, its
+  staging file is removed and no half-published entry survives. The
+  `preparing` admission is not held by the publication, so it can neither delay
+  nor block another transfer.
+- A bounded registry of running publications (keyed by
+  `media_cache::CacheKey`, at most 32 in flight) makes a second `prepare` of the
+  same track **wait** for the running publication and re-check the cache
+  instead of starting a second GET. A publication that failed leaves the cache
+  cold and the next `prepare` falls back to the ordinary verified GET. At the
+  registry limit the publication stays inside `prepare` (the previous
+  synchronous behaviour) rather than growing an unbounded number of background
+  copies.
+- `apps/desktop/src/media_cache.rs` — `CacheKey` gained `Hash` so the
+  registry can be keyed by it. The trust model, the budgets, the eviction and
+  the atomic publication are unchanged.
+- Six new desktop tests and five existing tests migrated to the asynchronous
+  publication: they now wait for the publication instead of assuming the cache
+  was already warm when `prepare` returned.
+
+**What was deliberately not changed.** The verification itself: the decoder
+still only ever receives a lease whose exact size and whole-file BLAKE3 were
+checked against the origin ETag, and that lease is still an unnamed private
+`0600` file with `nlink() == 0` on Linux. `write_original`, the 250 MiB cap,
+the HEAD re-authorization, the account/origin-scoped namespace, the budgets,
+the eviction, `apps/web/**`, the server, the audio engine and the output
+thread are untouched. No progressive decode, no Range playback and no partial
+bytes to the decoder: W03 still needs its own ADR. The caller's per-selection
+cancel token is deliberately **not** observed by the publication — the UI
+cancels it as soon as another track is selected, and aborting the warm-up of
+the track that just played would break the one-body-per-track guarantee.
+
+**Measured.** `cargo fmt --all -- --check` exit 0; strict Clippy
+`--workspace --all-targets` and `-p vela-desktop --all-targets --features
+native-qa` exit 0; `cargo test --locked -p vela-desktop` **135 passed / 0 failed
+/ 3 ignored** (129 at baseline, all kept); `cargo test --locked -p vela-web` 57
+passed; the wasm build of `vela-web` exit 0; the real X11 native QA
+(`scripts/verify_native_client.py --backend x11 --test-preparation`) exit 0 with
+`report.json` `ok=true` (**314 checks, 24 screenshots, 0 temporary originals**),
+including the real preparation journey ("real 65536-byte partial transfer
+canceled on socket, generation 3→4, no late load and successful Play retry").
+Evidence: `target/checks/tl01-warm-cache-native/`.
+
+The cost that was removed, measured first-hand on this host with the same
+64 KiB read → write → `fsync` loop against the real 37 635 761 B original
+`/var/lib/vela/media/6874dbb7….audio`: **130.8 / 124.7 / 115.4 ms** over three
+trials (the team lead measured 140.4 / 119.7 / 117.0 ms). That whole cost now
+sits behind the first sound. In the in-process server test with a slowed
+response body, the lease of an 8 MiB original was returned after **218.6 ms**
+and the cache entry appeared **34.7 ms** later: the publication is measurably
+outside the path to the decoder.
+
+**Still not run.** Progressive decode and Range playback (W03, own ADR), a
+real-process ENOSPC/eviction run, a hardware audio output run, a Wayland
+session, screen readers, physical media keys and every non-Linux target. The
+browser surfaces were not re-rendered: this increment changes no web file, no
+CSS and no asset, and `apps/web/**` is byte-identical.
+
 ## DR-08 the verified Linux presentation parity — 2026-10-23
 
 The Linux client had the web client's *vocabulary* nowhere: its two floating

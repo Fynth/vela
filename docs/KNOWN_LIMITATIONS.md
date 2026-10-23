@@ -1,5 +1,48 @@
 # Unsupported and unverified functionality
 
+## TL-01 step 1 — the warm cache no longer delays the first sound (native) — 2026-10-23
+
+The native cache warm-up left the path to the decoder. What is **not** covered
+by that increment is here.
+
+- **No progressive decode and no Range playback.** The decoder still receives
+  only a complete verified original. Nothing partial, nothing streamed, no
+  seek-by-range: W03 needs its own ADR and its own evidence
+  ([DECISIONS/0026](DECISIONS/0026-native-warm-cache-publication.md) explicitly
+  does not authorize it).
+- **The cache can lag behind playback by one publication.** Between the
+  verified lease and the published entry there is a window in which the track
+  is playable but not yet cached. A second `prepare` of the same track inside
+  that window waits for the publication instead of re-downloading; it does not
+  get a half-written entry.
+- **The publication observes the client lifetime, not the per-selection cancel
+  token.** A sign-out stops it. A new track selection does not: the UI cancels
+  the per-selection token immediately, and aborting the warm-up of the track
+  that just played would break the one-body-per-track guarantee. A publication
+  therefore runs to its end even when the user moves on, bounded by the
+  250 MiB cap and the disk.
+- **A publication is not durable across a crash.** The bytes are copied into a
+  staging file and published atomically, but a process that dies mid-copy
+  leaves the staging file counted against the budget; the eviction pass
+  accounts for orphans, and an explicit orphan sweep is still open.
+- **The registry bound is a fallback, not a policy.** At 32 running
+  publications the warm-up stays inside `prepare` again, so the first sound can
+  pay the copy cost again in that corner. The bound was not measured under
+  real concurrent load; only the refusal and the fallback are asserted.
+- **ENOSPC, a full cache and the production budget were not exercised.** The
+  failed-publication path is asserted with a cache root that cannot be
+  created, not with a real full disk. Real-process eviction at 200
+  entries/2GiB per account and the disk-full behaviour remain NOT_RUN.
+- **The copy cost was measured with the same loop, not through the app.** The
+  115–131 ms figure for the 37 635 761 B original comes from an equivalent
+  64 KiB read → write → `fsync` loop, and the in-process server test measured
+  the ordering with an 8 MiB fixture. The real 37.6 MB original was not played
+  through the native client in this window, and no time-to-first-audible figure
+  is claimed for it.
+- **The browser surfaces were not re-rendered.** No web file, CSS or asset
+  changed in this increment; `apps/web/**` is byte-identical and only
+  `cargo test -p vela-web` and the wasm build were executed.
+
 ## DR-08 the verified Linux presentation parity — 2026-10-23
 
 The native presentation was measured in a real WebKitGTK window on a headless

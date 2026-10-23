@@ -1,5 +1,90 @@
 # Verified0.12.0 package and preserved runtime checkpoint
 
+## TL-01 step 1 — the warm cache no longer delays the first sound (native) — 2026-10-23
+
+Only the native client changed: `apps/desktop/src/client.rs` and
+`apps/desktop/src/media_cache.rs`. The audio adapter, the output thread, the
+HTTP/account boundary, the server, the domain API, the web client, every web
+asset, the migrations and the workspace manifest/lock are untouched. No new
+dependency: `Cargo.toml` and `Cargo.lock` are byte-identical.
+
+### The commands and their real output
+
+| Command | Result |
+| --- | --- |
+| `cargo fmt --all -- --check` | exit 0 |
+| `cargo clippy --locked --workspace --all-targets -- -D warnings` | exit 0, no warnings |
+| `cargo clippy --locked -p vela-desktop --all-targets --features native-qa -- -D warnings` | exit 0, no warnings |
+| `cargo test --locked -p vela-desktop` | `135 passed; 0 failed; 3 ignored` (the 3 are the opt-in audio/MPRIS tests; the 129 baseline tests are all kept) |
+| `cargo test --locked -p vela-web` | `57 passed; 0 failed; 0 ignored` |
+| `cargo build --locked -p vela-web --target wasm32-unknown-unknown` | exit 0 |
+| `cargo build --locked -p vela-server` | exit 0 |
+| `cargo build --locked -p vela-desktop --example native-ui-qa --features native-qa` | exit 0 |
+| `DISPLAY=:99 python3 scripts/verify_native_client.py --backend x11 --server target/debug/vela-server --test-preparation --evidence target/checks/tl01-warm-cache-native` | **exit 0** — `report.json` `result.ok=true`, **314 checks**, **24 screenshots**, `temporary_originals_after_exit=0`, engine `Rodio/CPAL, owned isolated null sink`; the separate reduced-motion window `reduced-report.json` `ok=true` |
+
+### The new tests and what each one proves
+
+| Test | What it proves |
+| --- | --- |
+| `the_cache_publication_does_not_delay_the_prepared_lease` | The lease is returned while the publication is still running: the publication counter is still zero and the cache entry does not exist when `prepare` returns. The publication then publishes exactly the verified bytes. |
+| `a_second_prepare_waits_for_the_running_publication_instead_of_a_second_transfer` | A second `prepare` of the same track during a running publication issues **0** extra GETs and is served from the cache; `gets == 1` and `body_bytes == len`. |
+| `a_failed_publication_keeps_playback_working_and_costs_exactly_one_more_transfer` | A publication that cannot create its namespace fails silently: playback still works, the cache stays cold and the next `prepare` makes exactly one new GET (`gets == 2`). |
+| `a_sign_out_stops_a_running_publication` | A sign-out during a publication stops it: no late cache entry, no sidecar, no staging file. |
+| `the_lease_is_returned_before_the_cache_copy_of_a_slow_body_finishes` | With a slowed response body the lease is returned before the entry exists, and the entry appears only after the local copy. |
+| `the_registry_of_running_publications_is_bounded` | At 32 running publications the next publication is refused and the warm-up stays inside `prepare` (the previous synchronous behaviour) instead of starting one more background copy. |
+
+### The failure proof on the previous behaviour
+
+The previous behaviour was restored temporarily (the synchronous
+`CacheScope::store` inside `prepare` and no in-flight coordination) and the new
+tests were run against it:
+
+```
+---- client::tests::the_lease_is_returned_before_the_cache_copy_of_a_slow_body_finishes stdout ----
+panicked at apps/desktop/src/client.rs:3971:9:
+the lease must be returned before the cache copy, not after it
+---- client::tests::the_cache_publication_does_not_delay_the_prepared_lease stdout ----
+panicked at apps/desktop/src/client.rs:2535:10:
+isolated cleanup condition timed out: Elapsed(())
+---- client::tests::a_second_prepare_waits_for_the_running_publication_instead_of_a_second_transfer stdout ----
+panicked at apps/desktop/src/client.rs:2535:10:
+isolated cleanup condition timed out: Elapsed(())
+---- client::tests::a_sign_out_stops_a_running_publication stdout ----
+panicked at apps/desktop/src/client.rs:2535:10:
+isolated cleanup condition timed out: Elapsed(())
+test result: FAILED. 131 passed; 4 failed; 3 ignored; 0 measured; 0 filtered out
+```
+
+The two remaining new tests (`a_failed_publication_keeps_playback_working_…`
+and `the_registry_of_running_publications_is_bounded`) pass on both behaviours
+on purpose: they are regression guards, not proofs of the new behaviour. The
+implementation was restored and the same suite reported `135 passed; 0 failed;
+3 ignored`.
+
+### The measured numbers
+
+- **The cost that left the first-sound path.** The same 64 KiB read → write →
+  `fsync` loop that `media_cache::copy_verified` performs, measured read-only
+  against the real 37 635 761 B original
+  `/var/lib/vela/media/6874dbb7df5af405e84cffd60a7b049e5aa0e9941cb93ce78fa01d7d8ddae3ec.audio`:
+  **130.8 / 124.7 / 115.4 ms** over three trials (the team lead measured
+  140.4 / 119.7 / 117.0 ms on the same file). That whole cost now happens
+  after the lease was handed out.
+- **The ordering inside the app.** In the in-process server test with a slowed
+  response body (8 × 1 MiB, 25 ms per chunk), an 8 MiB original was leased
+  after **218.610494 ms** and the cache entry was published after
+  **253.340024 ms** — a publication cost of **34.72953 ms** that is measurably
+  outside the path to the decoder.
+
+### What was not measured
+
+Progressive decode and Range playback, a real-process ENOSPC/eviction run, the
+production 200-entry/2GiB budget, hardware audio output, a Wayland session,
+screen readers, physical media keys and every non-Linux target. The browser
+surfaces were not re-rendered: no web file, CSS or asset changed, and
+`apps/web/**` is byte-identical; only `cargo test -p vela-web` and the wasm
+build were executed for the web crate.
+
 ## DR-08 the verified Linux presentation parity — 2026-10-23
 
 Only the Linux native presentation changed: `apps/desktop/style.css`,
