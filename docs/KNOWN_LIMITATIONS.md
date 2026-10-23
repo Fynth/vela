@@ -42,6 +42,22 @@ immediate. The measurements are in [QA_EVIDENCE](QA_EVIDENCE.md); what was
 - **The settle of a moved row is a presentation fact, not a frame budget.**
   Its duration is the reorder role. Whether 150ms reads as "the row moved"
   on every device was not measured with a person.
+- **The first music test owns a one-second fixture, so the queue section
+  pauses playback first.** `crates/media/tests/fixtures/signal.flac` is
+  **1.0 s** long. The test plays it, asserts that time advances, then edits
+  the queue; if the track reaches natural EOF between two edits the root
+  advances the cursor by design and the cursor assertions read the wrong
+  row. The test therefore pauses with `#player-toggle` before the edits.
+  This was **not** a DR-03 regression — the same test fails the same way on
+  `origin/main` `d2bcbb0`. The fragility stays for future tests: anything
+  asserting cursor identity on this fixture has to control the clock
+  (pause, or use the 3.0 s `bright-cover.flac`).
+- **The round-3 DR-03 slice is not shipped.** Its longer spec (eleven
+  journeys) and its `cover_fade` rework exist only as an uncommitted stash:
+  journey 4b ("the late answer of the outgoing layer") fails **3/3 in
+  Chromium** with that code and passes **2/2** with the committed round-1
+  code, so the rework regresses the crossfade guard. The committed tree is
+  the round-1 slice; nothing in the docs claims the round-3 numbers.
 
 ## DR-02 the underlap and the two glass bands — 2026-10-22
 

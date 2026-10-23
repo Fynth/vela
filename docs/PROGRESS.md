@@ -108,6 +108,42 @@ tracks really have two different artworks):
 The permanent gate is `tests/browser/dr03-motion.spec.mjs`; the evidence is
 in `target/checks/dr03-motion/<engine>/`.
 
+### The queue cursor was never racing — the fixture clock was
+
+An earlier report of this package claimed that the queue cursor sometimes
+failed to follow a row move and that the fault was a race in
+`receipt`/`onsealed`. That claim was wrong, and it is corrected here after a
+probe that records the whole event order instead of one assertion
+(`probe/eof-probe.mjs`, kept outside the tree in the team-lead scratch).
+
+The probe replays the sequence of `music.spec.mjs` and logs every
+`play`/`ended`/`seeked` of `#vela-audio`, every change of the `.queue-row`
+class list and the exact moment of both move clicks. In Chromium and Firefox
+alike the cursor **does** follow the swap: the rows read `C..` before the move
+and `.C.` after it, in the click's own tick. No `ui.index.set` is dropped.
+
+The real cause is the fixture clock. The tracked `signal.flac` is **1.0 s**
+long. The first test plays it, asserts that time advances, and then performs
+two queue edits; on a slower run the track reaches natural EOF between them,
+the root handles `Ended` exactly as designed (`onended` →
+`advance(Command::Ended)`) and the cursor moves to the next occurrence. The
+assertion at `music.spec.mjs:113` then reads a row that is no longer current
+for a reason that has nothing to do with the edit, and `:117` sees two rows
+where it expects one.
+
+This is **pre-existing, not a DR-03 regression**. The same test fails on
+`origin/main` `d2bcbb0` in an isolated worktree with the same two symptoms:
+four runs gave 3 passes and one failure at `:117`; the same four runs on this
+branch gave 2 passes and 2 failures (`:113` once, `:117` once). The `onended`
+handler and `advance` are unchanged from `origin/main` in this branch.
+
+The repair is in the **test**: the first test now pauses with
+`#player-toggle` and asserts that the label flipped to `Play` before it edits
+the queue. The decode, the duration and the advancing time were already
+asserted above that point, so the queue section measures the queue instead of
+the clock. Six consecutive Firefox runs of the repaired test passed **6/6**
+(before the repair: 2 failures in 3 runs).
+
 ## DR-06 the music in the first phone screen — 2026-10-22
 
 The mobile composition spent its first screen on its pre-list. On a 320×700

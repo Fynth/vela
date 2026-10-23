@@ -103,6 +103,14 @@ test('first-run setup, real FLAC upload, artwork, decode, favorites and safe sha
   await page.getByRole('button', { name: 'Play Signal', exact: true }).click();
   await expect.poll(() => page.locator('#vela-audio').evaluate(audio => Number.isFinite(audio.duration) && audio.duration > 0 && audio.error === null)).toBeTruthy();
   await expect.poll(() => page.locator('#vela-audio').evaluate(audio => audio.currentTime)).toBeGreaterThan(0);
+  // The queue edits below assert that the cursor follows the occurrence it was
+  // on. The tracked fixture is one second long, so a run that reaches natural
+  // EOF between two edits advances the cursor for a reason that has nothing to
+  // do with the edit (the same two assertions failed on origin/main). Playback
+  // is paused here so the queue section measures the queue and not the clock;
+  // the decode itself was already asserted above.
+  await page.locator('#player-toggle').click();
+  await expect(page.locator('#player-toggle')).toHaveAttribute('aria-label', 'Play');
   await page.getByRole('button', { name: 'Add Signal to playback queue', exact: true }).click();
   await page.getByRole('button', { name: 'Add Signal to playback queue', exact: true }).click();
   await page.getByRole('button', { name: 'Show playback queue', exact: true }).click();
