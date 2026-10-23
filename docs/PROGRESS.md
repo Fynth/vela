@@ -44,23 +44,40 @@ of it.
   even for a frame. The panel's own box is the anchor, and the anchor
   does not move.
 - `apps/web/src/cover_fade.rs` — **new**. The artwork crossfade of the root
-  player and the Now Playing sheet: two layers at most, one generation at a
-  time and no timer. The outgoing picture stays until the incoming one is
-  really there, a load result is accepted only when its generation, its
-  account and its session still match, and the state lives in the component
-  — an account change or a sign-out drops it with the component, so a
-  previous account's picture can never reach the screen.
+  player and the Now Playing sheet: two layers at most, **one generation per
+  layer** and no timer. Each callback carries the generation of the layer it
+  belongs to, so the late `load` of a picture that is already leaving is
+  dropped instead of being read as the arrival of the picture that replaced
+  it; the readiness itself belongs to the **picture**, so a track that keeps
+  the same artwork keeps the loaded element and never asks for it again. A
+  load result is accepted only when its generation, its key, its account and
+  its session still match, the effect ends when the browser says it ended and
+  a cancelled effect — reduced motion arriving in the middle of a fade, a
+  surface that changes — has a synchronous cleanup path that does not wait for
+  an end event. The state lives in the component, so an account change or a
+  sign-out drops it with the component and a previous account's picture can
+  never reach the screen.
 - `apps/web/src/main.rs` — `Art` takes an optional `onready`; the root
   player and the Now Playing sheet use the crossfade; the queue edit
   publishes a **receipt** (`generation`, `at`, `direction`, `focus`) that
   dies with the next structural edit, with the session and with the
-  drawer; a moved row hands the focus back to the same control of the
-  destination row after the renderer rebuilt it.
+  drawer; a moved row hands the focus to the same control of the destination
+  row after the renderer rebuilt it — **also** when the control kept its DOM
+  node (a swap of two adjacent identical occurrences), because the focus
+  would then sit on the row that now holds somebody else's occurrence. At a
+  boundary, where that control is disabled, the opposite control of the same
+  row takes the focus, and a row that can take neither leaves the focus where
+  it is instead of parking it on the document body.
 - `apps/web/src/now_playing.rs`, `apps/web/src/queue_drawer.rs` — the sheet
   uses the crossfade; the drawer renders the receipt, settles the row that
   has already moved and reports the end of the effect.
-- `tests/browser/dr03-motion.spec.mjs` — **new**, permanent: six journeys
+- `tests/browser/dr03-motion.spec.mjs` — **new**, permanent: eleven journeys
   on a real server, a real account and real uploaded originals.
+- `tests/browser/dr03-render.mjs` — **new**: the real render matrix of this
+  package (seven viewports × two themes × two motion preferences × two
+  engines, plus a long Cyrillic title, an empty library and a track without a
+  cover). Every artifact name carries the engine, the theme, the viewport and
+  the motion preference it was really taken in.
 
 **What stayed the same.** The exit of an overlay is still **0ms**: the
 dialog leaves the top layer in the tick that closes it, the inertness is
@@ -105,8 +122,263 @@ tracks really have two different artworks):
   equalizer keeps its own height, and Play, Escape and the drawer still
   work.
 
+### Round 2: the journeys that could pass on cache luck
+
+The first round measured the crossfade on a page where every cover had
+already been painted by the library rows. The two engines answer that
+question differently, and the first round read the difference as a lucky
+pass: in Chromium a second `<img>` of an already painted URL really does
+reach the network again, so a route installed after the paint receives that
+request and holding it works. In Firefox the browser answers the second
+element of a warm URL **from its own image cache**, without asking the
+network at all, so the same route held nothing, the incoming picture
+arrived at once and the journey measured the wrong thing — sometimes
+failing, sometimes passing.
+
+This was measured, not guessed: probes against a real HTTP server, both
+engines, one question each. A picture that is already painted is answered
+for a second element without reaching a route installed **before** the
+paint (Chromium **0** requests, Firefox **0**), while a route installed
+**after** the paint sees the second request in Chromium (**1**) and does not
+in Firefox (**0**); the caching headers (`private, no-store` and `private,
+max-age=300`) change neither number. A picture whose first request is held
+keeps every later element of the same URL pending with it (one request,
+both elements `complete: false` in both engines, both complete after the
+release).
+
+The two held journeys therefore run in **their own browser context with an
+empty cache**, and the hold is installed before the page is opened, so the
+first request for each of the two pictures really reaches the route. The
+spec asserts that the hold is real (`pending` of the outgoing and of the
+incoming picture is greater than zero) before it reads the state, so a
+journey whose hold silently did nothing now fails instead of passing.
+
+The negative control is real too, and it was reproduced after the review. A
+temporary mutation of `select` marks the outgoing layer as leaving as soon as
+it is replaced; it **fails journey 4b in both engines** — Firefox at the named
+assertion (`nothing leaves before the new picture answers`, expected 0,
+received 1) and Chromium at the wait for the released outgoing picture
+(`page.waitForFunction` timed out after 10s), because the layer it waits for is
+already leaving. The mutation was reverted and `apps/web/src/cover_fade.rs`
+hashes to the same SHA-256 as before it. The two engines fail at different
+lines, so the doc names both rather than claiming one assertion covers it.
+
+One more flake was found and removed in the same pass: the last journey
+assumed the audio was playing when it clicked Play/Pause, and on this host a
+Firefox run can be paused at that point. The check now reads the label before
+the click and asserts the toggle, so it measures the control instead of the
+sound card.
+
+### Round 3: the cursor was never racing — the fixture was
+
+Round 2 closed with a claim that the queue cursor sometimes failed to follow
+a row move, and that the fault was a race in `receipt`/`onsealed`. That claim
+was wrong, and it is corrected here after a probe that reads the whole event
+order instead of one assertion.
+
+`probe/eof-probe.mjs` replays the sequence of `music.spec.mjs` and records
+every `play`/`paused`/`ended`/`seeked` of `#vela-audio`, every change of the
+`.queue-row` class list, and the exact moment of both move clicks. In both
+engines the cursor **does** follow the swap every time: the rows read `C..`
+before the move and `.C.` after it, on the same tick as the click. There is
+no dropped `ui.index.set`.
+
+What the probe did show is the real cause. The tracked `signal.flac` fixture
+is **one second** long. The first test plays it, asserts that time advances,
+and then performs two queue moves; on a slower run the track reaches natural
+EOF between those moves, the root handles `Ended` exactly as designed
+(`onended` → `advance(Command::Ended)`), and the cursor advances to the next
+occurrence. The assertion at `music.spec.mjs:113` then reads a row that is no
+longer current for a reason that has nothing to do with the edit, and the
+next assertion at `:117` sees two rows where it expects one.
+
+This is **pre-existing and not introduced by DR-03**: the same test fails on
+`origin/main` (`d2bcbb0`) with the same two symptoms. On the baseline worktree
+four runs gave three passes and one failure at `:117`; on the DR-03 branch
+four runs gave two passes and two failures (`:113` once, `:117` once). The
+`onended` handler and `advance` are byte-identical to `origin/main` in this
+branch (`git diff origin/main..HEAD -- apps/web/src/main.rs` matches no line
+of them), so this package cannot have changed that behaviour.
+
+The repair is in the **test**, not in the player: the first test now pauses
+playback with `#player-toggle` and asserts the label flipped to `Play` before
+it starts editing the queue. The decode, the duration and the advancing time
+were already asserted above that point, so nothing about playback is lost;
+the queue section measures the queue instead of the clock. Six consecutive
+Firefox runs of the repaired test passed 6/6 (before the repair: 2 failures
+in 3 runs). The full Firefox suite passes 90/90 with one skip.
+
 The permanent gate is `tests/browser/dr03-motion.spec.mjs`; the evidence is
 in `target/checks/dr03-motion/<engine>/`.
+
+### Round 4: the held slice comes back, held up by the same clock
+
+The round-3 slice (`cover_fade` rework + eleven journeys) was held back
+because journey 4b failed 3/3 in Chromium and the round-1 code passed 2/2,
+which looked like a regression in the crossfade guard. It was not. A timeline
+probe — a `MutationObserver` on the surface plus a 100 ms tick, recording
+every layer class, its `data-generation` and the audio element on the held
+context — shows the fixture reaching its end: `d=3`, `t=0.00 … 2.96`, and at
+`t=4903ms` the root advances to "Second cover" while that picture is still
+held, so the surface `select`s a third identity and the journey's wait for the
+released outgoing picture can never settle. The same 3-second
+`bright-cover.flac` that made the round-3 journey slow is what broke it.
+
+The fix is in the test, not in `cover_fade.rs`: journeys 4b and 4c click the
+row and pause with `#player-toggle` before they assert, so the media clock
+stops and the fade they hold is the fade they measure. Chromium **3/3 green**
+after the fix (19.1 s, 19.0 s, 20.0 s); before the fix the same tree failed
+2 of 3 runs. Pausing during a held fade is also the behaviour the package
+claims — the command answers while the effect waits — so the journey keeps
+its point.
+
+The negative control still holds on the repaired spec: a temporary mutation
+that accepts an answer from any layer (dropping the
+`generation`/`key` guard in `accept_ready`) **fails journey 4b in Chromium**
+at the named assertion `the leaving layer did not start to leave on somebody
+else answer` (expected 0, received 1) in 15.1 s. The mutation was reverted and
+`apps/web/src/cover_fade.rs` hashes to the same SHA-256 as before it
+(`ac7a6e0b…`).
+
+### Round 4 review: stop every picture and cursor measurement at the root
+
+The reviewer read `cover_fade.rs` in full and kept the Rust slice unchanged
+(SHA-256 `ac7a6e0b637e6fd9a3c42179ad99c34a16ce62cab183f55c4dc956909ce1aa43`).
+The model binds callbacks to owner, session lifetime, picture key and layer
+generation; readiness belongs to the picture. It retains at most two layers,
+releases a cancelled outgoing layer without an end event, and detaches its
+document/media-query listeners on unmount. It introduces no fetch pipeline,
+URL resolver or audio owner.
+
+The remaining short-fixture clock dependencies were in the tests:
+`tests/browser/dr03-motion.spec.mjs` now pauses through `#player-toggle` and
+checks both the root play-request marker and the actual paused audio element
+before reading artwork or cursor identity. This covers ordinary/rapid crossfades, no-cover,
+shared artwork, queue edits and the already repaired held journeys 4b/4c.
+The playing equalizer is measured before pausing; journey 3 explicitly resumes
+for its command-response measurement. Shared-artwork readiness is awaited
+instead of sleeping 400ms. `tests/browser/dr03-render.mjs` also pauses the
+no-cover and Cyrillic-title selections before capture. No new `test.skip`
+or `waitForTimeout` was added. Player, queue and audio behavior are unchanged.
+
+Executed on this review tree, with `CARGO_BUILD_JOBS=2` for Cargo builds:
+
+- `cargo fmt --all -- --check`: exit 0, no output.
+- `cargo clippy --locked --workspace --all-targets -- -D warnings`: exit 0.
+- `cargo test --locked --workspace -- --test-threads=2`: **392 passed,
+  0 failed, 3 ignored**, exit 0; includes 57 web tests and 12 cover-model tests.
+- `cargo build --locked -p vela-web --target wasm32-unknown-unknown --release`,
+  `scripts/build-web.sh`, and `cmp apps/web/style.css dist/style.css`: exit 0.
+- `cargo clippy --locked -p vela-web --target wasm32-unknown-unknown -- -D warnings`:
+  exit 0.
+- From `tests/browser`, `npx playwright test dr03-motion.spec.mjs --browser=chromium`:
+  two consecutive runs before the boundary-test correction with separate
+  `--output` directories: **1 passed (19.3s)** and **1 passed (17.9s)**, exit 0.
+  Firefox before that correction: **1 passed (19.8s)**, exit 0, with the preserved
+  `isolated.config.mjs` and a separate output directory. That config omits
+  the unused global server: this spec starts its own isolated runtime.
+- Final-file checks including the corrected bottom boundary: two consecutive
+  Chromium runs **1 passed (17.4s)** and **1 passed (19.7s)**; Firefox
+  **1 passed (21.8s)**, exit 0 each. All three use `isolated.config.mjs`,
+  separate output/evidence directories and the source recorded in
+  `browser-final-source.sha256` under `target/checks/dr03-round4-review/`.
+- The reviewer's own runs on the same tree, each with its own evidence and
+  output directory under `target/checks/dr03-review/`: **1 passed (16.7s)**,
+  **1 passed (17.0s)**, and — after the bottom-boundary correction below —
+  **1 passed (16.8s)** and, on the final file, **1 passed (19.4s)**, exit 0
+  each. The final file in Firefox, with the preserved isolated config:
+  **1 passed (20.3s)**, exit 0. The recorded evidence of the last Chromium run:
+  the bottom boundary focuses `queue-move-up-6` (the "down" control of the
+  last row is disabled), the top boundary focuses `queue-move-down-0`, the
+  swap of two identical occurrences moves the focus from `queue-move-up-6`
+  to `queue-move-up-5`, the crossfade shows **2** layers with **1** leaving
+  and **1** at the end, the rapid replacement never exceeds **1** layer with
+  **1** audio element, and the shared artwork stays **1** ready layer at
+  opacity **1**.
+- `node dr03-render.mjs chromium`: exit 0, 100 PNGs; seven viewports
+  (320×700, 360×800, 390×844, 768×1024, 1284×856, 1440×900, 1728×1000), both
+  themes and both motion preferences. All 28 measured combinations report
+  one settled layer and zero horizontal overflow. Representative mobile
+  menu/queue, desktop Library and Cyrillic-title images were visually inspected.
+- `node target/checks/dr03-round4-review/lifecycle-probe.mjs`: exit 0;
+  a paused, genuinely started outgoing animation has `aria-hidden=true` and
+  `pointer-events:none`; reduce removes it with **0 animationend events**;
+  releasing a held image after logout leaves **0 private layers**; an aborted
+  image load produces one ready fallback layer.
+
+An intermediate run after a concurrent helper update failed at context teardown
+with `ENOENT` for a trace in the shared `tests/browser/test-results` directory;
+its log contains no failed assertion. That run is recorded as failed, not
+counted as a pass. The two final Chromium runs use isolated output directories.
+An additional Firefox launch could not start because another runner held port
+3217; no test ran in that attempt. The subsequent isolated Firefox run passed.
+
+Logs, source hashes, the incoming patch, probe and screenshots are preserved
+under `target/checks/dr03-round4-review/`. The full browser suite, Firefox render
+matrix, native GUI, physical output, screen reader and Docker were NOT_RUN in
+this review. The earlier negative mutation was not repeated. The one P2
+coverage gap that was open is closed: journey 6b moved a hardcoded row 3 to 4
+in a seven-row queue, so its bottom-boundary assertion never reached the last
+row. The journey now reads the last index of the drawer and moves the
+penultimate row into that place, where the "down" control is disabled, and it asserts
+the named neighbour `queue-move-up-{last}` — the measured focus is
+`queue-move-up-6` in a seven-row queue. No production change was made for it:
+the queue, the cursor and the audio are untouched, and the team lead owns the
+commit.
+
+### Team-lead acceptance: the whole gate on the final tree
+
+The team lead accepted the slice with the reviewers' corrections and repeated
+every gate itself on the final files, in one tree, with `CARGO_BUILD_JOBS=2` and
+no other Cargo process. Source recorded in
+`target/checks/dr03-r4-final/source-final.sha256`; evidence root
+`target/checks/dr03-r4-final/`.
+
+- `cargo fmt --all -- --check`: exit 0, no output.
+- `cargo clippy --locked --workspace --all-targets -- -D warnings`: exit 0.
+- `cargo clippy --locked -p vela-web --target wasm32-unknown-unknown -- -D warnings`:
+  exit 0.
+- `cargo test --locked --workspace -- --test-threads=2`: **392 passed, 0 failed,
+  3 ignored**, exit 0 (`tests.log`).
+- `cargo build --locked -p vela-web --target wasm32-unknown-unknown --release`
+  exit 0 (`wasm-release.log`); `scripts/build-web.sh` exit 0
+  (`build-web.log`); `cmp apps/web/style.css dist/style.css` identical, no output.
+- Full browser suite, Chromium: **90 passed, 1 skipped**, exit 0, 6.8m
+  (`full-chromium.log`); Firefox: **90 passed, 1 skipped**, exit 0, 8.1m
+  (`full-firefox.log`). `dr03-motion.spec.mjs` is test 14 in both and passed
+  (**16.2s** Chromium, **17.3s** Firefox) inside the suite, not only in
+  isolation.
+- `node dr03-render.mjs chromium` and `node dr03-render.mjs firefox`, one engine
+  at a time with the port and the stray browser processes cleared between them:
+  exit 0 each, **100 PNG per engine**. Seven viewports × dark/light ×
+  normal/reduce: every one of the **28** combinations per engine reports
+  `layers 1`, `leaving 0`, `ready 1`, **`audio 1`**, **overflow 0**. The empty
+  library reports `layers 0`, the no-cover selection `layers 1 / ready 0` with
+  one icon and no image, and the Cyrillic title renders at 202px with no
+  overflow in both engines.
+- `node target/checks/dr03-round4-review/lifecycle-probe.mjs`: exit 0;
+  a genuinely started outgoing animation is `paused`, `aria-hidden=true`,
+  `pointer-events:none`; reduce during that animation drops the layer with
+  **0** `animationend` events; logout with a held picture leaves **0** layers
+  and 0 in the shell; an aborted image load leaves one ready fallback layer.
+
+Two screenshots were inspected by eye, not only measured: the 320×700 dark menu
+sheet over the no-cover library, and the 1284×856 light library with the long
+Cyrillic title. Both show the real uploaded originals, the placeholder for the
+track without a picture, and no clipped or overlapped control. In the 320px
+sheet the "Add to queue" row carries the hover background, which is where the
+pointer is left after the trigger click; it is a `:hover` paint
+(`style.css:1600`), not a stored state, and the earlier round-1 journeys already
+drive every item of that sheet as a real command.
+
+One reading from a screenshot was **not** confirmed by measurement, so it is
+not recorded as a limitation: at 1284×856 the sidebar does carry 33px of
+scrollable overflow (`clientHeight 768`, `scrollHeight 801`), but its last
+utility item is fully inside the visible region — rect `683…727` against a
+sidebar that ends at 768 and a player band that starts at 768 — and
+`elementFromPoint` on its centre hits that same `nav-item`. Nothing is clipped
+and no control needs the scroll; the overflow is the decorative tail of the
+sidebar, and it belongs to the shell package, not to this motion slice.
 
 ### The queue cursor was never racing — the fixture clock was
 

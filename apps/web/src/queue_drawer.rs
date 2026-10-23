@@ -366,6 +366,7 @@ pub fn QueueDrawer(
                                     },
                                     button {
                                         class: "queue-track",
+                                        id: "queue-track-{at}",
                                         r#type: "button",
                                         "aria-label": "{play_label} queue item {at + 1}: {title}",
                                         onclick: move |_| onselect.call(at),

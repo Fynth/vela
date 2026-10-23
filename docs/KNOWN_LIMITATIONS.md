@@ -51,13 +51,53 @@ immediate. The measurements are in [QA_EVIDENCE](QA_EVIDENCE.md); what was
   This was **not** a DR-03 regression — the same test fails the same way on
   `origin/main` `d2bcbb0`. The fragility stays for future tests: anything
   asserting cursor identity on this fixture has to control the clock
-  (pause, or use the 3.0 s `bright-cover.flac`).
-- **The round-3 DR-03 slice is not shipped.** Its longer spec (eleven
-  journeys) and its `cover_fade` rework exist only as an uncommitted stash:
-  journey 4b ("the late answer of the outgoing layer") fails **3/3 in
-  Chromium** with that code and passes **2/2** with the committed round-1
-  code, so the rework regresses the crossfade guard. The committed tree is
-  the round-1 slice; nothing in the docs claims the round-3 numbers.
+  (pause, or use an original long enough for the whole measured operation).
+- **A second fixture length is short too, and the two held journeys control
+  the clock for that reason.** `crates/media/tests/fixtures/bright-cover.flac`
+  — the picture-bearing fixture the crossfade journeys play — is **3.0 s**
+  long. Journeys 4b and 4c hold one picture at the network layer on purpose,
+  so their own waits add up; if the track reaches natural EOF while the
+  picture is still held, the root advances the cursor by design, the surface
+  selects another occurrence and the fade under measurement is replaced
+  underneath the journey. Measured with a timeline probe on the round-3 tree:
+  the track ran `0.00…2.96` of `3.00` and at `t=4903ms` the cursor moved to
+  another track with a held picture and no answer — the wait for the released
+  outgoing picture could never settle. Both held journeys now click the row
+  and pause with `#player-toggle` before they assert, so they measure the
+  picture and not the clock. With the clock controlled the run is **3/3 green
+  in Chromium**; the unfixed tree failed 2 of 3. This is the same class of
+  fragility as the one-second `signal.flac` above, and it is why no journey in
+  this spec may assert picture identity while the media clock runs.
+- **Round-4 review extends the clock control beyond the held journeys.**
+  Ordinary and rapid crossfades, the no-cover/shared-artwork checks and the
+  queue cursor checks now pause through the root control and verify the real
+  audio element is paused. The decision to stop the transport is taken on the
+  element's own `data-play-request` mark, which the player sets and removes in
+  the tick of the command, and not on the transport's label, which is a render
+  of that mark a tick later: a pause decided on a stale label is skipped, and
+  the media clock that then runs is the flake this package closed. The render
+  probe also pauses its no-cover and Cyrillic-title selections. Playing-time
+  and command-response checks still exercise playback explicitly. The team lead
+  then repeated the whole gate on these final files: fmt and both strict clippy
+  runs exit 0, `cargo test --locked --workspace -- --test-threads=2` **392
+  passed / 0 failed / 3 ignored**, wasm release and `build-web.sh` exit 0 with
+  `cmp apps/web/style.css dist/style.css` identical, the full Playwright suite
+  **90 passed / 1 skipped** in Chromium (6.8m) and **90 passed / 1 skipped** in
+  Firefox (8.1m), the render matrix **100 PNG per engine** with all 28
+  combinations at one settled layer, one audio element and zero overflow, and
+  the lifecycle probe green. The isolated lifecycle probe covers reduce during
+  a started animation, logout with a held picture and an actual image request
+  failure. The earlier negative mutation was not repeated by the team lead in
+  this cycle, and the guard it protects is unchanged.
+- **Journey 6b did not prove the bottom-boundary focus hand-back; it does
+  now.** It used `#queue-move-down-3` in a seven-row queue, landing at index 4
+  rather than the last index 6, so the disabled "down" control of the last row
+  was never the control that had to hand the focus to its neighbour. The
+  journey now reads the last index of the drawer and moves the penultimate row
+  into that place; the measured focus is `queue-move-up-6`, the honest
+  neighbour of the last row. The top boundary and the adjacent identical
+  occurrences are exercised as before, and no queue behavior was changed for
+  this.
 
 ## DR-02 the underlap and the two glass bands — 2026-10-22
 

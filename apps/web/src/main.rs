@@ -305,6 +305,44 @@ fn move_control_has_focus(direction: i8) -> bool {
         label.starts_with("Move queue occurrence") && label.ends_with(" down")
     }
 }
+/// DR-03: hand the focus to the move control of the destination row.
+///
+/// A swap of two adjacent identical occurrences keeps the DOM, so the focus
+/// is not lost with a node: it stays on the control of the row that is now
+/// somebody else's, and the next keyboard command would act on the wrong
+/// occurrence. The same control of the destination row is therefore taken
+/// even when the focus was not lost. At a boundary that control is
+/// disabled, so the opposite control of the same row is the honest
+/// neighbour; when neither can take the focus, the focus is left where it is
+/// instead of being parked on the document body.
+fn focus_move_control(at: usize, direction: i8) -> bool {
+    let same = if direction < 0 { "up" } else { "down" };
+    let opposite = if direction < 0 { "down" } else { "up" };
+    focus_by_id(&format!("queue-move-{same}-{at}"))
+        || focus_by_id(&format!("queue-move-{opposite}-{at}"))
+}
+
+/// Whether the focus belongs to a move control of the queue.
+///
+/// The hand-back after a move is not a theft: it happens when the focus was
+/// lost with the node, and when the focus still sits on a move control —
+/// which is exactly the case a swap of adjacent identical occurrences
+/// produces, because the markup is kept and the focus stays on the row that
+/// now holds somebody else's occurrence. A reader who has already moved on
+/// to another control keeps that control.
+fn focus_is_on_a_move_control() -> bool {
+    let active = web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| document.active_element());
+    match active {
+        None => true,
+        Some(element) => {
+            element.tag_name().eq_ignore_ascii_case("BODY")
+                || element.id().starts_with("queue-move-")
+        }
+    }
+}
+
 fn enqueue_track(track: Track, next: bool, mut ui: PlaybackUi, mut notice: Signal<String>) {
     synchronize_order(ui);
     if ui.queue.peek().len() >= playback::MAX_QUEUE {
@@ -2149,10 +2187,12 @@ fn App() -> Element {
         }
     });
     // DR-03: a moved row is a new DOM node, so the focus of the move
-    // control is gone with it. The root hands the focus to the same control
-    // of the destination row after the renderer's batch, and only when the
-    // focus was really lost. The audio, the selection and the current
-    // occurrence are not touched.
+    // control goes with it. The root hands the focus to the same control of
+    // the destination row after the renderer's batch. It does so even when
+    // the control kept its DOM node (two adjacent identical occurrences keep
+    // the markup), because the focus would then belong to the row that now
+    // holds somebody else's occurrence. The audio, the selection and the
+    // current occurrence are not touched.
     use_effect(move || {
         let Some(receipt) = *playback.receipt.read() else {
             return;
@@ -2172,18 +2212,16 @@ fn App() -> Element {
             if !still_current {
                 return;
             }
-            let active = web_sys::window()
-                .and_then(|window| window.document())
-                .and_then(|document| document.active_element());
-            let lost = active
-                .as_ref()
-                .map(|element| element.tag_name().eq_ignore_ascii_case("BODY"))
-                .unwrap_or(true);
-            if !lost {
+            if !focus_is_on_a_move_control() {
                 return;
             }
-            let control = if receipt.direction < 0 { "up" } else { "down" };
-            focus_by_id(&format!("queue-move-{control}-{}", receipt.at));
+            if !focus_move_control(receipt.at, receipt.direction) {
+                // Neither control of the destination row can take the focus.
+                // The move already happened and the receipt is over, so the
+                // reader is not left with a focus on the row that changed
+                // under it: the row itself is the honest fallback.
+                focus_by_id(&format!("queue-track-{}", receipt.at));
+            }
         });
     });
 

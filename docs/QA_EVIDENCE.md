@@ -231,6 +231,95 @@ DR-01 shipped a vocabulary, not a surface: when the package was written no
 them back). DR-02 has since consumed the roles in the player and the topbar;
 this section still claims nothing about the glass working on its own.
 
+## DR-03 round-4 reviewer verification — 2026-10-23
+
+This review checks the held Rust slice and removes remaining fixture-clock
+dependencies in its browser measurements. It changes only the two DR-03 test
+scripts and these evidence documents. The production Rust files, including
+`browser_player.rs` and `playback.rs`, match their incoming SHA-256 hashes.
+Evidence root: `target/checks/dr03-round4-review/`. The older DR-03 table records
+earlier runs; its full-suite and negative-mutation results were not repeated here.
+
+| Executed command | Actual result | Artifact |
+| --- | --- | --- |
+| `cargo fmt --all -- --check` | exit 0; no output | `fmt.log` |
+| `cargo clippy --locked --workspace --all-targets -- -D warnings` | exit 0; `Finished dev profile` | `clippy.log` |
+| `cargo test --locked --workspace -- --test-threads=2` | exit 0; **392 passed, 0 failed, 3 ignored** across workspace test binaries; web **57 passed**, including **12** cover-model tests | `tests.log` |
+| `cargo build --locked -p vela-web --target wasm32-unknown-unknown --release` | exit 0; `Finished release profile` | `wasm-release.log` |
+| `scripts/build-web.sh` | exit 0; `Web assets built in dist/` | `build-web.log` |
+| `cmp apps/web/style.css dist/style.css` | exit 0; identical, no output | packaged stylesheet compared directly |
+| `cargo clippy --locked -p vela-web --target wasm32-unknown-unknown -- -D warnings` | exit 0; `Finished dev profile` | `clippy-wasm.log` |
+| `cd tests/browser && npx playwright test dr03-motion.spec.mjs --browser=chromium --output=/root/vela/target/checks/dr03-round4-review/pw-final-2` (then `pw-final-3`) | two consecutive runs before the boundary correction: **1 passed (19.3s)** and **1 passed (17.9s)**; exit 0 each | `chromium-final-2.log`, `chromium-final-3.log`; each run has its own `dr03-motion.json` and screenshots |
+| `cd tests/browser && npx playwright test dr03-motion.spec.mjs --browser=firefox --config=/root/vela/target/checks/dr03-round4-review/isolated.config.mjs --output=/root/vela/target/checks/dr03-round4-review/pw-firefox-final-isolated` | before the boundary correction: **1 passed (19.8s)**; exit 0; config omits the unused shared server, retaining the spec's own isolated runtime | `firefox-final-isolated.log`, `firefox-final-isolated/dr03-motion.json`, `isolated.config.mjs` |
+| `cd tests/browser && npx playwright test dr03-motion.spec.mjs --browser=chromium --config=/root/vela/target/checks/dr03-round4-review/isolated.config.mjs --output=/root/vela/target/checks/dr03-round4-review/pw-boundary-1` (then `pw-boundary-2`) | two consecutive final-file runs including the boundary correction: **1 passed (17.4s)** and **1 passed (19.7s)**; exit 0 each | `chromium-boundary-1.log`, `chromium-boundary-2.log`, per-run `dr03-motion.json`; `browser-final-source.sha256` |
+| `cd tests/browser && npx playwright test dr03-motion.spec.mjs --browser=firefox --config=/root/vela/target/checks/dr03-round4-review/isolated.config.mjs --output=/root/vela/target/checks/dr03-round4-review/pw-firefox-boundary` | final file including the boundary correction: **1 passed (21.8s)**; exit 0 | `firefox-boundary.log`, `firefox-boundary/dr03-motion.json`; same source hash |
+| `cd tests/browser && node dr03-render.mjs chromium` | exit 0; **100 PNGs**, seven sizes × dark/light × normal/reduce; all 28 combinations: **1** settled layer, **0** overflow; no-cover: **1** layer, **0** leaving | `render-chromium.log`, `render-chromium/render-chromium.json`, `render-chromium/*.png` |
+| `node target/checks/dr03-round4-review/lifecycle-probe.mjs` | exit 0; actual outgoing animation: `aria-hidden=true`, `pointer-events:none`; reduce cleanup with **0** end events; held image released after logout: **0** layers; aborted image: **1** ready fallback layer | `lifecycle-probe.log`, probe source, `lifecycle/lifecycle.json`, `lifecycle/image-error.png` |
+| `cd tests/browser && VELA_DR03_EVIDENCE=target/checks/dr03-review/chromium-1 npx playwright test dr03-motion.spec.mjs --browser=chromium --output=/root/vela/target/checks/dr03-review/pw-1` (then `chromium-2`, `chromium-3`, `chromium-final`), and the final file in Firefox with the preserved isolated config | Chromium **1 passed (16.7s)**, **1 passed (17.0s)**, and after the boundary correction **1 passed (16.8s)** and **1 passed (19.4s)**; Firefox on the final file **1 passed (20.3s)**; exit 0 each. The recorded evidence of the last Chromium run: bottom boundary focus `queue-move-up-6` in a seven-row queue (the "down" control of the last row is disabled), top boundary focus `queue-move-down-0`, identical-occurrence swap moves the focus from `queue-move-up-6` to `queue-move-up-5`, crossfade **2** layers / **1** leaving / **1** at the end / **1** audio element, rapid replacement **1** layer / **1** distinct audio element, shared artwork **1** ready layer at opacity **1**, reduce inside a held fade **1** layer / **0** leaving / opacity **1** | `target/checks/dr03-review/chromium-{1,2,3,final}/dr03-motion.json`, `target/checks/dr03-review/firefox-final/dr03-motion.json`, `target/checks/dr03-review/pw-*` |
+
+Cargo used `CARGO_BUILD_JOBS=2`, sequentially. Browser runs used separate
+`VELA_DR03_EVIDENCE` directories; the render used `VELA_DR03_RENDER` under the
+same evidence root. Viewports: 320×700, 360×800, 390×844, 768×1024, 1284×856,
+1440×900 and 1728×1000. Representative mobile menu/queue, desktop Library and
+Cyrillic-title screenshots were visually inspected. Journeys 4b/4c retain their
+real network holds and named stale-answer/reduce assertions. No new skip or
+fixed-time wait was added. Existing named EXP/PLAY/RES/NET/AUTH/NP tests are
+unchanged; this is presentation evidence for G05/G23, not another playback engine.
+
+An intermediate run (`chromium-final-1.log`) after a concurrent helper update
+failed during `browserContext.close` with `ENOENT` for a trace in the shared
+`tests/browser/test-results` directory. No assertion failure appears in its
+log. Its status remains **FAIL**; the two subsequent final-file passes use
+separate output directories. Earlier snapshot runs also passed in both engines
+(`chromium-1.log`, `chromium-2.log`, `firefox.log`); they are not the final-file gate.
+A Firefox launch with the default config (`firefox-final.log`) exited 1 before
+running any test because another runner occupied port 3217. The final isolated
+Firefox run avoids that shared port and passed.
+
+A P2 finding was closed by a concurrent test correction: journey 6b's hardcoded
+move 3→4 did not reach the bottom of its seven-row queue. It now computes the
+last index and asserts focus on that row's Up control. Both final Chromium
+runs and the final Firefox run include the correction; player behavior is unchanged.
+Full browser suites, Firefox render matrix, native GUI (no X server), physical
+audio, screen reader, GPU-backed device and Docker runtime are **NOT_RUN in this
+review**. No live runtime/data upgrade or commit was performed.
+
+### Team-lead acceptance of the same final files — 2026-10-23
+
+The reviewers' own runs above are not the gate the package was accepted on. The
+team lead repeated every check itself on the corrected files, in one tree, with
+`CARGO_BUILD_JOBS=2` and no competing Cargo process. Source hashes in
+`target/checks/dr03-r4-final/source-final.sha256` — `cover_fade.rs`
+`ac7a6e0b…`, `main.rs` `c2d3531e…`, `queue_drawer.rs` `19407963…`,
+`browser_player.rs` `d950761c…`, `playback.rs` `d7a34d0c…`, spec `efb4b77e…`,
+render probe `548095d0…`. Evidence root `target/checks/dr03-r4-final/`.
+
+| Executed command | Actual result | Artifact |
+| --- | --- | --- |
+| `cargo fmt --all -- --check` | exit 0; no output | — |
+| `cargo clippy --locked --workspace --all-targets -- -D warnings` | exit 0; `Finished dev profile` | `clippy.log` |
+| `cargo clippy --locked -p vela-web --target wasm32-unknown-unknown -- -D warnings` | exit 0 | `clippy-wasm.log` |
+| `cargo test --locked --workspace -- --test-threads=2` | exit 0; **392 passed, 0 failed, 3 ignored** | `tests.log` |
+| `cargo build --locked -p vela-web --target wasm32-unknown-unknown --release`; `scripts/build-web.sh`; `cmp apps/web/style.css dist/style.css` | exit 0; exit 0; identical, no output | `wasm-release.log`, `build-web.log` |
+| `cd tests/browser && npx playwright test --browser=chromium --output=…/pw-full-chromium` | **90 passed, 1 skipped**, exit 0, 6.8m; `dr03-motion.spec.mjs` passed inside the suite at **16.2s** | `full-chromium.log` |
+| `cd tests/browser && npx playwright test --browser=firefox --output=…/pw-full-firefox` | **90 passed, 1 skipped**, exit 0, 8.1m; `dr03-motion.spec.mjs` passed inside the suite at **17.3s** | `full-firefox.log` |
+| `cd tests/browser && VELA_DR03_RENDER=…/render-chromium node dr03-render.mjs chromium`, then the same for `firefox` | exit 0 each; **100 PNG per engine**; all **28** combinations per engine: `layers 1`, `leaving 0`, `ready 1`, **`audio 1`**, **overflow 0**; empty library `layers 0`; no-cover `layers 1 / ready 0` with 1 icon and 0 images; Cyrillic title 202px wide, overflow 0 | `render-chromium/`, `render-firefox/`, `*.json`, `*.log` |
+| `node target/checks/dr03-round4-review/lifecycle-probe.mjs` | exit 0; outgoing animation genuinely started and `paused`, `aria-hidden=true`, `pointer-events:none`; reduce during it → **0** end events; logout with a held picture → **0** layers, 0 in shell; aborted image → 1 ready fallback layer | `lifecycle-probe.log` |
+| Sidebar reading from the 1284×856 screenshot, checked against the DOM | the 33px sidebar overflow does **not** clip a control: last utility item rect `683…727`, sidebar ends 768, player band starts 768, `elementFromPoint` on its centre hits that `nav-item` | `sidebar-probe/` |
+
+Two screenshots were inspected by eye in addition to being measured: the
+320×700 dark row-menu sheet over the no-cover library and the 1284×856 light
+library with the long Cyrillic title. The hover paint on "Add to queue" in the
+sheet is `:hover` (`style.css:1600`), where the pointer is left after the
+trigger click, not a stored state.
+
+Still **NOT_RUN**, honestly: screen reader, forced-colors, browser zoom 200%,
+app-scale 150% for this slice, GPU-backed device / SwiftShader stand, native
+WebKitGTK (no X server), physical audio output, Docker runtime, and a real
+mobile browser with a dynamic toolbar. The earlier negative mutation of
+`accept_ready` was **not** repeated by the team lead in this cycle; its recorded
+run stands and the guard is unchanged (`ac7a6e0b…`).
+
 ## DR-03 the short answer that never delays the command — 2026-10-23
 
 | Check | Paths | Evidence | Status | NOT_RUN |
@@ -242,8 +331,11 @@ this section still claims nothing about the glass working on its own.
 | The artwork crossfade keeps two layers, one request and one audio element | apps/web/src/cover_fade.rs; tests/browser/dr03-motion.spec.mjs | Two real covers: the tracked `crates/media/tests/fixtures/bright-cover.flac` and a second real FLAC whose picture block carries the tracked `cover.png`, so two tracks really have two different artworks. On the change: **2 layers** (one of them leaving), **1** at the end, **1** `<audio>` element, and the resource timeline grows by exactly **one** entry — the request for the new cover. The outgoing picture is not fetched again. Three changes in a row: never more than **2** layers, **1** at the end, **1** audio element and **1** distinct audio element over 90 frames (the minimum count is 1). A track without a cover: **0** leaving layers and the placeholder is there | PASS measured | — |
 | A moved queue row changes the order at once, settles and keeps the focus | apps/web/src/main.rs; apps/web/src/queue_drawer.rs; apps/web/queue-drawer.css; tests/browser/dr03-motion.spec.mjs | A real queue with five occurrences, three of them the same track. "Move track up" on the third row: the DOM order changed in the click's own tick, the destination row carries `queue-row-settle` with `--queue-settle-from: -4px`, the class is gone after the effect, the focus is on **"Move track up"** of `queue-move-up-1` — the moved row — the `src` and the `data-source-generation` are unchanged, one `<audio>` element, and the `.queue-row.current` mark still names the same occurrence (it follows the swap, because the engine remaps the cursor with the order). The three occurrences of the same track are still three rows. A second move right after the first leaves **one** settled row | PASS measured | — |
 | Reduced motion is the same surfaces without a movement | apps/web/style.css; apps/web/now-playing.css; apps/web/queue-drawer.css; tests/browser/dr03-motion.spec.mjs | `emulateMedia({reducedMotion:'reduce'})`: on `.button`, `.icon-button`, `.catalog-card .catalog-cover`, `.track-menu-panel`, `.now-playing-dialog[open]`, `#queue-drawer-dialog .queue-panel`, `.player-eq i` and `.cover-fade-layer` — the `animation-name` is `none`, the animation and transition durations are **0**, there is **no running animation** (`getAnimations()` is empty) and the `::before`/`::after` pseudo-elements are `none` too. The equalizer keeps its own height (`scaleY(.4/.7/.5/.9)`, not the squashed playing base). Play, Escape and the drawer still work | PASS measured | A screen reader, forced colours and the native client are NOT_RUN |
-| Rust quality and web build | workspace | `cargo fmt --all -- --check` exit 0; `cargo clippy --locked --workspace --all-targets -- -D warnings` exit 0; `cargo clippy --locked -p vela-web --target wasm32-unknown-unknown -- -D warnings` exit 0; `cargo test -p vela-web` **53 passed, 0 failed** (8 of them the new cover-fade model); `cargo build --locked -p vela-web --target wasm32-unknown-unknown` exit 0; `scripts/build-web.sh` exit 0 (wasm-bindgen 0.2.129) into `dist/` | PASS | The native client's WebKitGTK rendering, its physical audio and the Docker runtime are NOT_RUN: no X server on this host |
-| Browser suites | tests/browser | The DR-03 spec owns its server, its account and its real uploaded originals: **six** journeys in the committed round-1 slice (eleven in the stashed round-3 spec, which is **not shipped** — see KNOWN_LIMITATIONS). Chromium **1 passed**, Firefox **1 passed**. The whole suite on the committed tree, re-run by the team lead: Chromium **90 passed, 1 skipped**, exit 0 (6.6m); Firefox **90 passed, 1 skipped**, exit 0 (8.1m) | PASS measured | A screen reader, a real GPU-backed browser and the native client are NOT_RUN |
+| Rust quality and web build | workspace | `cargo fmt --all -- --check` exit 0; `cargo clippy --locked --workspace --all-targets -- -D warnings` exit 0; `cargo clippy --locked -p vela-web --target wasm32-unknown-unknown -- -D warnings` exit 0; `cargo test -p vela-web` **57 passed, 0 failed** (12 of them the new cover-fade model); `cargo build --locked -p vela-web --target wasm32-unknown-unknown` exit 0; `scripts/build-web.sh` exit 0 (wasm-bindgen 0.2.129) into `dist/` | PASS | The native client's WebKitGTK rendering, its physical audio and the Docker runtime are NOT_RUN: no X server on this host |
+| Browser suites | tests/browser | The DR-03 spec owns its server, its account and its real uploaded originals: **eleven** journeys (round 3), and the engine that runs the spec is the engine it measures. Chromium **1 passed**, Firefox **1 passed**. Team-lead Chromium runs of the repaired spec: **3/3 green** (19.1 s, 19.0 s, 20.0 s). The whole suite, re-run by the team lead on the round-3 tree: Chromium **90 passed, 1 skipped**, exit 0 (6.7m); Firefox **90 passed, 1 skipped**, exit 0 | PASS measured | A screen reader, a real GPU-backed browser and the native client are NOT_RUN |
+| Journey 4b was blocked by the fixture clock, not by the crossfade guard | tests/browser/dr03-motion.spec.mjs; team-lead timeline probe | A `MutationObserver` on `.cover-fade` plus a 100 ms tick recorded every layer class, its `data-generation`, and the audio element of the held context. Unfixed tree: `d=3`, `t=0.00 … 2.96`, and at `t=4903ms` the root advanced to the next track while its picture was still held — a third identity was selected and the wait for the released outgoing picture could never settle (**2 failures in 3 Chromium runs**). Fixed tree (the held journeys pause with `#player-toggle` after the row click): **3/3 green** in Chromium | PASS measured | The probe measures this host's headless Chromium; a real device and a GPU stand are NOT_RUN |
+| The negative control fires on the repaired spec | apps/web/src/cover_fade.rs (temporary mutation, reverted) | Dropping the `generation`/`key` guard in `accept_ready` so any answer is accepted as the arrival of the current layer: journey 4b fails in Chromium at `the leaving layer did not start to leave on somebody else answer` (expected **0**, received **1**), 15.1 s. The file was restored and hashes to `ac7a6e0b…`, identical to before the mutation | PASS measured | — |
+| The render matrix is real, not a green compilation | tests/browser/dr03-render.mjs; target/checks/dr03-motion/render-chromium | Seven viewports (320×700, 360×800, 390×844, 768×1024, 1284×856, 1440×900, 1728×1000) × dark/light × normal/reduced in Chromium, each state reached by a real command (row click, menu trigger, queue trigger) and photographed after the effect settled: crossfade layers **1/1/1/1/1/1/1** in all four configurations, horizontal overflow **0** at every viewport, a track without a cover **1** layer and **0** leaving. Every file name carries the engine, the theme, the viewport and the motion preference. One viewport in the first run read **2** layers / **1** leaving because the 3-second fixture hit natural EOF mid-matrix; the probe now pauses the transport and waits for a settled surface before it reads, and the rerun is clean | PASS measured | The Firefox matrix of the current fixture is recorded separately below |
 | The queue cursor follows the move — the fixture clock was the flake | tests/browser/music.spec.mjs; team-lead probe `eof-probe.mjs` | Every `play`/`ended`/`seeked` of `#vela-audio` and every change of `.queue-row.current` recorded around the two move clicks. Chromium and Firefox: the rows read `C..` before the move and `.C.` after it in the click's own tick — the cursor is never dropped. The two assertions that used to fail (`music.spec.mjs:113`, `:117`) fail because the tracked **1.0 s** `signal.flac` reaches **natural EOF** between the edits and the root advances the cursor by design. The same test fails on `origin/main` `d2bcbb0` in an isolated worktree (4 runs: 3 pass / 1 fail at `:117`; this branch: 2 pass / 2 fail), and `onended`/`advance` are unchanged from `origin/main` — **pre-existing, not a DR-03 regression**. The test now pauses with `#player-toggle` before the queue edits: **6/6** Firefox runs pass afterwards (before: 2 failures in 3 runs) | PASS measured | A screen reader and the native client are NOT_RUN |
 
 Permanent coverage: `tests/browser/dr03-motion.spec.mjs` owns its server, its
