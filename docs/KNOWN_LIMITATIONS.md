@@ -64,11 +64,11 @@ those two bands with the DR-01 glass roles. The measurements are in
 DR-01 declares the vocabulary and applies none of it. The measurements are
 in [QA_EVIDENCE](QA_EVIDENCE.md); what was **not** measured is here.
 
-- **The glass does not exist yet.** No surface reads `--vela-glass-*`: no
-  `backdrop-filter` was applied, no floating layer was rendered, and no
-  pixel of the product has ever been seen with these colours over
-  artwork. The package's result is a dictionary, and the word "glass" in
-  this section names a role, not a feature.
+- **The glass does not exist yet, as of DR-01.** When DR-01 was written no
+  surface read `--vela-glass-*`: no `backdrop-filter` was applied and no
+  floating layer was rendered. DR-02 has since applied the roles to the
+  player and the topbar and measured them over artwork; this section
+  describes the state DR-01 shipped, not the current one.
 - **The alpha is arithmetic, not contrast.** 0.851 (dark) and 0.902 (light)
   are the alphas the two declared hex values state. No contrast ratio was
   measured against any image, and none is claimed: the quiet 10px

@@ -2975,8 +2975,11 @@ What changed in the source — `apps/web/style.css` only, no Rust:
 
 The collection stays opaque: the sidebar, the mobile navigation, the rows,
 the grids, the cards, the panels and the inner surfaces of the dialogs
-carry no filter. The only other filtered surface in the product is the
-`::backdrop` of an open native dialog.
+carry no filter. The other filtered surfaces belong to overlays that are not
+open with the collection: the `::backdrop` of the queue drawer, of Now
+Playing and of the metadata dialog, plus the `.playlist-picker-backdrop`
+element. Measured, two filters are visible with the catalog and three with
+one overlay open.
 
 Measured, in Chromium and in Firefox, on a real account with real
 uploaded tracks — the details and the artifacts are in

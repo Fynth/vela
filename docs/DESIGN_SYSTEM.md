@@ -346,8 +346,12 @@ block paints the two bands:
 **The collection stays opaque.** The sidebar, the mobile navigation, the
 rows, the grids, the cards, the panels and the inner surfaces of the dialogs
 carry no filter: a blur over a long list is a jank and a readability cost.
-The only other filtered surface in the product is the `::backdrop` of an
-open native dialog, so at most **three** filters are visible at once.
+The other filtered surfaces belong to overlays that are not open with the
+collection: the `::backdrop` of the queue drawer (8px), of Now Playing
+(14px) and of the metadata dialog (6px), plus the `.playlist-picker-backdrop`
+element (6px). Measured: **two** filters are visible with the catalog, and
+**three** with the queue drawer or Now Playing open (the metadata dialog and
+the playlist picker were not opened in that run).
 
 **The captions on a glass band use `--vela-glass-text`, not the quiet
 role.** Over a light cover the quiet role (`#798372`) falls to about

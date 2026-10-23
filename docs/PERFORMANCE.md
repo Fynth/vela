@@ -93,8 +93,10 @@ two bands blurred, with no blur at all, with only the player blurred, with
 only the topbar blurred and with both blurred at 4px and at 8px
 (`target/checks/dr02-glass/perf-diagnostics.json`): all six read 602 frames,
 a 16.7 ms median, a 16.8 ms longest frame and **0 %** frames over 33 ms.
-That run also used the filter-only fallback, so it compares blur radii and
-not glass against opaque. The blur radius is therefore not what costs
+That diagnostic predates the opaque fallback and records only frame
+timings — no painted surface — so read it as a comparison of blur radii on
+this stand, not as glass against opaque; the opaque comparison lives in
+`budget-runs.json` above. The blur radius is therefore not what costs
 anything on this stand — the whole filter is free here — which is why the
 shipped radii (16px for the desktop player, 12px for the topbar and the
 mobile player) are the ones the DR-01 roles declare.
