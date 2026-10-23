@@ -1,5 +1,54 @@
 # Unsupported and unverified functionality
 
+## DR-08 the verified Linux presentation parity — 2026-10-23
+
+The native presentation was measured in a real WebKitGTK window on a headless
+Xvfb display. What was **not** measured is here.
+
+- **No physical audio.** The window owned exactly one output stream on the
+  QA-owned null sink, and that is the whole audio claim. Nothing was heard:
+  no speaker, no headphone, no latency, no volume calibration and no
+  external DAC was involved.
+- **No screen reader and no Orca.** The driver asserts the accessible names,
+  the roles, the live region and the keyboard labels of the band; what a
+  screen reader announces about the glass bands, the 44px ranges or the
+  focus ring was not observed.
+- **No Wayland session.** The measurement ran on X11 (`:99`, headless
+  Xvfb). The Wayland path of `scripts/verify_native_client.py` is
+  `--window-only` and was not executed for this increment, so the Wayland
+  compositor's own rendering of `backdrop-filter` is not claimed.
+- **No background session.** The window was never sent to the background.
+  A background session is a separate evidence class and is not implied by
+  the window run.
+- **No packaging.** No archive, installer, AppImage, DEB or release
+  artifact was produced or re-verified. The increment changed the packaged
+  stylesheet, so the previous package evidence describes the previous
+  binary.
+- **No performance budget.** The DR-02 frame budget was measured in
+  browsers. The cost of two `backdrop-filter` layers in WebKitGTK on this
+  host was not measured with a frame budget, and the historical 72fps
+  figure in the progress log is not a guarantee for this engine.
+- **The desktop behind the window is never blurred.** CSS
+  `backdrop-filter` samples the content of this WebView only. No claim is
+  made about the desktop, another window or a compositor behind the app.
+- **`forced-colors`, `print` and `prefers-reduced-transparency` are not
+  claimed for the native shell.** They were not emulated and the native
+  stylesheet declares no branch for them.
+- **The pixel contrast reading is conservative.** The sampler avoids the
+  control boxes and the real text boxes of the band, but a decorative
+  one-pixel border inside the band can still be sampled. In the opaque
+  compact frames that border is the worst sampled pixel (4.805:1 and
+  3.998:1 against the muted and the quiet caption colour); the caption's own
+  background is the band itself, and those frames are reported as
+  `FALLBACK_OPAQUE` rather than as a glass verdict. The glass frames — the
+  scope of this package — are all at or above 12.775:1.
+- **The frame names of the older native captures are historical.** The
+  driver names a frame after the scene it expects; after the theme toggle
+  the frames `playlists-dark`, `albums-dark`, `public-dark` and
+  `public-search-dark` are rendered in the light theme. The report records
+  the real theme of every frame in `bands.theme`, and the new DR-08 frames
+  carry the actual theme in their name.
+
 ## DR-03 the short answer that never delays the command — 2026-10-23
 
 The package gives the web surfaces a short answer and keeps every command
@@ -17,10 +66,12 @@ immediate. The measurements are in [QA_EVIDENCE](QA_EVIDENCE.md); what was
   entrance and the settle was not measured on a compositing GPU. The
   DR-02 frame budget is the only frame measurement on this host and it does
   not cover these effects.
-- **The native client is NOT_RUN.** There is no X server on this host. The
-  Linux client has its own stylesheet (`apps/desktop/style.css`) and its own
-  motion; the web package changed neither. The native surface was not
-  rendered, and its WebKitGTK rendering of the crossfade is not claimed.
+- **The native client was not part of this package.** DR-03 changed no
+  native file: the Linux client has its own stylesheet
+  (`apps/desktop/style.css`) and its own motion. The native surface was not
+  rendered for DR-03, and its WebKitGTK rendering of the crossfade is not
+  claimed. The native presentation was measured separately in the DR-08
+  package (2026-10-23) on a headless Xvfb display.
 - **No screen reader was run.** The DOM contract of the new surfaces was
   checked in the document: the outgoing cover layer is `aria-hidden="true"`
   and `pointer-events: none`, the artwork keeps its empty `alt`, and the

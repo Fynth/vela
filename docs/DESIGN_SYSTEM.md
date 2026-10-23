@@ -446,6 +446,83 @@ rebuilt row lost is handed to the same control of the destination row.
 The measured evidence is in [QA_EVIDENCE](QA_EVIDENCE.md) and the permanent
 gate is `tests/browser/dr03-motion.spec.mjs`.
 
+## DR-08 the native glass bands and the 112px Linux band — 2026-10-23
+
+DR-08 moves the DR-01 vocabulary and the DR-02 underlap into the Linux
+WebKitGTK shell. The native client keeps its own roles, its own grid and its
+one `AudioEngine`; what changes is that the two floating bands of the native
+shell become glass, the content really passes under them, and both native
+range controls carry a real 44px pointer target.
+
+**The vocabulary is transferred as values, not as web selectors.** The
+canonical native layer (`apps/desktop/style.css`, `.native-app`) declares the
+same roles as the web client (`apps/web/style.css:89-107`): the four glass
+colours, the three blur sizes, the glass text alias, the eight durations and
+the two curves. The explicit light theme and the System theme under
+`prefers-color-scheme: light` override **only** the four colour roles
+(`--vela-glass-bg`, `--vela-glass-border`, `--vela-glass-highlight`,
+`--vela-glass-shadow`). The blur sizes, the durations and the curves are
+inherited, so the two themes cannot drift apart and a System window never
+paints dark glass over light content. `--bg/--raised/--hover/--accent` stay
+aliases of the `--vela-*` roles; no new hex value was introduced. The
+embedded Manrope data URIs are untouched.
+
+**The native band is 112px, not the web 88px.** This is a deliberate native
+exception, recorded here. Two independent 44px rows (the transport and the
+seek) plus 20px of vertical padding, one border pixel and three spare pixels
+do not fit in 88px, and the 44px pointer target of the two ranges is not
+negotiable. `--vela-player-height` in the native canonical layer is therefore
+`112px`, and it is the **only** place the number lives: the band height, the
+content reserve, the notification offset and the underlap formulas all read
+the token. No formula repeats 88 or 112. The compact compositions (≤900px)
+keep their own auto-height rules and their own minimum of 44px per range.
+The frameless window controls (44px) and the drag region did not move.
+
+**The underlap is strictly conditional.** The positive condition is
+simultaneous: `@media (min-width:1101px)`, the app size at 100%
+(`[data-app-scale="100"]` or an absent attribute), no `.player-error` and no
+`.preparation-progress`, and `@supports ((backdrop-filter:blur(1px)) or
+(-webkit-backdrop-filter:blur(1px)))`. Inside it:
+
+| Rule | Value | Why |
+| --- | --- | --- |
+| `.native-main` | `grid-row: 1 / -1` | the main column spans both grid rows: the sidebar keeps column 1 row 1, the player keeps row 2 |
+| `.native-scroll` | `margin-top: calc(-1 * var(--vela-topbar-height))` and the same value as `padding-top` | the one scroller starts under the topbar and the first heading keeps its old y |
+| `.native-scroll` | `scroll-padding-top: calc(topbar + 8px)`, `scroll-padding-bottom: calc(var(--vela-player-height) + 8px)` | a focused target lands inside the effective rectangle between the two bands |
+| `.native-scroll-inner` | `padding-bottom: calc(var(--vela-player-height) + 32px)` | the one content reserve: the last row can always be scrolled above the band. The side gutter and the current top inset are untouched |
+| `.native-topbar` | `position: relative; z-index: 5` | the topbar floats over the scroller |
+| `.native-player` | `position: relative; z-index: 40` | the band floats over the scroller |
+| `.native-scroll` | `position: relative; z-index: 0` | the scroller is painted before the two bands, so their glass samples the content that scrolls under them |
+
+Outside that condition the shell keeps the original geometry: the main column
+is grid row 1, the scroller starts below the topbar and ends above the band
+(`margin-top: 0; padding-top: 0`), the content keeps its own 32px (24px in
+the compact composition) bottom inset, and both bands are opaque with
+`backdrop-filter: none`. There is no second reserve authority and no height
+polling.
+
+**The collection stays opaque.** Only the two floating bands sample a
+backdrop. The sidebar, the rows, the queue rows and the scroller itself
+carry no filter. Measured in the real window: exactly **two** backdrop
+layers in the normal shell, zero in the compact fallback.
+
+**The captions on a glass band use `--vela-glass-text`, not the muted or the
+quiet role.** The hierarchy on the bands is carried by the size and the
+weight, never by the opacity of the text. The rule is the same one the web
+DR-02 applies.
+
+**The modes are explicit.** `prefers-reduced-motion: reduce` sets the eight
+duration roles to `0ms`, keeps `transition:none` / `animation:none` on both
+bands and their pseudo-elements and removes the press transform. Without the
+`@supports` query the two opaque bands are the fallback. `forced-colors`,
+`print` and `prefers-reduced-transparency` are **not** claimed for the native
+shell: they are not measured here.
+
+The native client has no Now Playing dialog, no expanded player and no mobile
+composition, so none of them was transferred. The desktop transparency is
+the WebView content only: CSS `backdrop-filter` cannot blur the desktop
+behind the window, and no such claim is made.
+
 ## Earlier visual baseline and proposals
 
 Proposed evolution2026-10-19: [Listening Atlas visual specification](PLANS/2026-10-19/06_VISUAL_SYSTEM.md)

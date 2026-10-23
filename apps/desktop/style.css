@@ -46,11 +46,38 @@
   --vela-mobile-nav:#10140e;
   --vela-disabled-text:#9aa296;
   --vela-disabled-surface:#232823;
+  /* DR08: one depth/response vocabulary for the two floating native bands. The
+     values are the approved web roles (apps/web/style.css:89-107) transferred
+     as roles, not as web selectors: a native consumer reads them and never
+     re-declares them. The light adaptations below override the four colour
+     roles only; the blur sizes, the durations and the curves are inherited. */
+  --vela-glass-bg:#131513d9;
+  --vela-glass-blur:16px;
+  --vela-glass-blur-mobile:12px;
+  --vela-glass-blur-topbar:12px;
+  --vela-glass-border:#ffffff14;
+  --vela-glass-highlight:#ffffff0f;
+  --vela-glass-shadow:0 18px 50px #00000059;
+  --vela-glass-text:var(--vela-text);
+  --vela-motion-instant:80ms;
+  --vela-motion-quick:120ms;
+  --vela-motion-overlay:140ms;
+  --vela-motion-exit:100ms;
+  --vela-motion-panel:180ms;
+  --vela-motion-skeleton:1800ms;
+  --vela-motion-reorder:150ms;
+  --vela-motion-artwork:140ms;
+  --vela-ease-enter:ease-out;
+  --vela-ease-state:ease-in-out;
   /* One shell layout authority: these four values are the only source for
      the sidebar offset, topbar band and player reserve. */
   --vela-sidebar-width:216px;
   --vela-topbar-height:75px;
-  --vela-player-height:88px;
+  /* DR08 native exception: the Linux band is 112px, not the web 88px. Both
+     range controls carry a real 44px target (44 transport row + 44 seek row +
+     20px vertical padding + 1px border + 3px spare), so the fixed band has to
+     grow. Every consumer reads this one token; no formula repeats 88 or 112. */
+  --vela-player-height:112px;
   --vela-content-max:1560px;
   --vela-gutter:33px;
   /* Compatibility aliases. Every existing reader keeps its meaning; the
@@ -111,6 +138,13 @@
   --vela-mobile-nav:#fff;
   --vela-disabled-text:#607368;
   --vela-disabled-surface:#e5ebe6;
+  /* DR08: the light adaptation overrides the four glass colour roles only. The
+     blur sizes, the durations and the curves are inherited from the canonical
+     layer, so the two themes can never drift apart. */
+  --vela-glass-bg:#f4f7f3e6;
+  --vela-glass-border:#14271c14;
+  --vela-glass-highlight:#ffffffb3;
+  --vela-glass-shadow:0 18px 50px #21372924;
   color-scheme:light
 }.eyebrow{display:block;font-size:9px;letter-spacing:1.8px;font-weight:650;color:var(--accent);margin-bottom:14px}.vela-icon{width:22px;height:22px;display:inline-block;flex-shrink:0;vertical-align:middle}.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);clip-path:inset(50%);white-space:nowrap}.button{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;max-width:100%;border-radius:9px;padding:11px 19px;font-size:12px;font-weight:600;line-height:1.6;text-align:center;transition:background-color .15s,filter .15s,transform .15s}.button.primary{background:var(--accent);color:var(--accent-text)}.button.secondary{background:var(--raised);color:var(--text);border:1px solid var(--line)}.button.small{padding:9px 15px;font-size:11px}.button>.vela-icon{width:17px;height:17px}.button:hover:not(:disabled){filter:brightness(1.08)}.button:active:not(:disabled){transform:scale(.96)}.icon-button{min-width:44px;height:44px;padding:9px;display:inline-grid;place-items:center;background:none;color:var(--muted);border-radius:8px;transition:background-color .15s,transform .15s}.icon-button>.vela-icon{width:19px;height:19px}.icon-button:hover:not(:disabled){background:var(--hover);color:var(--text)}.icon-button:active:not(:disabled){transform:scale(.96)}.icon-button.selected{color:var(--accent)}.text-button{min-height:44px;padding:7px 5px;color:var(--accent);background:none;font-size:12px;text-align:left}.alert{padding:13px 17px;border:1px solid var(--line);border-radius:10px;background:var(--raised);font-size:12px;line-height:1.7;margin:0 0 20px;overflow-wrap:anywhere}.alert.error{color:var(--danger)}.alert.notice{color:var(--accent)}input{display:block;width:100%;min-height:44px;max-width:100%;min-width:0;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:9px;padding:11px 13px;font-size:12px}input::placeholder{color:var(--quiet)}label{display:block;font-size:12px;font-weight:550;margin:18px 0 8px}input[type=range]{padding:0;border:0;border-radius:0;min-height:24px;height:24px;accent-color:var(--accent);background:none;cursor:pointer}input:disabled{cursor:default;opacity:.45}.inline-form{display:flex;align-items:center;gap:9px;flex-wrap:wrap;min-width:0;margin:0 0 12px}.inline-form input{width:auto;flex:1;min-width:130px;min-height:36px;font-size:11px}.inline-form .button{margin:0}.inline-form label{margin:0}.native-brand{display:flex;align-items:center;gap:11px;color:var(--text)}.native-brand>.vela-icon{width:30px;height:30px;color:var(--accent)}.native-brand>span{font-size:32px;letter-spacing:-1.8px;font-weight:600}.native-brand>small{font-size:7px;letter-spacing:1.4px;align-self:flex-end;margin:0 0 10px -5px;color:var(--quiet)}
 .native-signin{min-height:100vh;display:grid;grid-template-columns:1fr 1fr}.signin-story{position:relative;padding:38px 12%;background:#173a30;color:#f1eedc;overflow:hidden;display:flex;flex-direction:column}.signin-story .native-brand{color:#f1eedc}.signin-story .native-brand>.vela-icon{color:#b9dbc8}.signin-story .native-brand small{color:#a4c2b0}.signin-copy{position:relative;z-index:1;margin-top:13vh}.signin-copy .eyebrow{color:#afcbb9;font-size:9px}.signin-copy h1{font-family:Georgia,"Times New Roman",serif;font-size:clamp(43px,5.2vw,76px);font-weight:400;line-height:1.05;letter-spacing:-2.6px;margin-bottom:24px}.signin-copy p{font-size:13px;color:#b6cbbd;max-width:280px}.signin-footnote{margin-top:auto;padding-top:150px;position:relative;z-index:1;color:#9eb8a8;font-size:10px;max-width:270px}.signin-record{position:absolute;bottom:8%;right:-185px;width:410px;height:410px;border-radius:50%;background:repeating-radial-gradient(circle,#14291f 0,#14291f 2px,#294231 3px,#152d21 4px);box-shadow:0 15px 45px #0003;display:grid;place-items:center;transform:rotate(-13deg)}.signin-record>span{width:142px;height:142px;border-radius:50%;background:#d1b391;color:#3a4d33;text-align:center;font-family:Georgia,serif;font-size:78px;font-style:italic;line-height:126px}.signin-form{width:min(460px,100%);align-self:center;justify-self:center;padding:38px 40px}.signin-form h2{font-size:30px}.signin-form>p{font-size:12px}.signin-form form>small{margin-top:8px;font-size:10px}.signin-form .button{width:100%;margin-top:24px}.signin-form .button.secondary{margin-top:10px}.signin-limit{padding-top:25px;margin-top:26px;border-top:1px solid var(--line);font-size:10px}.signin-notice{color:var(--accent);font-size:11px}
@@ -165,6 +199,10 @@
   min-height:var(--vela-topbar-height); margin:0;
   padding:0 var(--vela-gutter); gap:16px;
   border-bottom:1px solid var(--vela-topbar-border); background:var(--vela-bg);
+  /* DR08 fallback: the band is opaque and unblurred until the positive
+     underlap condition below is met. The glass block is the only place that
+     turns a band translucent. */
+  -webkit-backdrop-filter:none; backdrop-filter:none;
 }
 .native-topbar strong { font-size:14px; }
 .native-topbar .eyebrow { display:none; }
@@ -173,6 +211,10 @@
   flex:1 1 auto; min-width:0; min-height:0;
   overflow-x:hidden; overflow-y:auto; overscroll-behavior:contain;
   scrollbar-gutter:stable;
+  /* DR08 fallback: the scroller starts below the topbar and ends above the
+     player band. The underlap block below moves it under the topbar and
+     behind the player, and takes the same amount back as padding. */
+  margin-top:0; padding-top:0; position:static; z-index:auto;
 }
 .native-scroll-inner {
   width:100%; max-width:var(--vela-content-max); min-width:0;
@@ -287,6 +329,9 @@ input::placeholder { color:var(--quiet); opacity:1; }
   align-items:center; padding:10px 26px; column-gap:25px;
   background:var(--vela-player-bg); border-top:1px solid var(--vela-player-border);
   box-shadow:none;
+  /* DR08 fallback: the band is opaque and unblurred until the positive
+     underlap condition below is met. */
+  -webkit-backdrop-filter:none; backdrop-filter:none;
 }
 .player-track { grid-area:meta; display:flex; align-items:center; gap:12px; min-width:0; padding-right:0; }
 .player-cover { width:48px; height:48px; flex:0 0 48px; border-radius:6px; }
@@ -309,7 +354,10 @@ input::placeholder { color:var(--quiet); opacity:1; }
   flex:0 0 44px; width:44px; min-width:44px; height:44px; padding:0; font-size:11px;
 }
 .player-kind { color:var(--vela-quiet-text); }
-.player-controls { grid-area:controls; display:grid; grid-template-rows:44px 22px; min-width:0; }
+/* DR08: the transport row and the seek row are two independent 44px rows. The
+   range control itself carries a real 44px target, so the two rows are never
+   the same box and the seek input never overlaps the transport. */
+.player-controls { grid-area:controls; display:grid; grid-template-rows:44px 44px; min-width:0; }
 .transport { display:flex; align-items:center; justify-content:center; gap:17px; }
 .native-player .icon-button { min-width:44px; width:44px; height:44px; padding:0; }
 .native-play-toggle {
@@ -332,9 +380,11 @@ input::placeholder { color:var(--quiet); opacity:1; }
   flex:0 0 auto; min-width:34px; font-size:10px; text-align:center;
   font-variant-numeric:tabular-nums; color:var(--vela-muted-text);
 }
+/* DR08: the real pointer target of both native ranges is 44px high. The 3px
+   rail and the 8px thumb are unchanged: only the box around them grows. */
 .native-player input[type=range] {
   -webkit-appearance:none; appearance:none;
-  flex:1 1 auto; width:100%; min-width:0; height:22px; min-height:22px;
+  flex:1 1 auto; width:100%; min-width:0; height:44px; min-height:44px;
   margin:0; padding:0; border:0; border-radius:0; background:transparent; cursor:pointer;
 }
 .native-player input[type=range]:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
@@ -516,6 +566,13 @@ img.neutral-cover {
     --vela-mobile-nav:#fff;
     --vela-disabled-text:#607368;
     --vela-disabled-surface:#e5ebe6;
+    /* DR08: the System theme uses the same light glass adaptation as the
+       explicit light theme, so a System window never paints dark glass over
+       light content. */
+    --vela-glass-bg:#f4f7f3e6;
+    --vela-glass-border:#14271c14;
+    --vela-glass-highlight:#ffffffb3;
+    --vela-glass-shadow:0 18px 50px #21372924;
   }
 }
 
@@ -616,3 +673,115 @@ img.neutral-cover {
 .playlist-detail-intro{align-items:center;gap:18px}
 .playlist-detail-cover{width:96px;height:96px;flex:0 0 96px;border-radius:10px}
 @media(max-width:670px){.playlist-detail-cover{width:72px;height:72px;flex-basis:72px}}
+
+/* ============================================================================
+   DR08 — verified native presentation parity.
+
+   The two floating bands of the Linux shell (the topbar and the player band)
+   become glass and the content really passes under them. The change is
+   progressive and strictly conditional:
+
+     - the glass lives inside `@supports`, so a WebKitGTK build without
+       `backdrop-filter` keeps the opaque bands and the original geometry;
+     - the underlap lives inside `@media (min-width:1101px)`, so the compact
+       composition keeps its own two-row player and its own geometry;
+     - the app size must be 100% (`data-app-scale="100"` or an absent
+       attribute), because an enlarged app divides the viewport and the fixed
+       band would no longer fit;
+     - a player error or a pending preparation makes the band grow, so those
+       two scenes keep the opaque, non-overlapping band.
+
+   Every other scene keeps the original geometry: the main column is grid row
+   1, the scroller starts below the topbar and ends above the player, and the
+   two bands are opaque. There is no second reserve authority and no height
+   polling: the band height is the single `--vela-player-height` token and
+   every formula below reads it.
+
+   The collection stays opaque. Only the two floating bands sample a backdrop:
+   a blur over a long list is a jank and a readability cost, not a depth cue.
+   ============================================================================ */
+@supports ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))) {
+  @media (min-width:1101px) {
+    /* The main column spans both grid rows, so the single scroller reaches
+       under the topbar and behind the player band. */
+    .native-app:is(:not([data-app-scale]),[data-app-scale="100"]):not(:has(.player-error)):not(:has(.preparation-progress)) .native-main {
+      grid-row:1/-1;
+    }
+    /* The scroller moves up by exactly the topbar height and takes the same
+       amount back as padding, so the first heading keeps its y and the first
+       frame does not jump. `scroll-padding` keeps a focused target inside the
+       effective rectangle between the two bands. */
+    .native-app:is(:not([data-app-scale]),[data-app-scale="100"]):not(:has(.player-error)):not(:has(.preparation-progress)) .native-scroll {
+      margin-top:calc(-1 * var(--vela-topbar-height));
+      padding-top:var(--vela-topbar-height);
+      scroll-padding-top:calc(var(--vela-topbar-height) + 8px);
+      scroll-padding-bottom:calc(var(--vela-player-height) + 8px);
+      position:relative; z-index:0;
+    }
+    /* The one bottom reserve belongs to the content: the last row can always
+       be scrolled above the player band. The side gutter and the current top
+       inset are untouched. */
+    .native-app:is(:not([data-app-scale]),[data-app-scale="100"]):not(:has(.player-error)):not(:has(.preparation-progress)) .native-scroll-inner {
+      padding-bottom:calc(var(--vela-player-height) + 32px);
+    }
+    /* The topbar floats over the scroller: a translucent band, a 1px hairline
+       and the top edge highlight. It carries no outer shadow. */
+    .native-app:is(:not([data-app-scale]),[data-app-scale="100"]):not(:has(.player-error)):not(:has(.preparation-progress)) .native-topbar {
+      position:relative; z-index:5;
+      background:var(--vela-glass-bg); color:var(--vela-glass-text);
+      -webkit-backdrop-filter:blur(var(--vela-glass-blur-topbar));
+      backdrop-filter:blur(var(--vela-glass-blur-topbar));
+      border-bottom-color:var(--vela-glass-border);
+      box-shadow:inset 0 1px var(--vela-glass-highlight);
+    }
+    /* The player band floats over the scroller with the same vocabulary and
+       the one soft outer shadow of the shell. */
+    .native-app:is(:not([data-app-scale]),[data-app-scale="100"]):not(:has(.player-error)):not(:has(.preparation-progress)) .native-player {
+      position:relative; z-index:40;
+      background:var(--vela-glass-bg); color:var(--vela-glass-text);
+      -webkit-backdrop-filter:blur(var(--vela-glass-blur));
+      backdrop-filter:blur(var(--vela-glass-blur));
+      border-top-color:var(--vela-glass-border);
+      box-shadow:inset 0 1px var(--vela-glass-highlight),var(--vela-glass-shadow);
+    }
+    /* A caption on a glass band cannot use the quiet or the muted role: over a
+       bright cover it falls below the text threshold. The hierarchy is carried
+       by the size and the weight, never by the opacity of the text. */
+    .native-app:is(:not([data-app-scale]),[data-app-scale="100"]):not(:has(.player-error)):not(:has(.preparation-progress)) .native-player .player-sub,
+    .native-app:is(:not([data-app-scale]),[data-app-scale="100"]):not(:has(.player-error)):not(:has(.preparation-progress)) .native-player .player-time,
+    .native-app:is(:not([data-app-scale]),[data-app-scale="100"]):not(:has(.player-error)):not(:has(.preparation-progress)) .native-player .player-artist,
+    .native-app:is(:not([data-app-scale]),[data-app-scale="100"]):not(:has(.player-error)):not(:has(.preparation-progress)) .native-player .player-album,
+    .native-app:is(:not([data-app-scale]),[data-app-scale="100"]):not(:has(.player-error)):not(:has(.preparation-progress)) .native-player .player-kind,
+    .native-app:is(:not([data-app-scale]),[data-app-scale="100"]):not(:has(.player-error)):not(:has(.preparation-progress)) .native-player .player-source-label,
+    .native-app:is(:not([data-app-scale]),[data-app-scale="100"]):not(:has(.player-error)):not(:has(.preparation-progress)) .native-player .player-source-value,
+    .native-app:is(:not([data-app-scale]),[data-app-scale="100"]):not(:has(.player-error)):not(:has(.preparation-progress)) .native-topbar small {
+      color:var(--vela-glass-text);
+    }
+  }
+}
+
+/* DR08 reduced motion: the glass is a static surface, so nothing on the two
+   bands animates, the eight duration roles read 0ms and the press transform
+   is gone. The global `animation:none` / `transition:none !important` override
+   above stays in force; this states the contract for the bands themselves. */
+@media (prefers-reduced-motion:reduce) {
+  .native-app {
+    --vela-motion-instant:0ms;
+    --vela-motion-quick:0ms;
+    --vela-motion-overlay:0ms;
+    --vela-motion-exit:0ms;
+    --vela-motion-panel:0ms;
+    --vela-motion-skeleton:0ms;
+    --vela-motion-reorder:0ms;
+    --vela-motion-artwork:0ms;
+  }
+  .native-player,.native-topbar,
+  .native-player::before,.native-topbar::before {
+    transition:none!important; animation:none!important;
+  }
+  .native-player .native-play-toggle:active:not(:disabled),
+  .native-player .icon-button:active:not(:disabled),
+  .native-topbar .icon-button:active:not(:disabled) {
+    transform:none!important;
+  }
+}

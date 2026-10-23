@@ -1,5 +1,95 @@
 # Verified0.12.0 package and preserved runtime checkpoint
 
+## DR-08 the verified Linux presentation parity — 2026-10-23
+
+Only the Linux native presentation changed: `apps/desktop/style.css`,
+`apps/desktop/examples/native-ui-qa.js`, `apps/desktop/examples/native-ui-qa.rs`,
+`scripts/verify_native_client.py` and the new
+`scripts/native_band_contrast.py`. The audio adapter, the HTTP/account
+boundary, the MPRIS observer, the session store, the shared playback model, the
+server, the domain API and the web client are untouched.
+
+### The commands and their real output
+
+| Command | Result |
+| --- | --- |
+| `cargo fmt --all -- --check` | exit 0 |
+| `cargo clippy --locked -p vela-desktop --all-targets --features native-qa -- -D warnings` | exit 0, no warnings |
+| `cargo clippy --locked --workspace --all-targets -- -D warnings` | exit 0, no warnings |
+| `cargo test --locked -p vela-desktop` | `129 passed; 0 failed; 3 ignored` (the 3 are the opt-in audio/MPRIS tests) |
+| `cargo build --locked -p vela-desktop --example native-ui-qa --features native-qa` | exit 0 |
+| `cargo build --locked -p vela-server` | exit 0 |
+| `DISPLAY=:99 python3 scripts/verify_native_client.py --backend x11 --server target/debug/vela-server --test-peer --evidence target/checks/dr08-native` | **exit 0** — `report.json` `ok=true`, **300 checks**, **21 screenshots**, 0 temporary originals; the separate reduced-motion window `reduced-report.json` `ok=true`, 8 checks, `native-reduced-glass-dark.png` |
+| `python3 scripts/native_band_contrast.py --evidence target/checks/dr08-native --report report.json` | **exit 0** — verdict `PASS`, 0 failures, 26 glass frames measured |
+
+The pre-change baseline is preserved and was not overwritten:
+`target/checks/dr08-baseline-native/` (263 checks, 15 PNG). The new evidence is
+`target/checks/dr08-native/` with `report.json`, `reduced-report.json`,
+`native-player-band-glass-dark.png`, `native-player-band-glass-light.png`,
+`native-topbar-glass-dark.png`, `native-player-band-glass-scrolled-dark.png`,
+`native-compact-fallback-light.png` and `native-reduced-glass-dark.png`.
+
+### What the window actually measured
+
+- **Glass.** The player band computes `backdrop-filter: blur(16px)` over
+  `rgba(19, 21, 19, 0.85)` and the topbar `blur(12px)` over the same role.
+  Exactly two elements of the shell carry a backdrop filter
+  (`header.native-topbar`, `footer.native-player`); the sidebar, the rows and
+  the scroller carry none.
+- **The underlap is real.** At 1280×840 the scroller reaches `839.98px` while
+  the band starts at `727.98px`. In the same positive condition at 1280×500 the
+  real catalog (804px of content in a 500px scrollport) was observed passing
+  under the band, and the last row still cleared it (`row bottom 262px`,
+  `player top 388px`). The last focus target stayed visible above the band.
+- **The band is 112px and both ranges are 44px.** The band height is read from
+  `--vela-player-height`; the seek and the volume inputs both measure 44px.
+- **The contrast is reported by two separately named methods.**
+  *Computed composite over live intersecting backgrounds* (the driver, live
+  computed values): worst band text **16.476:1** (dark) / **14.547:1** (light),
+  worst glyph **6.976:1** / **4.536:1**, focus ring **13.954:1**.
+  *Rendered pixel sample* (`scripts/native_band_contrast.py`, the captured PNG):
+  the worst sampled pixel contrast over 26 glass frames is **12.775:1** (dark
+  player) and **13.047:1** (light player).
+- **The compact fallback is honest.** At 640×700: no backdrop layer,
+  `backdrop-filter: none` on both bands, the opaque player and canvas roles
+  (`rgb(255, 255, 255)` / `rgb(244, 247, 243)`), `scroll bottom 537px = player
+  top 537px`, the content keeps its own 24px bottom inset, and every control
+  stays reachable.
+- **The reduced-motion branch is a separate real window process** with GTK
+  animations disabled for that process only: `matchMedia('(prefers-reduced-motion:
+  reduce)')` is true, the eight duration roles read `0ms`, both bands report
+  `transition-duration 0s` and `animation-name none`, and the same two glass
+  bands are present.
+- **The unchanged contracts were re-measured in the same window:** one
+  `.native-player`, one `[data-audio-generation]`, zero `audio`/`video`/`iframe`
+  elements, exactly one output stream on the owned null sink, and the source,
+  the position and the queue preserved across the theme, the app-size sweep and
+  the navigation.
+
+### One pre-existing driver race was repaired
+
+`apps/desktop/examples/native-ui-qa.js` read the settled library grid columns
+while the library request was already pending. A settled row that had just
+been replaced by the skeleton list made the driver call
+`getComputedStyle(null)`, which aborted the run under load. The value is now
+read while the library is settled, before the request is submitted. The check
+compares the same two numbers as before — only the moment of the read moved.
+The failure was reproduced once in this session and is preserved as
+`target/checks/dr08-native-final/report.json` (`failure: "Argument 1
+('element') to Window.getComputedStyle must be an instance of Element"`, 33
+checks).
+
+### What was not run
+
+Screen reader and Orca, physical audio output, a Wayland session, a background
+session, a package/installer build, Docker and every non-Linux target are
+`NOT_RUN`. The web regression gate was executed as a regression gate only — no
+web file changed in this increment: `cargo build --locked -p vela-web --target
+wasm32-unknown-unknown --release` exit 0, `scripts/build-web.sh` exit 0
+("Web assets built in dist/"), and `npx playwright test` in `tests/browser`
+**90 passed / 1 skipped (6.9m), exit 0** in Chromium. Firefox was not run in
+this increment.
+
 ## DR-06 the music in the first phone screen — 2026-10-22
 
 The package changes the **density** of the mobile composition. Nothing in the

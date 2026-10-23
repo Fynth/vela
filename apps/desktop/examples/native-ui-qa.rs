@@ -249,6 +249,14 @@ fn known_capture(name: &str) -> bool {
             | "public-search-dark"
             | "player-band-dark"
             | "player-band-narrow-light"
+            // DR08: the measured glass bands of the native shell. Every name
+            // states the real theme of the frame it captures.
+            | "player-band-glass-dark"
+            | "player-band-glass-light"
+            | "player-band-glass-scrolled-dark"
+            | "topbar-glass-dark"
+            | "compact-fallback-light"
+            | "reduced-glass-dark"
             | "offline-dark"
             | "preparation-dark"
             | "preparation-compact-dark"

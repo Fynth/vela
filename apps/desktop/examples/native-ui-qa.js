@@ -38,6 +38,192 @@ const near = (actual, expected, tolerance = 1) => Number.isFinite(actual) && Mat
 const box = selector => el(selector)?.getBoundingClientRect();
 const cssToken = (node, name) => getComputedStyle(node).getPropertyValue(name).trim();
 const cssPx = (node, name) => parseFloat(getComputedStyle(node)[name]) || 0;
+// DR08 colour helpers. A colour is read from a live computed value, never from
+// a hard-coded expectation: the composite is built from the real glass role and
+// the real background colours of the elements that intersect the band.
+const parseColor = value => {
+  const text = String(value || '').trim();
+  const hex = /^#([0-9a-f]{3,8})$/i.exec(text);
+  if (hex) {
+    let digits = hex[1];
+    if (digits.length === 3 || digits.length === 4) digits = digits.split('').map(digit => digit + digit).join('');
+    if (digits.length !== 6 && digits.length !== 8) return null;
+    const packed = parseInt(digits.slice(0, 6), 16);
+    if (!Number.isFinite(packed)) return null;
+    return {r: (packed >> 16) & 255, g: (packed >> 8) & 255, b: packed & 255,
+      a: digits.length === 8 ? parseInt(digits.slice(6, 8), 16) / 255 : 1};
+  }
+  const rgb = /^rgba?\(([^)]+)\)$/i.exec(text);
+  if (rgb) {
+    const parts = rgb[1].split(/[,\s/]+/).filter(Boolean).map(Number);
+    if (parts.length < 3 || parts.slice(0, 3).some(part => !Number.isFinite(part))) return null;
+    return {r: parts[0], g: parts[1], b: parts[2], a: parts.length > 3 && Number.isFinite(parts[3]) ? parts[3] : 1};
+  }
+  return null;
+};
+const compositeOver = (top, bottom) => {
+  const alpha = Math.min(1, Math.max(0, top.a));
+  return {r: top.r * alpha + bottom.r * (1 - alpha), g: top.g * alpha + bottom.g * (1 - alpha),
+    b: top.b * alpha + bottom.b * (1 - alpha), a: 1};
+};
+const relativeLuminance = color => {
+  const channel = value => { const c = value / 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+  return 0.2126 * channel(color.r) + 0.7152 * channel(color.g) + 0.0722 * channel(color.b);
+};
+const contrastRatio = (a, b) => {
+  if (!a || !b) return 0;
+  const first = relativeLuminance(a), second = relativeLuminance(b);
+  return (Math.max(first, second) + 0.05) / (Math.min(first, second) + 0.05);
+};
+const describeNode = node => {
+  const classes = (node.getAttribute('class') || '').trim().split(/\s+/).filter(Boolean).slice(0, 2).join('.');
+  return classes ? `${node.tagName.toLowerCase()}.${classes}` : node.tagName.toLowerCase();
+};
+// DR08: the sample points of one band. A point is inside the band and outside
+// every control and every real text box of that band, so a pixel read at that
+// point is the rendered background of the band and not a glyph. The text boxes
+// are the client rects of the text nodes themselves, not the block boxes of
+// their elements, so a long caption does not black out the whole band.
+const bandSamplePoints = band => {
+  const rect = band.getBoundingClientRect();
+  const blockers = [];
+  const walker = document.createTreeWalker(band, NodeFilter.SHOW_TEXT);
+  let node = walker.nextNode();
+  while (node) {
+    if ((node.textContent || '').trim()) {
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      for (const candidate of range.getClientRects()) {
+        if (candidate.width > 0 && candidate.height > 0) blockers.push(candidate);
+      }
+    }
+    node = walker.nextNode();
+  }
+  for (const candidate of band.querySelectorAll('button,input,svg,img,label,progress,select,textarea')) {
+    const box = candidate.getBoundingClientRect();
+    if (box.width > 0 && box.height > 0) blockers.push(box);
+  }
+  const points = [];
+  for (let y = rect.top + 3; y < rect.bottom - 3; y += 5) {
+    for (let x = rect.left + 4; x < rect.right - 4; x += 9) {
+      if (blockers.some(candidate => x > candidate.left - 1 && x < candidate.right + 1 && y > candidate.top - 1 && y < candidate.bottom + 1)) continue;
+      points.push({x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10});
+    }
+  }
+  const stride = Math.max(1, Math.ceil(points.length / 240));
+  return points.filter((point, index) => index % stride === 0);
+};
+// DR08: the measured geometry and paint of one band. The report keeps it so the
+// separate pixel script can read the same rectangle, the same sample points and
+// the same real text colours of that band.
+const bandTextColors = band => {
+  const colors = [];
+  for (const node of band.querySelectorAll('*')) {
+    if (node.classList.contains('sr-only') || node.closest('.sr-only')) continue;
+    const candidate = node.getBoundingClientRect();
+    if (candidate.width < 2 || candidate.height < 2) continue;
+    if (!(node.textContent || '').trim()) continue;
+    if ([...node.children].some(child => (child.textContent || '').trim())) continue;
+    const color = getComputedStyle(node).color;
+    if (color && !colors.includes(color)) colors.push(color);
+  }
+  return colors;
+};
+const bandLayout = selector => {
+  const node = el(selector);
+  if (!node) return null;
+  const rect = node.getBoundingClientRect();
+  const style = getComputedStyle(node);
+  return {selector, x: rect.x, y: rect.y, width: rect.width, height: rect.height,
+    backgroundColor: style.backgroundColor, color: style.color,
+    backdropFilter: style.backdropFilter || style.webkitBackdropFilter || 'none',
+    borderTopColor: style.borderTopColor, borderBottomColor: style.borderBottomColor,
+    textColors: bandTextColors(node), samples: bandSamplePoints(node)};
+};
+// DR08: the glass evidence of one band, measured from the live values. The
+// composite is the glass role over the real background colours of the elements
+// that intersect the band rectangle, so the method is a computed composite over
+// live intersecting backgrounds — not a pixel measurement. The pixel evidence is
+// the separate scripts/native_band_contrast.py, which reads the rendered PNG.
+const bandEvidence = band => {
+  const rect = band.getBoundingClientRect();
+  const style = getComputedStyle(band);
+  const app = el('.native-app');
+  const glass = parseColor(cssToken(app, '--vela-glass-bg')) || parseColor(style.backgroundColor);
+  const stackBackground = node => {
+    const layers = [];
+    let current = node;
+    while (current && current !== document.documentElement) {
+      const background = parseColor(getComputedStyle(current).backgroundColor);
+      if (background && background.a > 0.001) layers.push(background);
+      if (current === app) break;
+      current = current.parentElement;
+    }
+    let result = {r: 0, g: 0, b: 0, a: 0};
+    for (let index = layers.length - 1; index >= 0; index--) result = compositeOver(layers[index], result);
+    return result;
+  };
+  const intersecting = [...app.querySelectorAll('*')].filter(node => {
+    if (node === band || band.contains(node)) return false;
+    const candidate = node.getBoundingClientRect();
+    if (candidate.width < 1 || candidate.height < 1) return false;
+    if (candidate.bottom <= rect.top + 1 || candidate.top >= rect.bottom - 1) return false;
+    const background = parseColor(getComputedStyle(node).backgroundColor);
+    return background && background.a > 0.02;
+  });
+  const backgrounds = intersecting.map(node => ({
+    source: describeNode(node), composite: compositeOver(glass, stackBackground(node)), raw: stackBackground(node),
+  }));
+  if (!backgrounds.length) backgrounds.push({source: 'app background', composite: compositeOver(glass, stackBackground(app)), raw: stackBackground(app)});
+  const worstBackground = color => backgrounds
+    .map(background => ({source: background.source, ratio: contrastRatio(color, background.composite), composite: background.composite}))
+    .sort((first, second) => first.ratio - second.ratio)[0];
+  const textNodes = [...band.querySelectorAll('*')].filter(node => {
+    if (node.classList.contains('sr-only') || node.closest('.sr-only')) return false;
+    const candidate = node.getBoundingClientRect();
+    if (candidate.width < 2 || candidate.height < 2) return false;
+    if (!(node.textContent || '').trim()) return false;
+    return ![...node.children].some(child => (child.textContent || '').trim());
+  });
+  const textPairs = textNodes.map(node => {
+    const color = parseColor(getComputedStyle(node).color);
+    if (!color) return null;
+    const worst = worstBackground(color);
+    return {source: describeNode(node), color, ratio: worst.ratio, background: worst.source, composite: worst.composite};
+  }).filter(Boolean).sort((first, second) => first.ratio - second.ratio);
+  // A glyph is read against its own opaque surface when it has one (the play
+  // circle), otherwise against the band composite.
+  const localSurface = node => {
+    let current = node.parentElement;
+    while (current && current !== band) {
+      const background = parseColor(getComputedStyle(current).backgroundColor);
+      if (background && background.a >= 0.9) return background;
+      current = current.parentElement;
+    }
+    return null;
+  };
+  const glyphPairs = [...band.querySelectorAll('svg')].map(node => {
+    const color = parseColor(getComputedStyle(node).color);
+    if (!color) return null;
+    const surface = localSurface(node);
+    const against = surface ? {source: 'own surface', composite: surface} : backgrounds
+      .map(background => ({source: background.source, composite: background.composite}))
+      .sort((first, second) => contrastRatio(color, first.composite) - contrastRatio(color, second.composite))[0];
+    return {source: describeNode(node), color, ratio: contrastRatio(color, against.composite), background: against.source};
+  }).filter(Boolean).sort((first, second) => first.ratio - second.ratio);
+  const accent = parseColor(cssToken(app, '--vela-primary'));
+  const accentWorst = worstBackground(accent);
+  return {rect, style, glass, backgrounds, textPairs, glyphPairs, accentWorst};
+};
+const sameColor = (first, second) => Boolean(first && second)
+  && Math.abs(first.r - second.r) < 0.5 && Math.abs(first.g - second.g) < 0.5
+  && Math.abs(first.b - second.b) < 0.5 && Math.abs(first.a - second.a) < 0.005;
+const backdropLayers = () => [...document.querySelectorAll('.native-app,.native-app *')].filter(node => {
+  if (!node.getClientRects().length) return false;
+  const style = getComputedStyle(node);
+  const filter = style.backdropFilter || style.webkitBackdropFilter || 'none';
+  return filter && filter !== 'none';
+});
 const fontFamilyOf = node => getComputedStyle(node).fontFamily.replace(/["']/g, '').replace(/\s+/g, ' ').trim();
 const fontFaceList = () => {
   const faces = [];
@@ -63,6 +249,11 @@ const layoutSnapshot = name => {
   const edges = (style, prefix) => Object.fromEntries(['top', 'right', 'bottom', 'left'].map(edge => [edge, number(style[prefix + edge[0].toUpperCase() + edge.slice(1)])]));
   return {
     name, title: document.title, viewport: {width: innerWidth, height: innerHeight, devicePixelRatio},
+    // DR08: the measured band geometry and the band sample points travel with
+    // the capture, so scripts/native_band_contrast.py can read the very same
+    // rectangle and the very same points from this report.
+    bands: {player: bandLayout('.native-player'), topbar: bandLayout('.native-topbar'),
+      theme: el('.native-app')?.dataset.theme || null, appScale: el('.native-app')?.dataset.appScale || null},
     elements: nodes.map(node => {
       const rect = node.getBoundingClientRect(), style = getComputedStyle(node), tag = node.tagName.toLowerCase();
       const interactive = ['button', 'input', 'select', 'summary', 'a'].includes(tag);
@@ -240,6 +431,45 @@ if (config.windowOnly) {
     });
     const fps = (sample.frames*1000/sample.elapsed).toFixed(1);
     dioxus.send({ok:true, checks:[`rAF ${fps} fps over ${sample.elapsed.toFixed(0)}ms`, `dpr=${devicePixelRatio} viewport=${innerWidth}x${innerHeight} screen=${screen.width}x${screen.height}`]});
+  } catch(error) { dioxus.send({ok:false, checks, failure:String(error.message)}); }
+} else if (config.sessionPhase === 'reduced') {
+  // DR08: the reduced-motion branch is proven in a real WebKitGTK process. The
+  // GTK animations setting is off for this process only, so WebKitGTK reports
+  // the reduced-motion media feature and the stylesheet's own reduce block
+  // applies to the two bands.
+  try {
+    const reducedTrace = await resizeExact(1280, 840);
+    assert(Math.abs(innerWidth - 1280) <= 2, `The reduced-motion window runs at 1280px (actual ${innerWidth}px, trace ${JSON.stringify(reducedTrace)})`);
+    assert(window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+      'The native window reports the reduced-motion media feature');
+    await wait(() => button('Sign in') && !button('Sign in').disabled, 'Native output initialization');
+    fill('#native-origin', config.origin); fill('#native-username', config.username); fill('#native-password', config.password);
+    el('.signin-form form').requestSubmit();
+    await wait(() => document.querySelectorAll('[data-native-track-id]').length === 3, 'Actual private library under reduced motion');
+    const reducedApp = el('.native-app');
+    assert(reducedApp.dataset.theme === 'dark', `The reduced-motion frame is the dark theme (${reducedApp.dataset.theme})`);
+    const motionRoles = ['--vela-motion-instant', '--vela-motion-quick', '--vela-motion-overlay', '--vela-motion-exit',
+      '--vela-motion-panel', '--vela-motion-skeleton', '--vela-motion-reorder', '--vela-motion-artwork'];
+    const reducedValues = motionRoles.map(role => `${role}=${cssToken(reducedApp, role)}`);
+    assert(motionRoles.every(role => cssToken(reducedApp, role) === '0ms'),
+      `DR08 the eight duration roles read 0ms under reduced motion (${reducedValues.join(', ')})`);
+    const reducedPlayer = el('.native-player'), reducedTopbar = el('.native-topbar');
+    const reducedPlayerStyle = getComputedStyle(reducedPlayer), reducedTopbarStyle = getComputedStyle(reducedTopbar);
+    const zeroed = value => value.split(',').every(part => parseFloat(part) === 0);
+    assert(zeroed(reducedPlayerStyle.transitionDuration) && zeroed(reducedTopbarStyle.transitionDuration)
+      && reducedPlayerStyle.animationName === 'none' && reducedTopbarStyle.animationName === 'none',
+      `DR08 the bands animate nothing under reduced motion (player transition "${reducedPlayerStyle.transitionDuration}" animation "${reducedPlayerStyle.animationName}"; topbar transition "${reducedTopbarStyle.transitionDuration}" animation "${reducedTopbarStyle.animationName}")`);
+    const reducedLayers = backdropLayers();
+    const reducedBlur = reducedPlayerStyle.backdropFilter || reducedPlayerStyle.webkitBackdropFilter || 'none';
+    assert(reducedLayers.length === 2 && reducedBlur.includes('blur(16px)'),
+      `DR08 the reduced-motion window keeps the same two glass bands (${reducedLayers.length} layers, player blur "${reducedBlur}")`);
+    const reducedEvidence = bandEvidence(reducedPlayer);
+    const reducedWorst = reducedEvidence.textPairs[0];
+    assert(reducedWorst && reducedWorst.ratio >= 4.5,
+      `DR08 the reduced-motion band text keeps at least 4.5:1 (worst ${reducedWorst?.ratio.toFixed(3)}:1, ${reducedWorst?.source} on ${reducedWorst?.background})`);
+    checks.push(`DR08 reduced motion at ${innerWidth}x${innerHeight}: matchMedia reduce=${window.matchMedia('(prefers-reduced-motion: reduce)').matches}, ${reducedValues.join(', ')}, player transition "${reducedPlayerStyle.transitionDuration}" animation "${reducedPlayerStyle.animationName}", ${reducedLayers.length} backdrop layers, player blur "${reducedBlur}", worst text ${reducedWorst?.ratio.toFixed(3)}:1`);
+    await capture('reduced-glass-dark');
+    dioxus.send({ok:true, checks, viewportEvidence:[{actualWidth:innerWidth,actualHeight:innerHeight,mode:'reduced motion, GTK animations disabled for this process'}]});
   } catch(error) { dioxus.send({ok:false, checks, failure:String(error.message)}); }
 } else if (config.sessionPhase === 'resume') {
   try {
@@ -443,11 +673,14 @@ try {
   });
   skeletonObserver.observe(document.body, {childList: true, subtree: true, attributes: true, attributeFilter: ['data-loading', 'aria-busy']});
   if (!el('[data-native-track-id]')) throw new Error('Skeleton fixture needs one settled library row first');
+  // The settled grid is read while the library is settled. Reading it while the
+  // request is pending is a race: the settled row may already be replaced by
+  // the skeleton list.
+  const settledColumns = getComputedStyle(el('[data-native-track-id]')).gridTemplateColumns;
   fill('#native-search', 'Signal'); el('.native-search').requestSubmit();
   try { await wait(() => pendingSkeletons.length > 0, 'Skeleton rows during the pending library request'); }
   catch { throw new Error(`Skeleton rows during the pending library request failed rows=${skeletons().length} loading=${el('.native-library')?.dataset.loading} dataset=${JSON.stringify(el('.native-library')?.dataset)}`); }
   const pendingSkeleton = pendingSkeletons[0];
-  const settledColumns = getComputedStyle(el('[data-native-track-id]')).gridTemplateColumns;
   assert(pendingSkeleton.count === 8 && pendingSkeleton.declared === '8', `Pending library request shows the bounded eight-row skeleton list (actual ${pendingSkeleton.count} rows, declared ${pendingSkeleton.declared || '-'})`);
   assert(pendingSkeleton.busy, 'Pending library region and skeleton table are marked aria-busy while the request is unanswered');
   assert(pendingSkeleton.status.includes('Loading your library'), `Skeleton keeps the honest library status label (actual "${pendingSkeleton.status}")`);
@@ -519,14 +752,21 @@ try {
   assert(app?.dataset.theme === 'dark', 'Baseline shell geometry is the shipped dark theme');
   assert(sidebarRect && near(sidebarRect.width, 216), `Desktop sidebar is the approved 216px (actual ${sidebarRect?.width})`);
   assert(topbarRect && near(topbarRect.height, 75), `Desktop topbar is the approved 75px (actual ${topbarRect?.height})`);
-  assert(playerRect && near(playerRect.height, 88), `Desktop player is the approved 88px (actual ${playerRect?.height})`);
+  // DR08: the band height is measured against the one length role that owns
+  // it. The number is read from the stylesheet, never hard-coded twice.
+  const playerToken = parseFloat(cssToken(app, '--vela-player-height'));
+  assert(Number.isFinite(playerToken) && playerRect && near(playerRect.height, playerToken),
+    `Desktop player height is the measured --vela-player-height (role ${cssToken(app, '--vela-player-height')}, actual ${playerRect?.height})`);
   assert(playerRect && near(playerRect.left, 0) && near(playerRect.width, innerWidth), `Player spans the full window (${playerRect?.left}..${playerRect?.right} of ${innerWidth})`);
   assert(sidebarRect && mainRect && topbarRect && scrollRect
     && near(mainRect.left, sidebarRect.right) && near(topbarRect.left, mainRect.left) && near(scrollRect.left, mainRect.left),
     `Sidebar offset is applied exactly once (sidebar right ${sidebarRect?.right}, main/topbar/scroll left ${mainRect?.left}/${topbarRect?.left}/${scrollRect?.left})`);
+  // DR08: with the underlap the scroller reaches the bottom of the window and
+  // the band floats over it. The band itself still ends at the window bottom,
+  // and the scroller is still the only vertical scroller.
   assert(scrollRect && playerRect
-    && near(scrollRect.bottom, playerRect.top) && near(playerRect.top + playerRect.height, innerHeight),
-    `The player reserve is one grid band (scroll bottom ${scrollRect?.bottom}, player top ${playerRect?.top}, viewport ${innerHeight})`);
+    && scrollRect.bottom > playerRect.top && near(playerRect.top + playerRect.height, innerHeight),
+    `The player band floats over the scroller and still ends at the window bottom (scroll bottom ${scrollRect?.bottom}, player top ${playerRect?.top}, viewport ${innerHeight})`);
   assert(getComputedStyle(scroll).overflowY === 'auto' && getComputedStyle(main).overflowY === 'hidden'
     && document.scrollingElement.scrollHeight <= innerHeight + 1,
     'The central content column is the only vertical scroller; the document itself does not scroll');
@@ -538,8 +778,10 @@ try {
   assert(inner && near(cssPx(inner, 'paddingLeft'), 33)
     && near(contentLeft, mainRect.left + 33),
     `Content gutter is applied once (inner padding ${inner ? cssPx(inner, 'paddingLeft') : '-'}, first content left ${contentLeft}, main left ${mainRect.left})`);
-  assert(cssPx(inner, 'paddingBottom') < playerRect.height,
-    `Content does not add a second player-height reserve (padding-bottom ${inner ? cssPx(inner, 'paddingBottom') : '-'}, player ${playerRect.height})`);
+  // DR08: the content owns the one bottom reserve that keeps the last row
+  // above the floating band: the measured band height plus the 32px tail.
+  assert(cssPx(inner, 'paddingBottom') === parseFloat(cssToken(app, '--vela-player-height')) + 32,
+    `The content reserve is the measured band height plus its 32px tail (padding-bottom ${inner ? cssPx(inner, 'paddingBottom') : '-'}px, band ${cssToken(app, '--vela-player-height')})`);
   assert(cssToken(app, '--vela-bg') === '#131513'
     && cssToken(app, '--vela-primary') === '#d3e9a5'
     && cssToken(app, '--vela-on-primary') === '#1b2511'
@@ -551,17 +793,19 @@ try {
     'The approved dark role values are exposed under the namespaced --vela-* layer');
   assert(cssToken(app, '--vela-sidebar-width') === '216px'
     && cssToken(app, '--vela-topbar-height') === '75px'
-    && cssToken(app, '--vela-player-height') === '88px'
+    && cssToken(app, '--vela-player-height') === '112px'
     && cssToken(app, '--sidebar').includes('216')
-    && cssToken(app, '--player').includes('88'),
+    && cssToken(app, '--player').includes('112'),
     'Length roles stay separate from text roles and alias the legacy --sidebar/--player names');
-  assert(getComputedStyle(app).backgroundColor === 'rgb(19, 21, 19)'
-    && getComputedStyle(sidebar).backgroundColor === 'rgb(14, 16, 15)'
-    && getComputedStyle(player).backgroundColor === 'rgb(16, 19, 15)'
-    && getComputedStyle(player).borderTopColor === 'rgb(52, 59, 46)'
+  // DR08: the canvas and the sidebar keep their opaque roles, while the band
+  // itself paints the glass role in this scene. The opaque player role is the
+  // documented fallback and is measured in the compact scene.
+  assert(sameColor(parseColor(getComputedStyle(app).backgroundColor), parseColor(cssToken(app, '--vela-bg')))
+    && sameColor(parseColor(getComputedStyle(sidebar).backgroundColor), parseColor(cssToken(app, '--vela-sidebar-bg')))
+    && sameColor(parseColor(getComputedStyle(player).backgroundColor), parseColor(cssToken(app, '--vela-glass-bg')))
     && getComputedStyle(app).color === 'rgb(243, 243, 237)'
     && getComputedStyle(el('.native-sidebar .native-brand > .vela-icon')).color === 'rgb(211, 233, 165)',
-    'Charcoal canvas, forest sidebar/player, warm-white text and pistachio mark render from those roles');
+    `Charcoal canvas, forest sidebar, the glass band, warm-white text and the pistachio mark render from those roles (app ${getComputedStyle(app).backgroundColor}, sidebar ${getComputedStyle(sidebar).backgroundColor}, player ${getComputedStyle(player).backgroundColor})`);
   checks.push(`TR01/TR02 desktop shell: ${Math.round(sidebarRect.width)}px sidebar, ${Math.round(topbarRect.height)}px topbar, ${Math.round(playerRect.height)}px player at ${innerWidth}x${innerHeight}, main left ${Math.round(mainRect.left)} = sidebar right ${Math.round(sidebarRect.right)}, content gutter ${cssPx(inner, 'paddingLeft')}px, scroll bottom ${Math.round(scrollRect.bottom)} = player top ${Math.round(playerRect.top)}`);
   await capture('library-dark');
   // TR10 typography screenshot: the same real library at the requested viewport, now
@@ -673,14 +917,17 @@ try {
     .map(node => ({label: (node.getAttribute('aria-label') || node.id || node.textContent).trim(), rect: node.getBoundingClientRect()}));
   const bandRect = bandNode().getBoundingClientRect();
   const trackZone = zoneRect('.player-track'), centerZone = zoneRect('.player-controls'), extrasZone = zoneRect('.player-extras');
-  assert(bandRect && near(bandRect.height, 88) && near(bandRect.left, 0) && near(bandRect.width, innerWidth),
-    `TR03 player is one full-width 88px band (actual ${bandRect?.width}x${bandRect?.height} at ${bandRect?.left},${bandRect?.top})`);
+  assert(bandRect && near(bandRect.height, parseFloat(cssToken(bandNode(), '--vela-player-height'))) && near(bandRect.left, 0) && near(bandRect.width, innerWidth),
+    `TR03 player is one full-width band of the measured length role (actual ${bandRect?.width}x${bandRect?.height} at ${bandRect?.left},${bandRect?.top}, role ${cssToken(bandNode(), '--vela-player-height')})`);
   assert(cssPx(bandNode(), 'paddingTop') === 10 && cssPx(bandNode(), 'paddingBottom') === 10
     && cssPx(bandNode(), 'paddingLeft') === 26 && cssPx(bandNode(), 'paddingRight') === 26,
     `TR03 band keeps the approved 10px 26px padding (${cssPx(bandNode(), 'paddingTop')}px ${cssPx(bandNode(), 'paddingLeft')}px)`);
-  assert(getComputedStyle(bandNode()).backgroundColor === 'rgb(16, 19, 15)'
-    && getComputedStyle(bandNode()).borderTopColor === 'rgb(52, 59, 46)',
-    'TR03 band renders the player surface and top border roles');
+  // DR08: in this scene the band paints the glass surface and the glass
+  // hairline. The opaque player surface and border roles are the documented
+  // fallback and are measured in the compact scene.
+  assert(sameColor(parseColor(getComputedStyle(bandNode()).backgroundColor), parseColor(cssToken(el('.native-app'), '--vela-glass-bg')))
+    && sameColor(parseColor(getComputedStyle(bandNode()).borderTopColor), parseColor(cssToken(el('.native-app'), '--vela-glass-border'))),
+    `TR03 band renders the glass surface and hairline roles (background ${getComputedStyle(bandNode()).backgroundColor}, border-top ${getComputedStyle(bandNode()).borderTopColor})`);
   assert(trackZone && centerZone && extrasZone && near(trackZone.left, bandRect.left + 26) && near(extrasZone.right, bandRect.right - 26),
     `TR03 three unboxed zones span the band exactly once (track ${trackZone?.left}, actions right ${extrasZone?.right}, band ${bandRect.left}..${bandRect.right})`);
   assert(trackZone.right <= centerZone.left + 1 && centerZone.right <= extrasZone.left + 1,
@@ -706,14 +953,18 @@ try {
   const seekInput = el('#native-seek');
   assert(seekInput.type === 'range' && Number(seekInput.max) > 0 && (seekInput.getAttribute('aria-valuetext') || '').includes(' of '),
     `TR03 seek is a real native range with an honest time announcement (${seekInput.getAttribute('aria-valuetext')})`);
-  assert(cssPx(seekInput, 'height') === 22 && parseFloat(cssToken(seekInput, '--vela-progress')) > 0,
-    `TR03 seek keeps the compact row and a state-driven filled rail (height ${cssPx(seekInput, 'height')}px, progress ${cssToken(seekInput, '--vela-progress')})`);
+  // DR08: both native ranges carry a real 44px pointer target. The rail and
+  // the thumb are unchanged; only the box around them is measured here.
+  assert(cssPx(seekInput, 'height') === 44 && seekInput.getBoundingClientRect().height === 44
+    && parseFloat(cssToken(seekInput, '--vela-progress')) > 0,
+    `TR03 seek keeps a real 44px target and a state-driven filled rail (height ${cssPx(seekInput, 'height')}px, rect ${seekInput.getBoundingClientRect().height}px, progress ${cssToken(seekInput, '--vela-progress')})`);
   assert(cssPx(el('.player-time'), 'fontSize') === 10
     && getComputedStyle(el('.player-time')).fontVariantNumeric.includes('tabular'),
     `TR03 player times use the approved 10px tabular role (actual ${cssPx(el('.player-time'), 'fontSize')}px ${getComputedStyle(el('.player-time')).fontVariantNumeric})`);
   const volumeSlider = el('#native-volume');
-  assert(volumeSlider.type === 'range' && near(cssPx(volumeSlider, 'width'), 65),
-    `TR03 volume keeps the approved 65px rail (actual ${cssPx(volumeSlider, 'width')}px)`);
+  assert(volumeSlider.type === 'range' && near(cssPx(volumeSlider, 'width'), 65)
+    && cssPx(volumeSlider, 'height') === 44 && volumeSlider.getBoundingClientRect().height === 44,
+    `TR03 volume keeps the approved 65px rail and a real 44px target (actual ${cssPx(volumeSlider, 'width')}x${cssPx(volumeSlider, 'height')}px)`);
   const muteState = () => el('[data-testid="native-player-mute"]')?.getAttribute('aria-pressed');
   const volumeLevel = () => Number(el('#native-volume')?.value);
   assert(muteState() === 'true' && button('Unmute'), 'TR03 zero engine volume is an honest muted state with a real Unmute action');
@@ -778,6 +1029,93 @@ try {
     'TR03 presents no expanded Now Playing surface; TR07 owns it and the band never fakes one');
   checks.push(`TR03 player band: ${Math.round(bandRect.width)}x${Math.round(bandRect.height)} at (${Math.round(bandRect.left)},${Math.round(bandRect.top)}), zones ${Math.round(trackZone.width)}/${Math.round(centerZone.width)}/${Math.round(extrasZone.width)}px, transport ${transportRects.map(rect => Math.round(rect.width)).join('/')}px, play circle ${Math.round(playCircle.width)}px, seek ${cssPx(seekInput, 'height')}px, volume ${Math.round(cssPx(volumeSlider, 'width'))}px, source "${(el('.player-source-value')?.textContent || '').trim()}"`);
   await capture('player-band-dark');
+  // ---------------------------------------------------------------------------
+  // DR08: the verified native glass bands. Every number below is measured in
+  // this real WebKitGTK window. The contrast method is a computed composite
+  // over the live intersecting backgrounds; the pixel evidence is the separate
+  // scripts/native_band_contrast.py run over the captured PNG.
+  // ---------------------------------------------------------------------------
+  const glassApp = el('.native-app');
+  const glassRole = parseColor(cssToken(glassApp, '--vela-glass-bg'));
+  const glassPlayer = el('.native-player'), glassTopbar = el('.native-topbar');
+  const glassPlayerStyle = getComputedStyle(glassPlayer), glassTopbarStyle = getComputedStyle(glassTopbar);
+  const playerBlur = glassPlayerStyle.backdropFilter || glassPlayerStyle.webkitBackdropFilter || 'none';
+  const topbarBlur = glassTopbarStyle.backdropFilter || glassTopbarStyle.webkitBackdropFilter || 'none';
+  assert(playerBlur.includes('blur(16px)'),
+    `DR08 the player band really blurs its backdrop (actual "${playerBlur}")`);
+  assert(topbarBlur.includes('blur(12px)'),
+    `DR08 the topbar really blurs its backdrop (actual "${topbarBlur}")`);
+  assert(sameColor(parseColor(glassPlayerStyle.backgroundColor), glassRole)
+    && sameColor(parseColor(glassTopbarStyle.backgroundColor), glassRole),
+    `DR08 both bands paint the glass role (role ${cssToken(glassApp, '--vela-glass-bg')}, player ${glassPlayerStyle.backgroundColor}, topbar ${glassTopbarStyle.backgroundColor})`);
+  const glassLayers = backdropLayers();
+  assert(glassLayers.length === 2 && glassLayers.length <= 3,
+    `DR08 the normal shell has exactly two backdrop layers (${glassLayers.map(node => describeNode(node)).join(', ')})`);
+  const transportRow = el('.player-controls .transport')?.getBoundingClientRect();
+  const seekRow = el('.player-controls .native-seek')?.getBoundingClientRect();
+  assert(transportRow && seekRow && transportRow.bottom <= seekRow.top + 1 && near(seekRow.height, 44),
+    `DR08 the transport row and the seek row are two independent 44px rows (transport ${Math.round(transportRow?.top)}..${Math.round(transportRow?.bottom)}, seek ${Math.round(seekRow?.top)}..${Math.round(seekRow?.bottom)})`);
+  const glassScroller = el('.native-scroll');
+  const glassBandRect = glassPlayer.getBoundingClientRect();
+  const glassScrollRect = glassScroller.getBoundingClientRect();
+  assert(glassScrollRect.bottom > glassBandRect.top,
+    `DR08 the scroller really reaches under the player band (scroll bottom ${glassScrollRect.bottom}, player top ${glassBandRect.top})`);
+  glassScroller.scrollTop = glassScroller.scrollHeight;
+  await sleep(350);
+  const glassRows = [...document.querySelectorAll('[data-native-track-id]')];
+  const glassLastRow = glassRows.length ? glassRows[glassRows.length - 1].getBoundingClientRect() : null;
+  assert(glassLastRow && glassLastRow.bottom <= glassBandRect.top + 1,
+    `DR08 the last catalog row stays entirely above the player band (row bottom ${glassLastRow?.bottom}, player top ${glassBandRect.top})`);
+  const lastFocusTarget = [...glassScroller.querySelectorAll('button,input,select,summary,a')]
+    .filter(node => node.getClientRects().length && !node.disabled).pop();
+  if (lastFocusTarget) {
+    lastFocusTarget.focus();
+    await sleep(220);
+    const focusRect = lastFocusTarget.getBoundingClientRect();
+    assert(document.activeElement === lastFocusTarget && focusRect.bottom <= glassBandRect.top + 1 && focusRect.top >= -1,
+      `DR08 the last focus target stays visible above the player band (${describeNode(lastFocusTarget)} ${Math.round(focusRect.top)}..${Math.round(focusRect.bottom)}, player top ${glassBandRect.top})`);
+  }
+  const playerEvidence = bandEvidence(glassPlayer);
+  const topbarEvidence = bandEvidence(glassTopbar);
+  const worstText = playerEvidence.textPairs[0];
+  const worstGlyph = playerEvidence.glyphPairs[0];
+  assert(worstText && worstText.ratio >= 4.5,
+    `DR08 the band text keeps at least 4.5:1 over the computed composite (worst ${worstText?.ratio.toFixed(3)}:1, ${worstText?.source} on ${worstText?.background})`);
+  assert(worstGlyph && worstGlyph.ratio >= 3,
+    `DR08 the band glyphs keep at least 3:1 over the computed composite (worst ${worstGlyph?.ratio.toFixed(3)}:1, ${worstGlyph?.source} on ${worstGlyph?.background})`);
+  assert(playerEvidence.accentWorst && playerEvidence.accentWorst.ratio >= 3,
+    `DR08 the focus ring keeps at least 3:1 over the computed composite (worst ${playerEvidence.accentWorst?.ratio.toFixed(3)}:1, ${playerEvidence.accentWorst?.source})`);
+  checks.push(`DR08 glass bands, method "computed composite over live intersecting backgrounds": player blur "${playerBlur}" over ${glassPlayerStyle.backgroundColor}, topbar blur "${topbarBlur}" over ${glassTopbarStyle.backgroundColor}, ${glassLayers.length} backdrop layers (${glassLayers.map(node => describeNode(node)).join('/')}), ${playerEvidence.backgrounds.length} intersecting background(s), worst text ${worstText?.ratio.toFixed(3)}:1 (${worstText?.source} on ${worstText?.background}), worst glyph ${worstGlyph?.ratio.toFixed(3)}:1 (${worstGlyph?.source}), focus ring ${playerEvidence.accentWorst?.ratio.toFixed(3)}:1, topbar worst text ${topbarEvidence.textPairs[0]?.ratio.toFixed(3)}:1`);
+  await capture('player-band-glass-dark');
+  glassTopbar.querySelector('button')?.focus();
+  await sleep(150);
+  await capture('topbar-glass-dark');
+  // The same positive condition in a shorter window: the real catalog is then
+  // taller than the scrollport, so the content visibly passes under the band
+  // and the last row still clears it.
+  await resizeExact(1280, 500);
+  const shortScroller = el('.native-scroll');
+  const shortBand = el('.native-player').getBoundingClientRect();
+  const shortRange = Math.max(0, shortScroller.scrollHeight - shortScroller.clientHeight);
+  let shortOverlap = false;
+  for (const fraction of [0, 0.25, 0.5, 0.75, 1]) {
+    shortScroller.scrollTop = Math.round(shortRange * fraction);
+    await sleep(140);
+    if ([...document.querySelectorAll('[data-native-track-id]')].some(row => {
+      const rect = row.getBoundingClientRect();
+      return rect.bottom > shortBand.top + 1 && rect.top < shortBand.bottom - 1;
+    })) shortOverlap = true;
+  }
+  shortScroller.scrollTop = shortRange;
+  await sleep(320);
+  const shortLast = [...document.querySelectorAll('[data-native-track-id]')].pop()?.getBoundingClientRect();
+  assert(shortOverlap,
+    `DR08 the real catalog passes under the player band in a shorter window (${innerWidth}x${innerHeight})`);
+  assert(shortLast && shortLast.bottom <= shortBand.top + 1,
+    `DR08 the last row still clears the band after scrolling (row bottom ${shortLast?.bottom}, player top ${shortBand.top})`);
+  checks.push(`DR08 underlap: scrollport ${Math.round(shortScroller.getBoundingClientRect().height)}px over a ${shortScroller.scrollHeight}px content, player top ${Math.round(shortBand.top)}, last row bottom ${Math.round(shortLast?.bottom || 0)}px, content observed under the band ${shortOverlap}`);
+  await capture('player-band-glass-scrolled-dark');
+  await resizeExact(1280, 840);
   const gen = generation(); const before = position();
   await click('Queue'); await sleep(450);
   assert(generation() === gen && position() > before, 'Navigation preserves native source and advancing position');
@@ -813,6 +1151,29 @@ try {
   assert(el('.native-app').dataset.theme === 'light', 'Functional light theme');
   assert(generation() === gen && phase() === 'Paused', 'Theme change preserves the native source, queue and paused state');
   await capture('queue-light');
+  // DR08: the same glass vocabulary in the light theme. The light adaptation
+  // overrides the four colour roles only, so the bands are the light glass and
+  // never the dark glass over light content.
+  await click('Library');
+  await wait(() => document.querySelectorAll('[data-native-track-id]').length === 3, 'Library after the light theme');
+  const lightApp = el('.native-app');
+  const lightGlass = parseColor(cssToken(lightApp, '--vela-glass-bg'));
+  const lightPlayerStyle = getComputedStyle(el('.native-player'));
+  const lightTopbarStyle = getComputedStyle(el('.native-topbar'));
+  assert(lightApp.dataset.theme === 'light' && lightGlass.r === 244 && lightGlass.g === 247 && lightGlass.b === 243,
+    `DR08 the light theme adapts the glass background role (${cssToken(lightApp, '--vela-glass-bg')})`);
+  assert(sameColor(parseColor(lightPlayerStyle.backgroundColor), lightGlass)
+    && sameColor(parseColor(lightTopbarStyle.backgroundColor), lightGlass),
+    `DR08 the light bands paint the light glass role (${lightPlayerStyle.backgroundColor} / ${lightTopbarStyle.backgroundColor})`);
+  const lightEvidence = bandEvidence(el('.native-player'));
+  const lightWorstText = lightEvidence.textPairs[0];
+  const lightWorstGlyph = lightEvidence.glyphPairs[0];
+  assert(lightWorstText && lightWorstText.ratio >= 4.5,
+    `DR08 the light band text keeps at least 4.5:1 over the computed composite (worst ${lightWorstText?.ratio.toFixed(3)}:1, ${lightWorstText?.source} on ${lightWorstText?.background})`);
+  assert(lightWorstGlyph && lightWorstGlyph.ratio >= 3,
+    `DR08 the light band glyphs keep at least 3:1 over the computed composite (worst ${lightWorstGlyph?.ratio.toFixed(3)}:1, ${lightWorstGlyph?.source})`);
+  checks.push(`DR08 light glass: role ${cssToken(lightApp, '--vela-glass-bg')}, player ${lightPlayerStyle.backgroundColor}, topbar ${lightTopbarStyle.backgroundColor}, worst text ${lightWorstText?.ratio.toFixed(3)}:1 (${lightWorstText?.source} on ${lightWorstText?.background}), worst glyph ${lightWorstGlyph?.ratio.toFixed(3)}:1`);
+  await capture('player-band-glass-light');
   // Theme/navigation/scale are presentation changes. None may replace the one
   // AudioEngine source or reset its paused position.
   const scaleSource = generation(), scalePosition = position();
@@ -919,8 +1280,12 @@ try {
     'Narrow shell removes the desktop sidebar and zeroes its layout role');
   assert(near(compactMainRect.left, 0) && near(compactTopbarRect.left, 0) && near(compactScrollRect.left, 0),
     `Narrow main/topbar/scroll start at 0, not an inherited sidebar offset (${compactMainRect.left}/${compactTopbarRect.left}/${compactScrollRect.left})`);
-  assert(compactPlayer && near(compactPlayer.left, 0) && near(compactPlayer.width, innerWidth) && compactPlayer.height >= 88,
-    `Narrow player stays full-width and at least the 88px baseline (${compactPlayer?.left}..${compactPlayer?.right}, ${compactPlayer?.height}px)`);
+  const compactPlayerRole = parseFloat(cssToken(compactApp, '--vela-player-height'));
+  assert(compactPlayer && near(compactPlayer.left, 0) && near(compactPlayer.width, innerWidth) && compactPlayer.height >= compactPlayerRole,
+    `Narrow player stays full-width and at least the measured length role (${compactPlayer?.left}..${compactPlayer?.right}, ${compactPlayer?.height}px, role ${compactPlayerRole}px)`);
+  const compactRanges = [...document.querySelectorAll('.native-player input[type=range]')];
+  assert(compactRanges.length === 2 && compactRanges.every(input => input.getBoundingClientRect().height >= 44),
+    `Narrow band keeps a real 44px target on both ranges (${compactRanges.map(input => `${Math.round(input.getBoundingClientRect().width)}x${Math.round(input.getBoundingClientRect().height)}`).join(',')})`);
   assert(near(compactPlayer.top + compactPlayer.height, innerHeight) && near(compactScrollRect.bottom, compactPlayer.top),
     `Narrow player reserve is one band below the scroller (scroll bottom ${compactScrollRect.bottom}, player top ${compactPlayer?.top})`);
   assert(getComputedStyle(compactScroll).overflowY === 'auto'
@@ -954,15 +1319,39 @@ try {
     `TR03 no narrow band control leaves the player (${narrowControls.map(control => control.label).join('/')})`);
   assert(narrowControls.every((control, at) => narrowControls.every((other, index) => at === index || !overlapping(control.rect, other.rect))),
     `TR03 narrow band controls never overlap (${narrowControls.map(control => `${control.label}:${Math.round(control.rect.width)}x${Math.round(control.rect.height)}`).join(',')})`);
-  assert(narrowControls.every(control => control.rect.width >= 44 && control.rect.height >= 22),
-    'TR03 narrow band keeps usable pointer boxes for every control');
+  assert(narrowControls.every(control => control.rect.width >= 44 && control.rect.height >= 44),
+    `TR03 narrow band keeps a 44px pointer box for every control (${narrowControls.map(control => `${control.label}:${Math.round(control.rect.width)}x${Math.round(control.rect.height)}`).join(',')})`);
   assert(narrowBandNode.scrollWidth <= narrowBandNode.clientWidth + 1,
     `TR03 narrow band has no clipped horizontal content (scroll ${narrowBandNode.scrollWidth} vs ${narrowBandNode.clientWidth})`);
   assert(button('Play') && !button('Pause') && muteState() === 'true' && button('Unmute'),
     'TR03 narrow band renders the real paused and muted states');
   checks.push(`TR03 narrow band: ${Math.round(narrowBand.width)}x${Math.round(narrowBand.height)} at 640px, track row bottom ${Math.round(narrowTrack.bottom)}, transport y ${Math.round(narrowCenter.top)}–${Math.round(narrowCenter.bottom)}, actions x ${Math.round(narrowExtras.left)}–${Math.round(narrowExtras.right)}, controls ${narrowControls.length}`);
+  // DR08: the compact scene is the honest fallback. The bands are opaque, the
+  // scroller keeps the original geometry and ends above the band, and no
+  // control is covered or clipped.
+  const compactPlayerStyle = getComputedStyle(el('.native-player'));
+  const compactTopbarStyle = getComputedStyle(el('.native-topbar'));
+  const compactLayers = backdropLayers();
+  const compactPlayerRoleColor = parseColor(cssToken(compactApp, '--vela-player-bg'));
+  const compactTopbarRoleColor = parseColor(cssToken(compactApp, '--vela-bg'));
+  assert(compactLayers.length === 0,
+    `DR08 the compact shell has no backdrop layer (${compactLayers.map(node => describeNode(node)).join(', ') || 'none'})`);
+  assert((compactPlayerStyle.backdropFilter || 'none') === 'none' && (compactTopbarStyle.backdropFilter || 'none') === 'none',
+    `DR08 the compact bands are not blurred (player "${compactPlayerStyle.backdropFilter}", topbar "${compactTopbarStyle.backdropFilter}")`);
+  assert(sameColor(parseColor(compactPlayerStyle.backgroundColor), compactPlayerRoleColor) && compactPlayerRoleColor.a === 1
+    && sameColor(parseColor(compactTopbarStyle.backgroundColor), compactTopbarRoleColor) && compactTopbarRoleColor.a === 1,
+    `DR08 the compact bands keep their opaque roles (player ${compactPlayerStyle.backgroundColor}, topbar ${compactTopbarStyle.backgroundColor})`);
+  assert(near(compactScrollRect.bottom, compactPlayer.top),
+    `DR08 the compact scroller still ends above the band (scroll bottom ${compactScrollRect.bottom}, player top ${compactPlayer.top})`);
+  assert(cssPx(el('.native-scroll'), 'marginTop') === 0 && cssPx(el('.native-scroll'), 'paddingTop') === 0,
+    `DR08 the compact scroller keeps the original offsets (margin ${cssPx(el('.native-scroll'), 'marginTop')}px, padding ${cssPx(el('.native-scroll'), 'paddingTop')}px)`);
+  assert(cssPx(el('.native-scroll-inner'), 'paddingBottom') === 24,
+    `DR08 the compact content keeps its own bottom inset (${cssPx(el('.native-scroll-inner'), 'paddingBottom')}px)`);
+  assert(compactApp.dataset.theme === 'light', `DR08 the compact fallback frame is the light theme (${compactApp.dataset.theme})`);
+  checks.push(`DR08 compact fallback at ${innerWidth}x${innerHeight}: player ${compactPlayerStyle.backgroundColor} over "${compactPlayerStyle.backdropFilter}", topbar ${compactTopbarStyle.backgroundColor} over "${compactTopbarStyle.backdropFilter}", ${compactLayers.length} backdrop layers, scroll bottom ${Math.round(compactScrollRect.bottom)} = player top ${Math.round(compactPlayer.top)}, content padding-bottom ${cssPx(el('.native-scroll-inner'), 'paddingBottom')}px`);
   await capture('player-band-narrow-light');
   await capture('compact-light');
+  await capture('compact-fallback-light');
   assert(document.documentElement.scrollWidth <= innerWidth + 1, 'Compact native window has no horizontal document overflow');
   await click('Clear queue'); await wait(() => phase() === 'Idle', 'Clear queue stops native audio');
   assert(document.querySelectorAll('[data-native-queue-index]').length === 0, 'Queue is cleared');

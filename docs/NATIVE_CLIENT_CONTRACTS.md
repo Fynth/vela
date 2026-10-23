@@ -334,6 +334,66 @@ account cannot see them. The real-window QA stops the fixture server, verifies t
 health probe fails, plays the saved original to advancing media time, and checks the
 audio/manifest exist at0600 and the v2 manifest carries a64-hex BLAKE3 digest.
 
+## DR-08 the verified Linux presentation parity — 2026-10-23
+
+DR-08 is a presentation-only increment of the Linux client. It changes
+`apps/desktop/style.css` and the native QA driver; it does not touch the
+audio adapter, the HTTP/account boundary, the MPRIS observer, the session
+store, the shared playback model, the server or the domain API. The one
+`AudioEngine` and its single output thread, the bounded command channel and
+the zero HTML media elements are unchanged and were re-measured in the same
+window.
+
+### The evidence classes are separate and none of them implies another
+
+| Class | What it proves here | How it was produced | What it does **not** prove |
+| --- | --- | --- | --- |
+| `COMPILES` | the workspace, the desktop crate with `--features native-qa` and the example build | `cargo fmt --all -- --check`, strict `cargo clippy --locked --workspace --all-targets -- -D warnings`, `cargo clippy --locked -p vela-desktop --all-targets --features native-qa -- -D warnings`, `cargo test --locked -p vela-desktop` (129 passed, 0 failed, 3 ignored), `cargo build --locked -p vela-desktop --example native-ui-qa --features native-qa`, `cargo build --locked -p vela-server` | any window, any pixel, any sound |
+| `WINDOW_TESTED` | the real WebKitGTK window at 1280×840, 1280×500 and 640×700 renders the two glass bands, the 112px band, two 44px ranges, the real underlap and the opaque compact fallback | `DISPLAY=:99 python3 scripts/verify_native_client.py --backend x11 --server target/debug/vela-server --test-peer --evidence target/checks/dr08-native` → exit 0, 300 checks, 21 screenshots, 0 temporary originals | that a human read the frame, that the blur is fast on other hardware, or that the sound was audible |
+| `INPUT_TESTED` | the real window answered real input: the theme toggle, the queue, the transport, the app-size stepper, the search, the playlist mutations and the two ranges keep one source, one position and one queue | the same run; the driver dispatches the real events and the real API calls | a screen reader, a keyboard-only session or a touch device |
+| `AUDIO_NULL_SINK_TESTED` | exactly one native output stream of this window process exists on the QA-owned null sink; the source, the position and the volume are one authority | the same run, `pactl` against the owned `vela_native_test_null` sink; the opt-in unit test `audio::tests::native_owned_null_sink_play_pause_seek_eof_replace_stop_and_cleanup` stays ignored and was **not** executed in this increment | physical audio, latency, volume calibration or any speaker |
+| `BACKGROUND_NOT_RUN` | the client was never sent to the background on this host, and no claim about a background session is made | not executed | anything about background behaviour |
+| `PACKAGING_NOT_RUN` | no package, archive, installer or release artifact was produced or re-verified for this increment | not executed | anything about packaging, signing or distribution |
+
+### What was measured in the window
+
+- The two bands are glass in the normal scene: the player blurs
+  `blur(16px)` over `rgba(19, 21, 19, 0.85)` and the topbar blurs
+  `blur(12px)` over the same role. Exactly **two** elements in the shell
+  carry a `backdrop-filter`; the sidebar, the rows, the queue rows and the
+  scroller carry none.
+- The underlap is real: the scroller reaches `839.98px` while the band
+  starts at `727.98px` in the 1280×840 window. In the same positive
+  condition at 1280×500 the real catalog (804px of content in a 500px
+  scrollport) was observed passing under the band, and the last row still
+  cleared it (`row bottom 262px`, `player top 388px`).
+- The band is 112px and both native ranges carry a real 44px target. The
+  transport row and the seek row are two independent 44px rows.
+- The contrast is reported by two different, separately named methods.
+  *Computed composite over live intersecting backgrounds* (the driver):
+  worst band text **16.476:1** (dark) and **14.547:1** (light), worst glyph
+  **6.976:1** and **4.536:1**, focus ring **13.954:1**.
+  *Rendered pixel sample* (`scripts/native_band_contrast.py` over the
+  captured PNG): 26 glass frames, the worst sampled pixel contrast
+  **12.775:1** (dark player) and **13.047:1** (light player); the script
+  exits 0 with 0 failures.
+- The compact scene at 640×700 is the honest fallback: no backdrop layer,
+  `backdrop-filter: none` on both bands, the opaque player and canvas roles,
+  `scroll bottom 537px = player top 537px`, the content keeps its own 24px
+  bottom inset, and every control stays reachable.
+- The reduced-motion branch is a separate real window process with GTK
+  animations disabled for that process only: `matchMedia('(prefers-reduced-motion: reduce)')`
+  is true, the eight duration roles read `0ms`, both bands report
+  `transition-duration 0s` and `animation-name none`, and the same two glass
+  bands are still there.
+
+### What was not measured
+
+Screen reader and Orca, physical audio output, a Wayland session, a
+background session, a package/installer build, Docker and every non-Linux
+target stay `NOT_RUN`. The desktop behind the window is never blurred by CSS
+`backdrop-filter`, and no such claim is made.
+
 ## Verification
 
 - `cargo fmt --all -- --check`; strict Clippy `-p vela-desktop --all-targets
@@ -442,6 +502,32 @@ audio/manifest exist at0600 and the v2 manifest carries a64-hex BLAKE3 digest.
   preserved as `target/checks/aud05-native-failed-run1/` and
   `target/checks/aud05-native-stale-green/`, and the final run above is the only
   evidence claimed.
+- DR-08 verified Linux presentation parity (2026-10-23): `cargo fmt --all --
+  --check` passed; strict Clippy `--workspace --all-targets` and `-p vela-desktop
+  --all-targets --features native-qa` passed; `cargo test --locked
+  -p vela-desktop` ran129 tests with129 passed,3 ignored (opt-in audio/MPRIS) and
+  0 failed; the `native-ui-qa` example and `vela-server` build. The real X11
+  native QA (`--test-peer`, owned null sink) exited0 with `report.json` ok=true
+  (**300 checks, 21 screenshots, 0 temporary originals**) and the separate
+  reduced-motion window ok=true (8 checks, `native-reduced-glass-dark.png`).
+  `python3 scripts/native_band_contrast.py --evidence target/checks/dr08-native
+  --report report.json` exited0 with verdict `PASS` and 0 failures over 26 glass
+  frames. Evidence: `target/checks/dr08-native/`
+  (`native-player-band-glass-dark.png`, `native-player-band-glass-light.png`,
+  `native-topbar-glass-dark.png`, `native-player-band-glass-scrolled-dark.png`,
+  `native-compact-fallback-light.png`, `native-reduced-glass-dark.png`,
+  `report.json`, `reduced-report.json`); the pre-change baseline is preserved as
+  `target/checks/dr08-baseline-native/` (263 checks, 15 PNG). Measured: the
+  player blurs `blur(16px)` over `rgba(19, 21, 19, 0.85)` and the topbar
+  `blur(12px)` over the same role, exactly two backdrop layers in the normal
+  shell and none in the compact fallback, the scroller reaches `839.98px` under
+  a band that starts at `727.98px`, the real catalog passes under the band in
+  the 1280×500 window while the last row still clears it (262px vs 388px), the
+  band is 112px with two real 44px ranges, the computed composite gives
+  16.476:1 (dark) / 14.547:1 (light) for the worst text and 6.976:1 / 4.536:1
+  for the worst glyph, and the rendered pixel sample gives 12.775:1 / 13.047:1.
+  NOT_RUN: screen reader, physical audio, a Wayland session, a background
+  session, packaging, Docker and every non-Linux target.
 - TR10 portable package (source `4ceafdc`, version0.12.6): the release build and
   `scripts/package-desktop-linux.sh` produced the archive above, and
   `scripts/verify_desktop_package.py --launch` passed (real `Vela Music` window,

@@ -438,6 +438,33 @@ def main():
                 for marker in (stop_request, stopped_ack):
                     marker.unlink(missing_ok=True)
                 environment.update({'VELA_NATIVE_QA_STOP_REQUEST': str(stop_request), 'VELA_NATIVE_QA_STOPPED_ACK': str(stopped_ack)})
+                # DR08: the reduced-motion branch is proven in a second, isolated
+                # window process. GTK animations are disabled for that process
+                # only, so WebKitGTK reports `prefers-reduced-motion: reduce` and
+                # the stylesheet's own reduce block applies to the two bands. The
+                # desktop settings of this machine are never changed. The run
+                # happens before the main fixture, because the main fixture stops
+                # the fixture server for its own offline scenario.
+                reduced_config = private / 'reduced-config'
+                (reduced_config / 'gtk-3.0').mkdir(parents=True, exist_ok=True)
+                (reduced_config / 'gtk-3.0' / 'settings.ini').write_text('[Settings]\ngtk-enable-animations=0\n')
+                reduced_report = evidence / 'reduced-report.json'
+                reduced_environment = {**environment,
+                    'XDG_CONFIG_HOME': str(reduced_config),
+                    'XDG_DATA_HOME': str(reduced_config / 'data'),
+                    'XDG_CACHE_HOME': str(reduced_config / 'cache'),
+                    'VELA_NATIVE_QA_SESSION_PHASE': 'reduced',
+                    'VELA_NATIVE_QA_REPORT': str(reduced_report)}
+                with (evidence / 'reduced-window.log').open('wb') as reduced_log:
+                    reduced_driver = subprocess.Popen([str(args.driver.resolve())], env=reduced_environment, stdout=reduced_log, stderr=subprocess.STDOUT)
+                    reduced_driver.wait(timeout=240)
+                if reduced_driver.returncode or not reduced_report.exists():
+                    raise RuntimeError('Reduced-motion native process failed')
+                reduced = json.loads(reduced_report.read_text())
+                if not reduced['result']['ok']:
+                    raise RuntimeError(f"Reduced-motion native window failed: {reduced['result'].get('failure')}")
+                if not all(image['passed'] for image in reduced['screenshots']):
+                    raise RuntimeError('Reduced-motion native window left a failed screenshot capture')
                 driver = subprocess.Popen([str(args.driver.resolve())], env=environment, stdout=window_log, stderr=subprocess.STDOUT)
                 while driver.poll() is None:
                     if stop_request.exists():
@@ -461,6 +488,13 @@ def main():
                     report.write_text(json.dumps(result, indent=2) + '\n')
                     print(json.dumps(result, indent=2))
                     return
+                result['reduced_motion'] = {'checks': reduced['result']['checks'],
+                    'screenshots': [image['name'] for image in reduced['screenshots']]}
+                result['result']['checks'] = result['result']['checks'] + reduced['result']['checks']
+                result['screenshots'] = result['screenshots'] + [
+                    {'name': image['name'], 'passed': image['passed'], 'error': image['error']}
+                    for image in reduced['screenshots']]
+                report.write_text(json.dumps(result, indent=2) + '\n')
                 offline_audio = list((private / 'home' / 'vela' / 'offline').glob('*/*/*.audio'))
                 offline_json = list((private / 'home' / 'vela' / 'offline').glob('*/*/*.json'))
                 if len(offline_audio) != 1 or len(offline_json) != 1:

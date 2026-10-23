@@ -1,5 +1,78 @@
 # Verified progress
 
+## DR-08 the verified Linux presentation parity — 2026-10-23
+
+The Linux client had the web client's *vocabulary* nowhere: its two floating
+bands were opaque, its content stopped above them, its range controls were
+22px tall and its band was the web's 88px number copied over. DR-08 moves the
+approved glass and motion **roles** into the native shell, makes the content
+really pass under the two bands, and gives both native ranges a real 44px
+pointer target.
+
+**What changed.**
+
+- `apps/desktop/style.css` — the canonical native layer declares the DR-01
+  glass roles (four colours, three blur sizes, the text alias), the eight
+  durations and the two curves. The explicit light theme and the System theme
+  under `prefers-color-scheme: light` override **only** the four colour
+  roles; the blur sizes, the durations and the curves are inherited, so the
+  themes cannot drift apart. `--vela-player-height` is now **112px**: two
+  independent 44px rows, 20px of vertical padding, one border pixel and three
+  spare pixels do not fit in 88px. A new `@supports`+`@media (min-width:1101px)`
+  block adds the underlap and the glass **only** when the app size is 100%,
+  there is no player error and no pending preparation; every other scene
+  keeps the original geometry and the opaque bands. `prefers-reduced-motion:
+  reduce` zeroes the eight duration roles and removes every band animation.
+- `apps/desktop/examples/native-ui-qa.js` — the driver measures the new band
+  instead of describing it: the real computed `backdrop-filter`, the real band
+  colour against the glass role, the number of backdrop layers, the real
+  underlap geometry, the last row and the last focus target above the band,
+  the measured 44px ranges, the measured band height, and the contrast of the
+  real band text and glyphs over the computed composite. The compact scene
+  measures the opaque fallback. A new reduced-motion phase runs in its own
+  window process.
+- `apps/desktop/examples/native-ui-qa.rs` — the six new capture names are
+  whitelisted, so a frame can never choose an arbitrary output path.
+- `scripts/verify_native_client.py` — the reduced-motion window runs before
+  the main fixture (the main fixture stops the fixture server for its own
+  offline scenario) with GTK animations disabled for that process only.
+- `scripts/native_band_contrast.py` — a new pixel measurement: it reads the
+  report and the captured PNGs, takes the band rectangle in CSS pixels times
+  the recorded device pixel ratio, samples the really rendered pixels inside
+  the band and outside every control and text box, and reports the worst
+  contrast against the real band text colour.
+- One pre-existing race in the same driver was repaired: it read the settled
+  library grid columns while the library request was already pending, so a
+  settled row that had just been replaced by the skeleton list made the
+  driver call `getComputedStyle(null)`. The value is now read while the
+  library is settled, before the request.
+
+**What was not changed.** The audio adapter, the HTTP/account boundary, the
+MPRIS observer, the session store, the shared playback model, the workspace
+manifest and lock, the migrations, the server, the domain API, the web client
+and every web asset. No new asset, no allowlist entry and no new font: the
+embedded Manrope data URIs are byte-identical.
+
+**Measured.** `cargo fmt --all -- --check` exit 0; strict Clippy for the
+workspace and for `-p vela-desktop --all-targets --features native-qa` exit 0;
+`cargo test --locked -p vela-desktop` 129 passed / 0 failed / 3 ignored; the
+real X11 native QA exited 0 with 300 checks, 21 screenshots and 0 temporary
+originals, and the separate reduced-motion window with 8 checks; the pixel
+contrast script exited 0 with verdict PASS over 26 glass frames. The band
+computes `blur(16px)` (player) and `blur(12px)` (topbar) over
+`rgba(19, 21, 19, 0.85)`, exactly two elements carry a backdrop filter, the
+scroller reaches 839.98px under a band that starts at 727.98px, the real
+catalog passes under the band in the 1280×500 window while the last row still
+clears it, the computed composite gives 16.476:1 (dark) / 14.547:1 (light) for
+the worst band text and the rendered pixels 12.775:1 / 13.047:1. Evidence:
+`target/checks/dr08-native/`; the pre-change baseline is preserved as
+`target/checks/dr08-baseline-native/`.
+
+**Still not run.** Screen reader and Orca, physical audio output, a Wayland
+session, a background session, a package/installer build, Docker and every
+non-Linux target. `forced-colors`, `print` and `prefers-reduced-transparency`
+are not claimed for the native shell.
+
 ## DR-03 the short answer that never delays the command — 2026-10-23
 
 The command and its visual answer had drifted apart: a button lifted itself
