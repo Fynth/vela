@@ -1,5 +1,103 @@
 # Verified0.12.0 package and preserved runtime checkpoint
 
+## TL-01 step 1 round 3 — the post-admission read observes the slot first (native) — 2026-10-24
+
+Round 3 closes the one remaining coordination P1 of round 2 and the test-layer
+defects both reviewers named. Only the native client and its private cache
+changed: `apps/desktop/src/client.rs`, `apps/desktop/src/media_cache.rs`. No web
+file, no CSS, no asset, no server file, no migration, no manifest and no lock
+file changed; `Cargo.lock` and `Cargo.toml` are byte-identical.
+
+### The defect and its fix
+
+`recheck_cache` — the cache read taken *after* the transfer admission — read the
+cache **before** it observed the single-flight slot of the key. A publication
+that ended inside that window was answered as a cold cache: the slot was already
+`ended` (or gone), `in_flight_publication` returned `None`, `recheck_cache`
+returned `None`, and `prepare` started a second full GET for a key whose bytes
+were already on disk. Measured on `13eabe8`: **`GETs=2, body_bytes=131072`**
+instead of `1 / 65536`, reproduced 10/10 by the deciding reviewer and by me on
+the same tree with the new regression.
+
+The slot is now captured before the read, exactly as in `cached_lease`, and the
+miss is answered with the bounded wait and a second read of the cache.
+
+### The commands and their real output
+
+| Command | Result |
+| --- | --- |
+| `cargo fmt --all -- --check` | exit 0 |
+| `cargo clippy --locked --workspace --all-targets -- -D warnings` | exit 0, no warnings |
+| `cargo test --locked -p vela-desktop -- --test-threads=2` | **`140 passed; 0 failed; 3 ignored`** |
+| `cargo test --locked -p vela-web` | `57 passed; 0 failed; 0 ignored` |
+| `cargo build --locked -p vela-web --target wasm32-unknown-unknown --release` | exit 0 |
+| `cargo build --locked -p vela-server` | exit 0 |
+| `cargo build --locked -p vela-desktop --example native-ui-qa --features native-qa` | exit 0 |
+| `DISPLAY=:99 python3 scripts/verify_native_client.py --backend x11 --server target/debug/vela-server --test-preparation --evidence target/checks/tl01-r3-native` | **exit 0** — `report.json` `result.ok=true`, **314 checks**, **24 screenshots**, `temporary_originals_after_exit=0`, engine `Rodio/CPAL, owned isolated null sink` |
+| the 12 publication tests, ten times in a row | `12 passed; 0 failed` in every one of the ten runs |
+
+The native run above is the **native window** evidence class: a real WebKitGTK
+window on the `:99` Xvfb display with one output stream on the QA-owned null
+sink. It is not a browser render and not hardware audio. No web file changed in
+this round, so no browser suite was run: `apps/web/**` is byte-identical and the
+web crate was exercised only by `cargo test -p vela-web` and the wasm build.
+
+The three ignored tests are `audio::tests::native_owned_null_sink_play_pause_seek_eof_replace_stop_and_cleanup`,
+`mpris::tests::real_session_bus_exposes_properties_and_forwards_controls` and
+`offline::tests::offline_copy_cost_and_cancel_latency` — all three are opt-in.
+
+### The new and changed tests
+
+| Test | What it proves |
+| --- | --- |
+| `a_publication_that_ends_between_the_post_admission_miss_and_the_decision_does_not_transfer_twice` (new) | A publication that ends exactly between the post-admission cache miss and the decision costs **1 GET / 65536 B**, not 2 / 131072. On the `13eabe8` ordering the same test fails with `left: 2, right: 1`. |
+| `a_publication_that_ends_after_an_expired_wait_does_not_transfer_twice` (new, round-3 review) | The first wait for a running publication runs out (200 ms here), the publication then finishes *inside* the post-admission read: **1 GET / 65536 B**, not 2 / 131072. This is the hole the deciding reviewer found in the first version of round 3 — the `if *waited { return Ok(None) }` branch skipped the second read. |
+| `a_sign_out_stops_a_running_publication` (rewritten) | The copy is held **inside** `copy_verified` after its first block is on disk (`media_cache::copy_gate`), so the sign-out cancels a copy that really started: the staging file exists while held (`1`), the entry and the sidecar never appear, and no staging file survives. The gate is removed **and released** by a drop guard, so a failing assertion produces one red test instead of a parked blocking worker. Mutating the publication to ignore the client lifetime makes it fail on `a sign-out must not publish a late cache entry`. |
+| `the_lease_is_returned_before_the_cache_copy_of_a_slow_body_finishes` (order made deterministic) | The publication gate is entered before the copy and released only after the lease was handed out, so `pause.finished == 0` while `!cached_audio.exists()` is a deterministic observation. The wall-clock pair is now a printed metric, not an assertion. |
+
+### The failure proofs, run by me on this host
+
+Every proof below was produced by mutating the round-3 tree, running the test and
+restoring the tree. **The panic line numbers in these transcripts belong to the
+mutated trees, not to the committed one**; the message and the numbers are the
+evidence.
+
+```
+# (a) The round-3 ordering reverted to 13eabe8 (in_flight_publication after the read):
+thread '...a_publication_that_ends_between_the_post_admission_miss_and_the_decision...' panicked:
+assertion `left == right` failed: a publication that ended between the post-admission miss and the decision must not cost a second body
+  left: 2
+ right: 1
+
+# (b) The `publication.ended()` branch removed again (the hole found in round-3 review):
+thread '...a_publication_that_ends_after_an_expired_wait_does_not_transfer_twice...' panicked:
+assertion `left == right` failed: a publication that ended after an expired wait must not cost a second body
+  left: 2
+ right: 1
+
+# (c) The publication ignoring the client lifetime (`&|| false` instead of `&|| lifetime.is_cancelled()`):
+thread '...a_sign_out_stops_a_running_publication...' panicked:
+a sign-out must not publish a late cache entry
+
+# (d) A wrong staging expectation (`1` -> `2`) inside the held copy, before the drop guard:
+#     the test binary HUNG (exit 124) instead of reporting a red test.
+#     After the guard releases the gate on drop: exit 101, one red test, no hang.
+```
+
+All four mutations were reverted and the suite was re-run green afterwards.
+The three reverse checks the reviewers asked for (ordering, lifetime, admission)
+also reproduced their expected failures.
+
+### What was not measured
+
+Progressive decode and Range playback, a real-process ENOSPC or eviction run,
+the production 200-entry/2 GiB budget, the ~8000 MiB staging load of 32 parallel
+250 MiB publications, hardware audio output, a Wayland session, screen readers,
+physical media keys and every non-Linux target. The browser surfaces were not
+re-rendered: no web file changed and only `cargo test -p vela-web` and the wasm
+build were executed for that crate. Concurrency was exercised in-process with
+one client and one account, not with parallel clients against a real origin.
+
 ## TL-01 step 1 round 2 — the publication coordination no longer blocks, duplicates or lies (native) — 2026-10-24
 
 Only the native client changed: `apps/desktop/src/client.rs`. The audio
@@ -45,6 +143,12 @@ hooks the new tests need: the cold-cache barrier (`cache_miss_barrier`,
 the expired-wait test, `PUBLICATION_WAIT` shortened from 60 s to 200 ms so the
 expired-wait path is reachable inside a test. The defect-1 reproduction was run
 with the production 60 s wait.
+
+**The line numbers below (`4199`, `4288`, `4354`) belong to that instrumented
+round-1 tree. No committed tree contains those lines**: the same asserts sit at
+different lines in `fbef0b8`, in `13eabe8` and in the round-3 tree, because every
+round adds tests above them. The messages and the numbers are the evidence, not
+the line numbers.
 
 ```
 ---- client::tests::a_pending_publication_does_not_block_the_play_of_another_track stdout ----
@@ -101,7 +205,7 @@ dependency: `Cargo.toml` and `Cargo.lock` are byte-identical.
 | `cargo fmt --all -- --check` | exit 0 |
 | `cargo clippy --locked --workspace --all-targets -- -D warnings` | exit 0, no warnings |
 | `cargo clippy --locked -p vela-desktop --all-targets --features native-qa -- -D warnings` | exit 0, no warnings |
-| `cargo test --locked -p vela-desktop` | `135 passed; 0 failed; 3 ignored` (the 3 are the opt-in audio/MPRIS tests; the 129 baseline tests are all kept) |
+| `cargo test --locked -p vela-desktop` | `135 passed; 0 failed; 3 ignored` (the 3 are the two opt-in audio/MPRIS tests and `offline::tests::offline_copy_cost_and_cancel_latency`; the 129 baseline tests are all kept) |
 | `cargo test --locked -p vela-web` | `57 passed; 0 failed; 0 ignored` |
 | `cargo build --locked -p vela-web --target wasm32-unknown-unknown` | exit 0 |
 | `cargo build --locked -p vela-server` | exit 0 |

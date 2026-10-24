@@ -28,10 +28,10 @@ contract. ADR0022 explicitly requires a separate ADR before that relaxation.
 1. **Publication leaves the critical path.** Once size and BLAKE3 have matched,
    `prepare` returns the verified lease immediately and warms the cache in a
    bounded background task that holds the `Arc<PreparedAudio>` lease and the
-   client `lifetime` token. The caller's per-selection cancel token is
-   deliberately not observed: the UI cancels it as soon as another track is
-   selected, and aborting the warm-up of the track that just played would
-   break decision 2.
+   client `lifetime` token. The caller's per-selection cancel token is not
+   observed *by that background task*: the UI cancels it as soon as another
+   track is selected, and aborting the warm-up of the track that just played
+   would break decision 2. The one exception is the fallback below.
 2. **No duplicate transfer regression.** A bounded in-flight publication
    registry (keyed by `media_cache::CacheKey`) makes a second `prepare` of the
    same track await the in-progress publication instead of starting another
@@ -51,12 +51,15 @@ defects in the coordination itself. The corrections keep the decision and
 change its mechanics:
 
 1. **The wait never holds the transfer admission.** The `preparing` semaphore
-   covers the transfer itself (and the cache read that serves a hit), never the
-   wait for a running publication. A `prepare` that waits for a publication of
-   track A therefore cannot refuse the play of track B with `PREPARE_BUSY`.
-   The admission is taken after the wait, and the state is re-checked with it
-   held: the cache is read again, and a publication of the same key that runs
-   now is waited for without the admission and taken again for the transfer.
+   covers the transfer body itself, never the wait for a running publication and
+   never the final cache read that may serve a hit. A `prepare` that waits for a
+   publication of track A therefore cannot refuse the play of track B with
+   `PREPARE_BUSY`. The admission is taken after the wait, and the state is
+   re-checked with it held: the cache is read again, and a publication of the
+   same key that runs now is waited for without the admission and taken again for
+   the transfer. Only the first of the two post-admission reads runs under the
+   admission; the second one runs after the admission was released for the wait,
+   because a warm hit must never be answered with `PREPARE_BUSY`.
 2. **The single-flight slot is observed before the cache is read.** A
    publication that ends between the cache miss and the decision can no longer
    be mistaken for a cold cache: the slot was captured first, the wait returns
@@ -71,6 +74,31 @@ change its mechanics:
    only after the previous one really ended. The registry bound counts *live*
    publications, not dictionary entries: an entry of a publication that ended
    describes nothing that runs.
+
+## Round 3 correction (2026-10-24)
+
+Decision 2 was implemented in `cached_lease` but not in the second, post-admission
+read: `recheck_cache` read the cache **before** it observed the single-flight
+slot, so a publication that ended inside that window was answered as a cold
+cache and cost a second body (`GETs=2` / 131072 B instead of 1 / 65536). Both
+reads now observe the slot before they read, and a miss is followed by the
+bounded wait and a second read. A slot that was live at the read and has ended
+since is answered with a second read of the cache even when the earlier wait had
+already run out — that was the remaining hole, found in review of this round.
+No other decision changed.
+
+## The registry-full fallback (round 3)
+
+The background task above is the ordinary path. When the registry of running
+publications is already full (`MAX_IN_FLIGHT_PUBLICATIONS`, 32 live copies), no
+background task starts and `prepare` awaits `scope.store(...)` **inside itself**,
+on the path to the first sound. That fallback deliberately keeps the caller's
+per-selection cancel token: it observes `cancel`, so a new selection aborts the
+copy instead of leaving a stale synchronous copy behind. The consequence is
+honest and narrow: in that corner a warm-up of track A canceled by selecting B
+means A→B→A transfers the body of A again. It is a cache-only effect — the
+decoder always receives its own verified lease — and it needs 32 simultaneous
+live publications to be reachable.
 
 ## Consequences
 

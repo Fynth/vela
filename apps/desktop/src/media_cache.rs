@@ -39,7 +39,7 @@ const MAX_SIDECAR_BYTES: usize = 4 * 1024;
 /// Directory entries inspected per pass; a namespace only holds two files per entry.
 const MAX_DIRECTORY_ENTRIES: usize = 8192;
 /// Bounded streaming block for hashing/copying and cancellation latency.
-const BLOCK_BYTES: usize = 64 * 1024;
+pub(crate) const BLOCK_BYTES: usize = 64 * 1024;
 /// Sidecar schema version. A sidecar of another version is never reinterpreted.
 const VERSION: u8 = 1;
 
@@ -422,12 +422,138 @@ fn copy_verified(
         output
             .write_all(&buffer[..read])
             .map_err(|_| WRITE.to_owned())?;
+        // Test-only: the first copied block is on disk, so a test can cancel a
+        // copy that has really started instead of one that never began.
+        #[cfg(test)]
+        if copied == BLOCK_BYTES as u64 {
+            copy_gate::hold_after_first_block(staged);
+        }
     }
     if copied != expected {
         return Err(INTEGRITY.into());
     }
     output.sync_all().map_err(|_| WRITE.to_owned())?;
     Ok(hasher.finalize().to_hex().to_string())
+}
+
+/// Test-only gate inside a running cache copy.
+///
+/// A copy that is canceled before it begins proves nothing about cancelling a
+/// copy that is already writing: the client test that asserts "a sign-out leaves
+/// no staging file" is vacuous while the copy never starts. This gate holds a
+/// copy right after its first copied block is on disk, so the test can cancel a
+/// transfer that has really begun.
+#[cfg(test)]
+pub(crate) mod copy_gate {
+    use std::{
+        path::{Path, PathBuf},
+        sync::{
+            Arc, Condvar, Mutex, OnceLock,
+            atomic::{AtomicUsize, Ordering},
+        },
+    };
+
+    /// One installed gate. It is global because `copy_verified` runs on a
+    /// blocking worker without a client handle; one test at a time installs it.
+    /// The gate only holds copies below `root`, so tests that run in parallel
+    /// with their own private cache root are never held.
+    pub(crate) struct CopyGate {
+        root: PathBuf,
+        entered: AtomicUsize,
+        released: Mutex<bool>,
+        signal: Condvar,
+    }
+
+    impl CopyGate {
+        pub(crate) fn new(root: &Path) -> Arc<Self> {
+            Arc::new(Self {
+                root: root.to_owned(),
+                entered: AtomicUsize::new(0),
+                released: Mutex::new(false),
+                signal: Condvar::new(),
+            })
+        }
+        /// How many copies below this gate's root reached the gate.
+        pub(crate) fn entered(&self) -> usize {
+            self.entered.load(Ordering::SeqCst)
+        }
+        /// Let a held copy continue.
+        pub(crate) fn release(&self) {
+            if let Ok(mut released) = self.released.lock() {
+                *released = true;
+                self.signal.notify_all();
+            }
+        }
+    }
+
+    static INSTALLED: OnceLock<Mutex<Option<Arc<CopyGate>>>> = OnceLock::new();
+
+    fn slot() -> &'static Mutex<Option<Arc<CopyGate>>> {
+        INSTALLED.get_or_init(|| Mutex::new(None))
+    }
+
+    /// Install a gate for the current test and return the previous one.
+    pub(crate) fn install(gate: Arc<CopyGate>) -> Option<Arc<CopyGate>> {
+        slot().lock().ok().and_then(|mut slot| slot.replace(gate))
+    }
+
+    /// Remove the gate, restoring the previous one.
+    pub(crate) fn restore(previous: Option<Arc<CopyGate>>) {
+        if let Ok(mut slot) = slot().lock() {
+            *slot = previous;
+        }
+    }
+
+    /// The installed gate, removed again when this value is dropped — including
+    /// when the test panics.
+    ///
+    /// Dropping also *releases* the gate: a test that panics while a copy is
+    /// held would otherwise leave the blocking worker parked in `Condvar::wait`
+    /// and hang the whole test binary instead of reporting one red test.
+    pub(crate) struct Installed {
+        gate: Option<Arc<CopyGate>>,
+        previous: Option<Arc<CopyGate>>,
+    }
+
+    impl Drop for Installed {
+        fn drop(&mut self) {
+            if let Some(gate) = self.gate.take() {
+                gate.release();
+            }
+            restore(self.previous.take());
+        }
+    }
+
+    /// Install a gate for the duration of the returned guard.
+    pub(crate) fn install_scoped(gate: Arc<CopyGate>) -> Installed {
+        let previous = install(gate.clone());
+        Installed {
+            gate: Some(gate),
+            previous,
+        }
+    }
+
+    /// Hold the running copy until the gate is released. Called with the first
+    /// copied block already written to the staging file, so the staging file
+    /// really exists while the test cancels the copy.
+    pub(crate) fn hold_after_first_block(staged: &Path) {
+        let Some(gate) = slot().lock().ok().and_then(|slot| slot.as_ref().cloned()) else {
+            return;
+        };
+        if !staged.starts_with(&gate.root) {
+            return;
+        }
+        gate.entered.fetch_add(1, Ordering::SeqCst);
+        let Ok(mut released) = gate.released.lock() else {
+            return;
+        };
+        while !*released {
+            let Ok(next) = gate.signal.wait(released) else {
+                return;
+            };
+            released = next;
+        }
+    }
 }
 
 /// Evict this cache's own oldest published pairs until the namespace fits. Staging and

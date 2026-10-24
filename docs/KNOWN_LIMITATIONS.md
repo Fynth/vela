@@ -1,19 +1,77 @@
 # Unsupported and unverified functionality
 
+## TL-01 step 1 round 3 — the post-admission read observes the slot first (native) — 2026-10-24
+
+Round 3 closed the last coordination P1 (the post-admission cache read observed
+the single-flight slot *after* it read the cache) and the test-layer defects the
+reviewers found. What is **not** covered by this increment is here.
+
+- **Staging is written before the budget is checked, so the temporary footprint
+  is outside the 2 GiB namespace budget.** `media_cache::store_at` calls
+  `copy_verified`, which writes the *whole* staging file, and only then calls
+  `make_room`. With 32 live publications of 250 MiB originals the staging
+  footprint can therefore reach ~8000 MiB before any of the 32 copies is
+  measured against `MAX_BYTES` (2 GiB) — plus one 250 MiB verified lease held
+  open per live publication. This is a reading of the call order, **not a
+  measurement**: the 8000 MiB load was never generated. `make_room` also does
+  not reserve and does not block, so two parallel publications both observe
+  "there is room" and both proceed; the eviction pass of one publication can
+  delete the entry the other just published, which is recoverable (the bytes
+  are re-downloadable) but not free. Free disk space is checked nowhere in the
+  cache path (`grep available_space|statvfs` over `apps/desktop/src` is empty):
+  a full disk surfaces as a `WRITE` error from the copy, which is swallowed as
+  "best effort" and leaves playback intact.
+- **`PublicationStart::Refused` adds a synchronous copy the registry does not
+  track, and that copy keeps the per-selection token.** When the live-publication
+  registry is full (32 live copies), `prepare` falls back to `scope.store(...)`
+  and awaits the full copy on the path to the first sound, outside the
+  single-flight registry: the copy is invisible to a concurrent `prepare` of the
+  same key, it is not counted by the bound, and it observes `cancel`, so
+  selecting another track aborts it. In that corner A→B→A transfers the body of A
+  a second time. This contradicts the unqualified "the per-selection token is
+  never observed" wording that ADR0026 and `NATIVE_CLIENT_CONTRACTS.md` used
+  before round 3; both now name this exception. Only the refusal and the fallback
+  are asserted; the duplicate transfer itself was not measured.
+- **The second `admit()` after an expired wait can still end as `PREPARE_BUSY`.**
+  The publication wait is bounded at 60 s; when it runs out, `prepare` continues
+  to the transfer and takes the admission again with a fresh 1 s timeout
+  (`client.rs`, `admit`). A `prepare` can therefore spend 60 s + 2×1 s and then
+  return "Busy: another track is preparing. Cancel it first.", although the
+  cause was an expired wait and not a busy transfer. The "one wait per prepare"
+  budget is documented; this second admission is not bounded by it.
+- **The round-3 regression holds the copy inside the client test, not inside a
+  real transfer.** The post-admission test ends a *held* publication with the
+  publication gate; it is not a run against a real origin under real concurrent
+  load, and the window is one cache read plus one admission.
+- **The sign-out test pins the observable outcome, not one specific cancel probe.**
+  The test now cancels a copy that has already written its first block, and it
+  fails when the publication ignores the client lifetime. It does **not** pin an
+  individual probe inside the copy loop: removing the per-block probe *and* the
+  probe before the commit point still leaves `make_room`'s own entry probe, which
+  returns `CANCELED` and produces the same observable state. The three probes are
+  redundant by design; the test proves that a canceled publication publishes
+  nothing and leaves no staging file, not that each probe fires.
+- **The copy still runs in a blocking worker and is not interrupted at a byte
+  boundary.** A cancel is observed between 64 KiB blocks, so a sign-out during a
+  copy keeps one block of work in flight. Open descriptors and `nlink` after a
+  *process* exit, and a cancel that lands between the last block and the commit
+  point, are not asserted.
+- **The browser surfaces were not re-rendered.** No web file, CSS or asset
+  changed in this increment either; `apps/web/**` is byte-identical and only
+  `cargo test -p vela-web` and the wasm build were executed for the web crate.
+
 ## TL-01 step 1 round 2 — the publication coordination no longer blocks, duplicates or lies (native) — 2026-10-24
 
 The three coordination defects of round 1 are fixed and proven. What is **not**
 covered by that increment is here.
 
-- **A publication that starts in a narrow window can still cost a second
-  body.** The single-flight slot is observed before the cache is read, and the
-  cache is read again after the transfer admission is taken. A publication of
-  the same key that starts *between* that observation and the transfer is
-  caught by the post-admission re-check, which waits for it without holding the
-  admission. A publication that starts after that re-check is not waited for,
-  and the transfer costs a second body for that key. The window is a single
-  cache read plus one admission, and it was not measured under real
-  concurrent load.
+- **A publication that starts after the post-admission re-check for the same key
+  can still cost a second body.** Both cache reads of `prepare` observe the
+  single-flight slot *before* they read, so a publication that ends while a read
+  runs is caught (round 3). A publication that *starts* after the last
+  observation is not waited for, and the transfer costs a second body for that
+  key. The window is one cache read plus one admission, and it was not measured
+  under real concurrent load.
 - **The wait is bounded, not cancelled by the per-selection token.** The wait
   for a running publication observes the caller's cancel token and the client
   lifetime, and it runs out after 60 s. It does not observe the per-selection

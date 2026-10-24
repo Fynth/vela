@@ -1,5 +1,49 @@
 # Verified progress
 
+## TL-01 step 1 round 3 — the post-admission read observes the slot first (native) — 2026-10-24
+
+Round 2 fixed three coordination defects but left one, found by the deciding
+reviewer and reproduced by me: the *post-admission* cache read (`recheck_cache`)
+still read the cache before it observed the single-flight slot. A publication
+that ended inside that window was answered as a cold cache, and `prepare`
+transferred a second body for a key whose bytes were already published
+(`GETs=2, body_bytes=131072` instead of `1 / 65536`). The slot is now captured
+before the read, exactly as in `cached_lease`; a miss with a live slot waits
+without the admission and reads the cache again. A slot that was live at that
+read and has **ended since** is answered with a second read of the cache even
+when an earlier wait had already run out — the second hole, found by the
+deciding reviewer in the first version of this round and reproduced by me
+(`left: 2, right: 1`). Both holes have their own regression test.
+
+The test layer was corrected in the same round, because two of the round-2
+tests proved less than they claimed:
+
+- `a_sign_out_stops_a_running_publication` paused the publication **before** the
+  copy, so the copy never started and "no staging file" was vacuous. The copy is
+  now held *inside* `copy_verified` after its first block is on disk
+  (`media_cache::copy_gate`, a test-only gate that holds only copies under its
+  own cache root): the test now asserts that a staging file exists while the
+  copy is held and that a sign-out mid-copy leaves no entry, no sidecar and no
+  staging file. It fails when the publication ignores the client lifetime. The
+  gate is removed **and released** by a drop guard, because a panicking
+  assertion would otherwise park the blocking worker and hang the test binary
+  instead of reporting one red test (verified: exit 124 before, exit 101 after).
+- `the_lease_is_returned_before_the_cache_copy_of_a_slow_body_finishes` compared
+  two wall-clock instants (`assert!(leased < published)`). The order is now
+  proved by the publication gate (`pause.finished == 0` while the entry does not
+  exist yet); the timing pair stays as a printed metric without an assertion.
+
+The registry-full fallback is now described honestly: when all 32 live
+publication slots are taken, `prepare` copies synchronously and **does** observe
+the per-selection token, so in that corner A→B→A transfers the body of A again.
+`ADR0026` and `NATIVE_CLIENT_CONTRACTS.md` name that exception instead of
+claiming the token is never observed.
+
+Only `apps/desktop/src/client.rs` and `apps/desktop/src/media_cache.rs` changed.
+The trust model is untouched: the decoder still receives one complete verified
+original of the exact size with a whole-file BLAKE3, unnamed private `0600`,
+`nlink() == 0` on Linux. Progressive decode and Range remain unapproved.
+
 ## TL-01 step 1 round 2 — the publication coordination no longer blocks, duplicates or lies (native) — 2026-10-24
 
 The round-1 slice was rejected in review with three P1 defects in the

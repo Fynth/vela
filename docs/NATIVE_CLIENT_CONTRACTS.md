@@ -252,9 +252,12 @@ lease immediately and the cache copy runs in a background task that holds the
 `Arc<PreparedAudio>` lease, so the copied bytes are the verified bytes. The
 publication observes the client `lifetime` token: a sign-out stops it, its
 staging file is removed and no half-published entry survives. The caller's
-per-selection cancel token is deliberately *not* observed — the UI cancels it
-as soon as another track is selected, and aborting the warm-up of the track that
-just played would break the one-body-per-track guarantee.
+per-selection cancel token is deliberately *not* observed by that background
+task — the UI cancels it as soon as another track is selected, and aborting the
+warm-up of the track that just played would break the one-body-per-track
+guarantee. The one exception is the registry-full fallback: when all 32 live
+publication slots are taken, `prepare` performs the copy synchronously and does
+observe that token, because a synchronous copy must not outlive its selection.
 
 A bounded registry of running publications (keyed by `media_cache::CacheKey`, at
 most 32 live publications in flight) makes a second `prepare` of the same track
