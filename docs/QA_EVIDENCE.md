@@ -1,5 +1,85 @@
 # Verified0.12.0 package and preserved runtime checkpoint
 
+## TL-02 — the cache evicts by the last confirmed hit, not by the insertion (native) — 2026-10-24
+
+The native media cache evicted by the age of the **insertion**
+(`ADR 0022`: "Eviction is insertion-age FIFO, not strict LRU; hits do not
+refresh `saved_at`"), so a track that is played every day left the cache and
+was downloaded again. TL-02 makes the recency of an entry the time of its last
+**confirmed hit**. The change is confined to `apps/desktop/src/media_cache.rs`
+and `apps/desktop/src/client.rs`; no web file, CSS, asset, route, DTO,
+migration or manifest changed.
+
+### What the slice does
+
+- `media_cache::touch(root, key, expected_size, expected_etag, canceled)` reads
+  the sidecar of an existing hit, requires that it still describes the very same
+  `(version, origin, account_id, track_id, size_bytes, etag, digest)` the origin
+  just re-authorized, and replaces **only** `saved_at`. The cached original is
+  not opened, not read and not written. The new record is staged under a unique
+  name (`0600`, `fsync`) and renamed over the old one; the namespace directory
+  keeps its `0700`. A missing record, another version and another
+  representation are refused with `Ok(false)` and no file at all is written;
+  cancellation returns `Err` and removes this operation's own staging file.
+- `client.rs` schedules the mark in the background on a confirmed hit
+  (`mark_recency`): the decoder lease is returned immediately, `prepare` never
+  waits for the mark, the mark observes the client `lifetime` token (a sign-out
+  stops it) and not the per-selection cancel token, a live publication of the
+  same key is not marked at all, and every error is swallowed.
+- The trust model is unchanged: the origin's validator still decides whether an
+  entry may be used, the cached descriptor is still re-hashed from the very
+  descriptor the decoder receives, the sidecar schema is unchanged (`VERSION` 1)
+  and the budgets, the atomic publication and the staging discipline are
+  untouched. The mark reads and returns no byte, makes no network request and
+  consults no session.
+
+### The commands and their real output
+
+| Command | Result |
+| --- | --- |
+| `cargo fmt --all -- --check` | exit 0 |
+| `cargo clippy --locked --workspace --all-targets -- -D warnings` | exit 0, no warnings |
+| `cargo test --locked -p vela-desktop -- --test-threads=2` | **`151 passed; 0 failed; 3 ignored`** (143 before this slice, all kept) |
+| `cargo test --locked -p vela-web` | **57 passed; 0 failed** |
+| `cargo build --locked -p vela-web --target wasm32-unknown-unknown --release` | exit 0 (nothing to rebuild: `apps/web/**` is byte-identical) |
+| the whole desktop suite, 5 consecutive runs with `--test-threads=2` | **5 × `151 passed; 0 failed; 3 ignored`** |
+| `DISPLAY=:99 python3 scripts/verify_native_client.py --backend x11 --server target/debug/vela-server --driver target/debug/examples/native-ui-qa --evidence target/checks/tl02-recency-native --test-preparation` | **exit 0** — `report.json` `result.ok=true`, **314 checks**, **24 PNG**, `temporary_originals_after_exit=0`, engine `Rodio/CPAL, owned isolated null sink`, reduced-motion window `reduced_motion.ok=true` (8 checks), including "Native preparation: real 65536-byte partial transfer canceled on socket, generation 3→4, no late load and successful Play retry" |
+
+The native artifact was produced at **06:22**, after the last edit of the two
+changed Rust files (06:20), and `git status` is clean for them. It is one run
+of the native window class, not repeated runs, and **not** a browser render: no
+web file changed in this slice.
+
+### The new regressions, and what they fail on
+
+| Test | Asserts |
+| --- | --- |
+| `media_cache::tests::a_confirmed_hit_refreshes_the_recency_without_touching_the_audio` | the recency grows while the audio file keeps its `dev`/`ino`/`len`/`mtime`; the record still describes the same representation; the namespace holds exactly the two published names; the modes stay `0700`/`0600` |
+| `media_cache::tests::the_eviction_follows_the_confirmed_playback_and_not_the_insertion` | with a mark, the entry that was played again survives and the untouched one is evicted; the control in the same test shows the older insertion going first without a mark |
+| `media_cache::tests::a_recency_mark_needs_the_same_representation_and_writes_nothing_otherwise` | a foreign validator, size, origin, account, track, version, digest, a zero recency and a missing record are refused; the complete file list of the namespace is unchanged |
+| `media_cache::tests::a_canceled_recency_mark_leaves_no_staging_file` | a canceled mark (before the first block and while its own staging file is on disk) returns `Err` and leaves no `.tmp` and no `.bak` |
+| `client::tests::a_confirmed_hit_refreshes_the_recency_of_the_entry_it_played` | A→B→A still transfers one body per track; the recency of A grows, the recency of B does not |
+| `client::tests::a_confirmed_hit_is_marked_in_the_background_and_never_delays_the_lease` | the lease is returned while the mark is still held (`entered == 1`, `finished == 0`), the held mark has written nothing, and releasing it grows the recency |
+| `client::tests::a_recency_mark_that_cannot_be_applied_does_not_affect_the_lease` | a mark whose record disappeared writes nothing, leaves no staging file, and the lease stays the verified original |
+| `client::tests::a_sign_out_stops_a_running_recency_mark` | a sign-out stops a running mark: it writes nothing and leaves no staging file |
+
+The mutations below were applied to the final tree and reverted afterwards; the
+numbers are the real output of the runs, not an expectation:
+
+| Mutation | Result |
+| --- | --- |
+| `touch` returns `Ok(false)` immediately (the mark does nothing) | **4 of the 8 new tests fail**: `a_confirmed_hit_refreshes_the_recency_without_touching_the_audio`, `the_eviction_follows_the_confirmed_playback_and_not_the_insertion`, `a_canceled_recency_mark_leaves_no_staging_file`, `a_confirmed_hit_refreshes_the_recency_of_the_entry_it_played`; the other 143 desktop tests stay green |
+| the client stops calling `mark_recency` | **exactly the 4 new client tests fail**; every pre-existing desktop test stays green |
+| `next_saved_at` returns the clock without the strict increment | the two growth assertions fail (`a_confirmed_hit_refreshes_the_recency_without_touching_the_audio`, `a_confirmed_hit_refreshes_the_recency_of_the_entry_it_played`) — the one-second clock alone does not order two hits of the same second |
+
+### Not run
+
+A real ENOSPC, the production 200-entry/2GiB eviction, two processes on one
+cache root, every non-Linux target, a Wayland session, screen readers and
+physical media keys are NOT_RUN. The browser surfaces were not re-rendered:
+`apps/web/**` is byte-identical, so only `cargo test -p vela-web` and the wasm
+build were executed for the web crate.
+
 ## TL-01 step 1 round 5 — the test gate is serialized (native) — 2026-10-24
 
 Round 5 closes a defect in the **test layer** of round 4 and corrects a false

@@ -1,5 +1,53 @@
 # Unsupported and unverified functionality
 
+## TL-02 — the cache evicts by the last confirmed hit (native) — 2026-10-24
+
+The eviction order of the native media cache now follows the last *confirmed
+hit* instead of the insertion, so a track that is played every day keeps its
+entry. What is **not** covered by that increment is here.
+
+- **The mark↔publication race is narrowed, not closed.** `media_cache::touch`
+  re-reads the record and the cached original immediately before its rename and
+  drops itself when either changed, but the window between that check and the
+  rename is not closed and is not covered by a lock. A publication of the same
+  key that lands in that window is overwritten by the mark: the entry stays
+  usable, but its `saved_at` can move back to the older value. The reverse
+  order leaves the publication's fresh `saved_at` in place. The mark is not
+  run at all while a publication of the same key is live
+  (`in_flight_publication`), so the common case is covered — the *rare* one is
+  not.
+- **The multiprocess case is not exercised.** Two `vela-desktop` processes on
+  one cache root, or a process against a second instance, were not run. The
+  staging name is unique per process and per operation, so the files cannot
+  collide, but the last writer of `saved_at` wins and no ordering between two
+  processes is guaranteed.
+- **A mark that lands after the eviction pass computed its candidates can still
+  be evicted.** The eviction reads the candidates once; an entry that was played
+  again in that window goes first. The cost is one re-download, and the bytes
+  are re-verified before they are used.
+- **The recency is a one-second clock with a strict increment.** The value is
+  `max(now, previous + 1)`, so a mark inside the same second still orders the
+  entry after an entry that was never played again, and a burst of marks can
+  push the value slightly ahead of the wall clock. It is a recency marker, not
+  a timestamp of the exact moment.
+- **A mark costs one sidecar write with an `fsync`, per confirmed hit.** It runs
+  on a blocking worker and never on the path to the first sound, but it is disk
+  I/O: a user who replays the same track in a loop writes and flushes a few
+  hundred bytes each time. The mark is one background blocking task per
+  confirmed hit and is not pooled or bounded beyond the runtime's blocking
+  pool.
+- **ENOSPC, a full cache and the production budget were not exercised.** The
+  refused path is asserted with a cache root that cannot be created, not with a
+  real full disk. Real-process eviction at 200 entries/2GiB per account and the
+  disk-full behaviour remain NOT_RUN.
+- **The mark is not a listening event and nothing leaves the device.** No media
+  time is counted, no history is written, nothing is reported to the origin. A
+  confirmed hit only means that the origin re-authorized the representation and
+  the cached bytes verified against it.
+- **The browser surfaces were not re-rendered.** No web file, CSS or asset
+  changed in this increment; `apps/web/**` is byte-identical and only
+  `cargo test -p vela-web` and the wasm build were executed.
+
 ## TL-01 step 1 round 5 — the test gate is serialized (native) — 2026-10-24
 
 Round 5 closed the round-4 review's test-layer defect (the global `copy_gate`

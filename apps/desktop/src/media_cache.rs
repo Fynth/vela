@@ -95,7 +95,7 @@ pub(crate) struct Cached {
 
 /// Sidecar written next to the audio. `digest` is the BLAKE3 of the cached audio and
 /// must equal `etag`, the origin's strong validator for the same representation.
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Sidecar {
     version: u8,
@@ -281,6 +281,130 @@ pub(crate) fn open_verified(
         file,
         length_bytes: metadata.len(),
     }))
+}
+
+/// Mark one published entry as recently played.
+///
+/// The recency of an entry is the time of its last *confirmed hit*, not the
+/// time it was inserted: a track that is played every day must not leave the
+/// cache before a track that was downloaded once and never played again.
+///
+/// A confirmed hit is the origin re-authorizing the representation and the
+/// cached original verifying against it. It is not a listening event: no media
+/// time is counted, nothing is reported to the origin and nothing leaves the
+/// device.
+///
+/// The mark is an optimization and never a grant:
+///
+/// - it reads and writes no audio byte — the cached original is not opened,
+///   not read and not written, and only the sidecar's `saved_at` is replaced;
+/// - it weakens no check of [`open_verified`]: the origin's validator still
+///   decides whether the entry may be used at all, and the cached original is
+///   still re-hashed from the very descriptor the decoder receives;
+/// - it makes no network request and consults no session.
+///
+/// `Ok(true)` — the sidecar now describes a newer confirmed hit.
+/// `Ok(false)` — the sidecar is absent, is of another version or describes
+/// another representation: nothing was written at all.
+/// `Err` — cancellation only.
+pub(crate) fn touch(
+    root: &Path,
+    key: &CacheKey,
+    expected_size: u64,
+    expected_etag: &str,
+    canceled: &dyn Fn() -> bool,
+) -> Result<bool, String> {
+    if canceled() {
+        return Err(CANCELED.into());
+    }
+    if expected_size == 0
+        || expected_size > crate::client::MAX_MEDIA_BYTES
+        || !crate::client::lower_hex64(expected_etag)
+    {
+        return Ok(false);
+    }
+    let record = sidecar_path(root, key);
+    let Some(bytes) = read_sidecar_bytes(&record) else {
+        return Ok(false);
+    };
+    let Some(sidecar) = serde_json::from_slice::<Sidecar>(&bytes).ok() else {
+        return Ok(false);
+    };
+    // The record must still describe the very representation the origin
+    // confirmed. Another version, another identity, another size, another
+    // validator or a digest that is not the origin's validator is another
+    // entry, and it is not marked.
+    if sidecar.version != VERSION
+        || sidecar.origin != key.origin
+        || sidecar.account_id != key.account_id
+        || sidecar.track_id != key.track_id
+        || sidecar.size_bytes != expected_size
+        || sidecar.etag != expected_etag
+        || sidecar.digest != expected_etag
+        || !crate::client::lower_hex64(&sidecar.digest)
+        || sidecar.saved_at == 0
+    {
+        return Ok(false);
+    }
+    // The cached original must still be the file the record describes: a
+    // record without its original describes nothing playable, and a playback
+    // that cannot happen must not keep an entry alive.
+    if !intact(root, key, sidecar.size_bytes) {
+        return Ok(false);
+    }
+    if canceled() {
+        return Err(CANCELED.into());
+    }
+    let account = account_root(root, key);
+    // Unique per operation and per process: a second mark never writes over
+    // the staging file of another one.
+    let suffix = unique_suffix();
+    let staged = account.join(format!(".{}.{suffix}.json.tmp", key.track_id));
+    let mut updated = sidecar.clone();
+    updated.saved_at = next_saved_at(sidecar.saved_at);
+    if let Err(error) = stage_sidecar(&staged, &updated) {
+        let _ = fs::remove_file(&staged);
+        return Err(error);
+    }
+    if canceled() {
+        let _ = fs::remove_file(&staged);
+        return Err(CANCELED.into());
+    }
+    // The record is replaced only while it still is the record that was read:
+    // a publication that replaced it in the meantime wins, and the mark is
+    // dropped instead of describing bytes that are no longer there.
+    if read_sidecar_bytes(&record).as_deref() != Some(bytes.as_slice())
+        || !intact(root, key, sidecar.size_bytes)
+    {
+        let _ = fs::remove_file(&staged);
+        return Ok(false);
+    }
+    // The commit point: the record is replaced by a rename, so a reader never
+    // sees a half-written sidecar, and a failed rename leaves the previous
+    // record exactly as it was.
+    if fs::rename(&staged, &record).is_err() {
+        let _ = fs::remove_file(&staged);
+        return Err(WRITE.into());
+    }
+    Ok(true)
+}
+
+/// Whether the cached original of this entry is still the file its record
+/// describes. Only metadata is read: no byte of the original is touched.
+fn intact(root: &Path, key: &CacheKey, size_bytes: u64) -> bool {
+    let Ok(link) = fs::symlink_metadata(audio_path(root, key)) else {
+        return false;
+    };
+    !link.file_type().is_symlink() && link.is_file() && link.len() == size_bytes
+}
+
+/// The recency of a confirmed hit.
+///
+/// The clock has a one-second resolution, so the value is also strictly newer
+/// than the one it replaces: two confirmed hits inside the same second still
+/// order the entry after an entry that was never played again.
+fn next_saved_at(previous: u64) -> u64 {
+    saved_at_now().max(previous.saturating_add(1))
 }
 
 /// Copy one already verified prepared original into this namespace. Best effort by
@@ -760,7 +884,10 @@ fn file_bytes(path: &Path) -> u64 {
     }
 }
 
-fn read_sidecar(path: &Path) -> Option<Sidecar> {
+/// The raw bytes of one sidecar, read under the same guards as the record
+/// itself: a symlink, a directory, an oversized or an unreadable file is no
+/// sidecar at all.
+fn read_sidecar_bytes(path: &Path) -> Option<Vec<u8>> {
     let metadata = fs::symlink_metadata(path).ok()?;
     if metadata.file_type().is_symlink() || !metadata.is_file() {
         return None;
@@ -777,7 +904,11 @@ fn read_sidecar(path: &Path) -> Option<Sidecar> {
     if bytes.len() > MAX_SIDECAR_BYTES {
         return None;
     }
-    serde_json::from_slice(&bytes).ok()
+    Some(bytes)
+}
+
+fn read_sidecar(path: &Path) -> Option<Sidecar> {
+    serde_json::from_slice(&read_sidecar_bytes(path)?).ok()
 }
 
 fn stage_sidecar(path: &Path, sidecar: &Sidecar) -> Result<(), String> {
@@ -980,6 +1111,28 @@ mod tests {
             digest: sidecar.digest.clone(),
             saved_at: sidecar.saved_at,
         }
+    }
+
+    /// The recency the sidecar of one published entry carries.
+    fn sidecar_saved_at(root: &Path, key: &CacheKey) -> u64 {
+        read_sidecar(&sidecar_path(root, key))
+            .expect("the sidecar of a published entry")
+            .saved_at
+    }
+
+    /// The identity of a file as the operating system sees it: the same bytes
+    /// under the same name are the same file only when the device, the inode,
+    /// the length and the modification time are the same.
+    #[cfg(unix)]
+    fn identity(path: &Path) -> (u64, u64, u64, std::time::SystemTime) {
+        use std::os::unix::fs::MetadataExt;
+        let metadata = fs::metadata(path).unwrap();
+        (
+            metadata.dev(),
+            metadata.ino(),
+            metadata.len(),
+            metadata.modified().unwrap(),
+        )
     }
 
     #[test]
@@ -1505,6 +1658,265 @@ mod tests {
             "an orphan without a sidecar is not assumed to be evictable"
         );
         assert_eq!(published(&account).unwrap().len(), 3);
+    }
+
+    /// A confirmed hit refreshes the recency of the entry and touches nothing
+    /// else: the cached original keeps its bytes, its size, its inode and its
+    /// modification time.
+    #[cfg(unix)]
+    #[test]
+    fn a_confirmed_hit_refreshes_the_recency_without_touching_the_audio() {
+        let cache = tempfile::tempdir().unwrap();
+        let bytes = b"recency-refresh-fixture".to_vec();
+        let etag = digest(&bytes);
+        let key = key(ORIGIN, ACCOUNT, TRACK);
+        // The entry was published with the current clock: the recency of a
+        // confirmed hit must grow even inside the same second.
+        publish_bytes(cache.path(), &key, &bytes, saved_at_now()).unwrap();
+        let audio = audio_path(cache.path(), &key);
+        let before = identity(&audio);
+        let recency = sidecar_saved_at(cache.path(), &key);
+
+        assert!(
+            touch(cache.path(), &key, bytes.len() as u64, &etag, &never()).unwrap(),
+            "a confirmed hit must refresh the recency of the entry"
+        );
+
+        assert_eq!(
+            before,
+            identity(&audio),
+            "the cached original is not touched by a recency mark"
+        );
+        assert!(
+            sidecar_saved_at(cache.path(), &key) > recency,
+            "the recency of a confirmed hit must grow"
+        );
+        // The record still describes the very same representation.
+        let record = read_sidecar(&sidecar_path(cache.path(), &key)).unwrap();
+        assert_eq!(record.version, VERSION);
+        assert_eq!(record.origin, ORIGIN);
+        assert_eq!(record.account_id, ACCOUNT);
+        assert_eq!(record.track_id, TRACK);
+        assert_eq!(record.size_bytes, bytes.len() as u64);
+        assert_eq!(record.etag, etag);
+        assert_eq!(record.digest, etag);
+        // The namespace holds the published pair and nothing else.
+        assert_eq!(
+            names(cache.path(), &key),
+            vec![format!("{TRACK}.audio"), format!("{TRACK}.json")]
+        );
+        // The private modes of the namespace and of the record are kept.
+        use std::os::unix::fs::PermissionsExt;
+        let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&account_root(cache.path(), &key)), 0o700);
+        assert_eq!(mode(&sidecar_path(cache.path(), &key)), 0o600);
+        assert_eq!(mode(&audio), 0o600);
+    }
+
+    /// The eviction order follows the last confirmed playback, not the
+    /// insertion: a track that is played again keeps its entry while the track
+    /// that was only downloaded once is evicted.
+    #[test]
+    fn the_eviction_follows_the_confirmed_playback_and_not_the_insertion() {
+        let oldest = key(ORIGIN, ACCOUNT, "20000000-0000-4000-8000-00000000000a");
+        let newer = key(ORIGIN, ACCOUNT, "20000000-0000-4000-8000-00000000000b");
+        let newcomer = key(ORIGIN, ACCOUNT, "20000000-0000-4000-8000-00000000000c");
+        let body = b"eviction-order-original";
+        let (_directory, source) = original(body);
+        let budget = Budget {
+            entries: 2,
+            bytes: MAX_BYTES,
+        };
+
+        // Control: without a confirmed playback the older insertion goes
+        // first.
+        let control = tempfile::tempdir().unwrap();
+        publish_bytes(control.path(), &oldest, body, 10).unwrap();
+        publish_bytes(control.path(), &newer, body, 20).unwrap();
+        store_at(
+            control.path(),
+            &newcomer,
+            &source,
+            body.len() as u64,
+            &digest(body),
+            30,
+            budget,
+            &never(),
+        )
+        .unwrap();
+        assert!(
+            !audio_path(control.path(), &oldest).exists(),
+            "without a confirmed playback the older insertion is evicted first"
+        );
+        assert!(audio_path(control.path(), &newer).exists());
+
+        // The same two entries with a confirmed playback of the older one: it
+        // is the newer entry now, and the untouched one is evicted.
+        let marked = tempfile::tempdir().unwrap();
+        publish_bytes(marked.path(), &oldest, body, 10).unwrap();
+        publish_bytes(marked.path(), &newer, body, 20).unwrap();
+        assert!(
+            touch(
+                marked.path(),
+                &oldest,
+                body.len() as u64,
+                &digest(body),
+                &never()
+            )
+            .unwrap(),
+            "a confirmed playback must refresh the recency"
+        );
+        store_at(
+            marked.path(),
+            &newcomer,
+            &source,
+            body.len() as u64,
+            &digest(body),
+            30,
+            budget,
+            &never(),
+        )
+        .unwrap();
+        assert!(
+            audio_path(marked.path(), &oldest).exists(),
+            "an entry that was played again keeps its place in the cache"
+        );
+        assert!(
+            !audio_path(marked.path(), &newer).exists(),
+            "an entry that was never played again is evicted first"
+        );
+        assert!(audio_path(marked.path(), &newcomer).exists());
+    }
+
+    /// A recency mark needs the very record of the confirmed representation:
+    /// another validator, another size, another identity, another version and
+    /// a missing record are all refused, and a refused mark writes no file.
+    #[test]
+    fn a_recency_mark_needs_the_same_representation_and_writes_nothing_otherwise() {
+        let cache = tempfile::tempdir().unwrap();
+        let bytes = b"recency-mismatch-fixture".to_vec();
+        let etag = digest(&bytes);
+        let key = key(ORIGIN, ACCOUNT, TRACK);
+        publish_bytes(cache.path(), &key, &bytes, 5).unwrap();
+        let record = sidecar_path(cache.path(), &key);
+        let valid = read_sidecar(&record).unwrap();
+        let before = names(cache.path(), &key);
+
+        // Another authoritative validator is another representation.
+        assert!(
+            !touch(
+                cache.path(),
+                &key,
+                bytes.len() as u64,
+                &"1".repeat(64),
+                &never()
+            )
+            .unwrap()
+        );
+        // Another size is another representation.
+        assert!(!touch(cache.path(), &key, bytes.len() as u64 + 1, &etag, &never()).unwrap());
+        assert_eq!(
+            names(cache.path(), &key),
+            before,
+            "a refused mark writes no file"
+        );
+
+        for foreign in [
+            Sidecar {
+                version: 2,
+                ..clone_sidecar(&valid)
+            },
+            Sidecar {
+                origin: OTHER_ORIGIN.into(),
+                ..clone_sidecar(&valid)
+            },
+            Sidecar {
+                account_id: OTHER_ACCOUNT.into(),
+                ..clone_sidecar(&valid)
+            },
+            Sidecar {
+                track_id: OTHER_TRACK.into(),
+                ..clone_sidecar(&valid)
+            },
+            Sidecar {
+                size_bytes: valid.size_bytes + 1,
+                ..clone_sidecar(&valid)
+            },
+            Sidecar {
+                etag: "3".repeat(64),
+                ..clone_sidecar(&valid)
+            },
+            Sidecar {
+                digest: "4".repeat(64),
+                ..clone_sidecar(&valid)
+            },
+            Sidecar {
+                saved_at: 0,
+                ..clone_sidecar(&valid)
+            },
+        ] {
+            fs::write(&record, serde_json::to_vec(&foreign).unwrap()).unwrap();
+            assert!(
+                !touch(cache.path(), &key, bytes.len() as u64, &etag, &never()).unwrap(),
+                "a foreign record is never marked"
+            );
+            assert_eq!(
+                names(cache.path(), &key),
+                before,
+                "a refused mark writes no file"
+            );
+        }
+
+        // A missing record is refused as well, and nothing is created for it.
+        fs::remove_file(&record).unwrap();
+        assert!(!touch(cache.path(), &key, bytes.len() as u64, &etag, &never()).unwrap());
+        assert_eq!(
+            names(cache.path(), &key),
+            vec![format!("{TRACK}.audio")],
+            "a refused mark creates no file"
+        );
+    }
+
+    /// A canceled recency mark leaves no staging file behind: neither before
+    /// the first block nor while its own staging file is on disk.
+    #[test]
+    fn a_canceled_recency_mark_leaves_no_staging_file() {
+        let cache = tempfile::tempdir().unwrap();
+        let bytes = b"recency-cancellation-fixture".to_vec();
+        let etag = digest(&bytes);
+        let key = key(ORIGIN, ACCOUNT, TRACK);
+        publish_bytes(cache.path(), &key, &bytes, 3).unwrap();
+        let before = names(cache.path(), &key);
+
+        // Canceled before the first block: nothing is written at all.
+        assert_eq!(
+            touch(cache.path(), &key, bytes.len() as u64, &etag, &|| true).unwrap_err(),
+            CANCELED
+        );
+        assert_eq!(names(cache.path(), &key), before);
+
+        // Canceled while this operation's own staging file is on disk: only
+        // that staging file disappears.
+        let canceled = || {
+            names(cache.path(), &key)
+                .iter()
+                .any(|name| name.ends_with(".tmp"))
+        };
+        assert_eq!(
+            touch(cache.path(), &key, bytes.len() as u64, &etag, &canceled).unwrap_err(),
+            CANCELED
+        );
+        assert_eq!(
+            names(cache.path(), &key),
+            before,
+            "a canceled mark leaves no staging file behind"
+        );
+        assert!(
+            names(cache.path(), &key)
+                .iter()
+                .all(|name| !name.ends_with(".tmp") && !name.ends_with(".bak")),
+            "a canceled mark leaves no staging and no backup behind"
+        );
     }
 
     #[test]

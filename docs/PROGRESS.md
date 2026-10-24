@@ -1,5 +1,87 @@
 # Verified progress
 
+## TL-02 — the cache evicts by the last confirmed hit, not by the insertion (native) — 2026-10-24
+
+The A→B→A body transfer was already closed and proven
+(`a_b_a_reuses_the_complete_original_without_a_second_body_transfer`). What was
+still open was the *order* of the eviction: ADR 0022 said "Eviction is
+insertion-age FIFO, not strict LRU; hits do not refresh `saved_at`", so a track
+that is played every day left the cache by the age of its **insertion** and was
+downloaded again. TL-02 closes that: the recency of a published entry is the
+time of its last **confirmed hit**.
+
+**The mark.** `media_cache::touch(root, key, expected_size, expected_etag,
+canceled)` reads the sidecar of an existing hit, checks that it still describes
+the very same `(version, origin, account_id, track_id, size_bytes, etag,
+digest)` the origin just re-authorized, and replaces **only** `saved_at`. The
+cached original is not opened, not read and not written — its bytes, size,
+inode and modification time are unchanged. The new record is written to a
+unique staging file (`0600`, `fsync`) and renamed over the old one, so a reader
+never sees a half-written sidecar; the namespace directory keeps its `0700`.
+A missing record, a record of another version and a record of another
+representation are refused with `Ok(false)` and **no file is written at all**;
+cancellation returns `Err` and removes this operation's own staging file, so
+neither a success nor a cancellation leaves a `.tmp` or a `.bak` behind. The
+clock has a one-second resolution, so the new value is `max(now, previous + 1)`:
+two confirmed hits inside the same second still order the entry after an entry
+that was never played again.
+
+**The call.** `client.rs` marks a hit in the background: `mark_recency` spawns
+the mark (`tokio::spawn` + `spawn_blocking`), the decoder lease is returned
+immediately and `prepare` never waits for the mark. The mark observes the
+client `lifetime` token — a sign-out stops it — and deliberately **not** the
+per-selection cancel token, for the same reason the publication does not: the
+UI cancels that token as soon as another track is selected, and the track that
+just played must keep its place in the cache. A live publication of the same
+key is not marked at all: the publication writes a fresh `saved_at` of its own.
+Every error of the mark is swallowed — it can neither fail, nor delay, nor
+cancel a playback.
+
+**What was deliberately not changed.** The trust model: a hit still requires the
+sidecar to match the response and the cached descriptor to re-hash to the
+origin ETag, from the very descriptor the decoder receives. The mark reads and
+returns no byte, makes no network request and consults no session. The sidecar
+schema is unchanged (`VERSION` stays 1, the same fields), the budgets
+(200 entries / 2GiB), the atomic publication, the staging discipline, the
+`preparing` admission and the whole-file verification are untouched. No
+progressive decode and no Range: W03 still needs its own ADR.
+
+**The tests.** Four new desktop regressions in `media_cache.rs` — the recency
+grows while the audio file keeps its `dev`/`ino`/`len`/`mtime`; the eviction
+drops the entry that was never played again and keeps the one that was, with
+the *same* control in the same test that shows the older insertion going first
+without a mark; a foreign validator, size, identity, version and a missing
+record are refused with the complete file list of the namespace unchanged; a
+canceled mark leaves no staging file. Four new client regressions — the A→B→A
+sequence still transfers one body per track while the recency of A grows and
+the recency of B does not; the lease is returned while the mark is still held
+and the mark is written afterwards; a mark that cannot be applied changes
+nothing; a sign-out stops a running mark and leaves no staging file.
+
+**Measured.** `cargo fmt --all -- --check` exit 0; `cargo clippy --locked
+--workspace --all-targets -- -D warnings` exit 0; `cargo test --locked
+-p vela-desktop -- --test-threads=2` **151 passed / 0 failed / 3 ignored** (143
+before this slice, all kept); `cargo test --locked -p vela-web` 57 passed;
+`cargo build --locked -p vela-web --target wasm32-unknown-unknown --release`
+exit 0; the native X11 window (`scripts/verify_native_client.py --backend x11
+--test-preparation`) **exit 0, 314 checks, 24 PNG, `result.ok=true`,
+`temporary_originals_after_exit=0`**, reduced-motion window 8 checks — evidence
+in `target/checks/tl02-recency-native/`, produced at 06:22 on the sources of
+this slice. Five consecutive full-suite runs: 0 failures. The mutations are
+proven, not asserted: a `touch` that does nothing fails 4 of the 8 new tests,
+a client that does not mark fails exactly the 4 new client tests, and a
+recency value that is not strictly newer fails the two growth assertions.
+
+**Not covered.** The multiprocess mark↔publication race, a real ENOSPC, the
+production 200-entry/2GiB budget eviction and every non-Linux target are still
+NOT_RUN; the browser surfaces were not re-rendered because `apps/web/**` is
+byte-identical. The details are in
+[KNOWN_LIMITATIONS](KNOWN_LIMITATIONS.md#tl-02--the-cache-evicts-by-the-last-confirmed-hit-native--2026-10-24).
+
+Only `apps/desktop/src/media_cache.rs` and `apps/desktop/src/client.rs`
+changed, plus the documents of this slice. Progressive decode and Range remain
+unapproved.
+
 ## TL-01 step 1 round 5 — the test gate is serialized (native) — 2026-10-24
 
 Round 5 closes a real defect of the **test layer** of the round-4 slice and one

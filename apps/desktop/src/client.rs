@@ -265,6 +265,10 @@ struct Inner {
     cache_directory: Option<PathBuf>,
     #[cfg(test)]
     publication_pause: Mutex<Option<Arc<PublicationPause>>>,
+    /// The gate of the background recency mark, so a test can hold a mark
+    /// that a confirmed cache hit scheduled.
+    #[cfg(test)]
+    recency_pause: Mutex<Option<Arc<RecencyPause>>>,
     #[cfg(test)]
     cache_miss_barrier: Mutex<Option<Arc<CacheMissBarrier>>>,
     /// The barrier of the post-admission cache read. It is a separate instance
@@ -371,6 +375,8 @@ impl VelaClient {
                     #[cfg(test)]
                     publication_pause: Mutex::new(None),
                     #[cfg(test)]
+                    recency_pause: Mutex::new(None),
+                    #[cfg(test)]
                     cache_miss_barrier: Mutex::new(None),
                     #[cfg(test)]
                     recheck_barrier: Mutex::new(None),
@@ -456,6 +462,8 @@ impl VelaClient {
                     cache_directory: None,
                     #[cfg(test)]
                     publication_pause: Mutex::new(None),
+                    #[cfg(test)]
+                    recency_pause: Mutex::new(None),
                     #[cfg(test)]
                     cache_miss_barrier: Mutex::new(None),
                     #[cfg(test)]
@@ -1967,6 +1975,68 @@ impl VelaClient {
         }
     }
 
+    /// A verified cache hit, and the recency mark it implies.
+    ///
+    /// The mark is scheduled in the background: the path to the first sound
+    /// never waits for it.
+    async fn hit(
+        &self,
+        scope: &CacheScope,
+        expected: u64,
+        etag: &str,
+        cancel: &CancellationToken,
+    ) -> Result<Option<Arc<PreparedAudio>>, String> {
+        let Some(cached) = scope.open_verified(expected, etag, cancel).await? else {
+            return Ok(None);
+        };
+        self.mark_recency(scope, expected, etag);
+        Ok(Some(cached))
+    }
+
+    /// Mark a confirmed cache hit as recently played.
+    ///
+    /// The mark is an optimization and never a condition of playback: it runs
+    /// in the background, its result is discarded, and it can neither fail nor
+    /// delay the lease.
+    ///
+    /// It is bound to the client's `lifetime` token — a sign-out stops it —
+    /// and deliberately not to the caller's per-selection cancel token: the UI
+    /// cancels that token as soon as another track is selected, and the track
+    /// that just played must keep its place in the cache.
+    ///
+    /// A live publication of the same key is never marked: the publication
+    /// writes a fresh `saved_at` of its own.
+    fn mark_recency(&self, scope: &CacheScope, expected: u64, etag: &str) {
+        if self.in_flight_publication(&scope.key).is_some() {
+            return;
+        }
+        let root = scope.root.clone();
+        let key = scope.key.clone();
+        let etag = etag.to_owned();
+        let lifetime = self.inner.lifetime.clone();
+        #[cfg(test)]
+        let pause = self
+            .inner
+            .recency_pause
+            .lock()
+            .ok()
+            .and_then(|slot| slot.clone());
+        tokio::spawn(async move {
+            #[cfg(test)]
+            if let Some(pause) = &pause {
+                pause.enter().await;
+            }
+            let _ = tokio::task::spawn_blocking(move || {
+                media_cache::touch(&root, &key, expected, &etag, &|| lifetime.is_cancelled())
+            })
+            .await;
+            #[cfg(test)]
+            if let Some(pause) = &pause {
+                pause.finished();
+            }
+        });
+    }
+
     /// The verified lease of a warm cache entry for this key, or `None` when the
     /// cache is cold and the caller has to do an ordinary verified transfer.
     ///
@@ -1993,7 +2063,7 @@ impl VelaClient {
             let publication = self.in_flight_publication(&scope.key);
             // A hit re-hashes its own bytes from the very descriptor the decoder
             // receives, so a hit is a verified complete original.
-            if let Some(cached) = scope.open_verified(expected, etag, cancel).await? {
+            if let Some(cached) = self.hit(scope, expected, etag, cancel).await? {
                 return Ok(Some(cached));
             }
             #[cfg(test)]
@@ -2050,7 +2120,7 @@ impl VelaClient {
         let publication = self.in_flight_publication(&scope.key);
         // A hit re-hashes its own bytes from the very descriptor the decoder
         // receives, so a hit is a verified complete original.
-        if let Some(cached) = scope.open_verified(expected, etag, cancel).await? {
+        if let Some(cached) = self.hit(scope, expected, etag, cancel).await? {
             return Ok(Some(cached));
         }
         #[cfg(test)]
@@ -2073,7 +2143,7 @@ impl VelaClient {
             *admission = None;
             #[cfg(test)]
             self.reach_ended_read().await;
-            return scope.open_verified(expected, etag, cancel).await;
+            return self.hit(scope, expected, etag, cancel).await;
         }
         if *waited {
             // One wait already ran out for a publication that is *still*
@@ -2093,7 +2163,7 @@ impl VelaClient {
         }
         // The publication ended: its bytes are in the cache now, so the cache
         // is read again instead of a second body being transferred.
-        scope.open_verified(expected, etag, cancel).await
+        self.hit(scope, expected, etag, cancel).await
     }
 
     /// Take the transfer admission.
@@ -2284,6 +2354,45 @@ impl PublicationPause {
     /// publication of the same key.
     fn arm(&self) {
         self.released.send_replace(false);
+    }
+}
+
+/// A test-only gate that holds the background recency mark of a confirmed
+/// cache hit, so a test can observe that the prepared lease is returned long
+/// before the mark of the hit is written.
+#[cfg(test)]
+struct RecencyPause {
+    entered: AtomicUsize,
+    finished: AtomicUsize,
+    released: watch::Sender<bool>,
+}
+#[cfg(test)]
+impl RecencyPause {
+    fn new() -> Arc<Self> {
+        let (released, _) = watch::channel(false);
+        Arc::new(Self {
+            entered: AtomicUsize::new(0),
+            finished: AtomicUsize::new(0),
+            released,
+        })
+    }
+    /// Hold the mark until the test releases it.
+    async fn enter(&self) {
+        self.entered.fetch_add(1, Ordering::SeqCst);
+        let mut released = self.released.subscribe();
+        while !*released.borrow_and_update() {
+            if released.changed().await.is_err() {
+                break;
+            }
+        }
+    }
+    /// Count a mark that ran to its end.
+    fn finished(&self) {
+        self.finished.fetch_add(1, Ordering::SeqCst);
+    }
+    /// Let the held mark continue.
+    fn release(&self) {
+        self.released.send_replace(true);
     }
 }
 
@@ -4136,6 +4245,32 @@ mod tests {
         client
     }
 
+    /// A fixture client whose private temporary originals, reusable media cache
+    /// and background recency gate are all isolated: a test can hold the
+    /// recency mark of a confirmed cache hit and observe that the prepared
+    /// lease does not wait for it.
+    async fn fixture_client_with_recency_pause(
+        http: &HttpFixture,
+        directory: &tempfile::TempDir,
+        cache: &tempfile::TempDir,
+        pause: &Arc<RecencyPause>,
+    ) -> VelaClient {
+        let mut client = fixture_client(http, directory, cache).await;
+        let inner = Arc::get_mut(&mut client.inner).unwrap();
+        inner.recency_pause = std::sync::Mutex::new(Some(pause.clone()));
+        client
+    }
+
+    /// The recency the sidecar of one cached entry carries.
+    fn sidecar_saved_at(cache: &std::path::Path, key: &media_cache::CacheKey) -> u64 {
+        let record: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(media_cache::sidecar_path(cache, key)).unwrap())
+                .unwrap();
+        record["saved_at"]
+            .as_u64()
+            .expect("the recency of a published entry")
+    }
+
     /// A fixture client with the background publication gate and the cold-cache
     /// barrier: a test can end a running publication exactly between the cache
     /// miss and the single-flight decision.
@@ -4296,6 +4431,225 @@ mod tests {
         eventually(|| cached_audio.exists()).await;
         assert_eq!(std::fs::read(&cached_audio).unwrap(), original);
         assert!(media_cache::sidecar_path(cache.path(), &key).is_file());
+    }
+
+    /// A confirmed hit refreshes the recency of the entry it played, and only
+    /// that entry: the track that was never played again keeps the recency of
+    /// its publication. The body of a track is still transferred exactly once.
+    #[tokio::test]
+    async fn a_confirmed_hit_refreshes_the_recency_of_the_entry_it_played() {
+        let first_bytes = vec![51_u8; 16 * 1024];
+        let second_bytes = vec![52_u8; 12 * 1024];
+        let first_counters = Arc::new(StreamCounters::default());
+        let second_counters = Arc::new(StreamCounters::default());
+        let router = tracked_streams(&[
+            (
+                "20000000-0000-4000-8000-0000000000a1".to_owned(),
+                first_bytes.clone(),
+                first_counters.clone(),
+            ),
+            (
+                "20000000-0000-4000-8000-0000000000b2".to_owned(),
+                second_bytes.clone(),
+                second_counters.clone(),
+            ),
+        ]);
+        let http = HttpFixture::start(with_login(router)).await;
+        let temporary = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let client = fixture_client(&http, &temporary, &cache).await;
+        let first = sample_track_with("20000000-0000-4000-8000-0000000000a1", first_bytes.len());
+        let second = sample_track_with("20000000-0000-4000-8000-0000000000b2", second_bytes.len());
+        let first_key = cache_key(
+            &http.origin,
+            USER_ID,
+            "20000000-0000-4000-8000-0000000000a1",
+        );
+        let second_key = cache_key(
+            &http.origin,
+            USER_ID,
+            "20000000-0000-4000-8000-0000000000b2",
+        );
+
+        // A and B are published; the recency of both is the one of their
+        // publication.
+        for (track, key) in [(&first, &first_key), (&second, &second_key)] {
+            let prepared = client
+                .prepare(track, CancellationToken::new(), progress().0)
+                .await
+                .unwrap();
+            assert_eq!(
+                std::fs::read(prepared.path()).unwrap().len(),
+                track.size_bytes as usize
+            );
+            drop(prepared);
+            await_publication(&client, key).await;
+        }
+        let first_recency = sidecar_saved_at(cache.path(), &first_key);
+        let second_recency = sidecar_saved_at(cache.path(), &second_key);
+
+        // A again: the confirmed hit refreshes the recency of A alone.
+        let warm = client
+            .prepare(&first, CancellationToken::new(), progress().0)
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(warm.path()).unwrap(), first_bytes);
+        drop(warm);
+        eventually(|| sidecar_saved_at(cache.path(), &first_key) > first_recency).await;
+        assert_eq!(
+            sidecar_saved_at(cache.path(), &second_key),
+            second_recency,
+            "an entry that was not played again keeps the recency of its publication"
+        );
+        assert_eq!(
+            first_counters.gets.load(Ordering::SeqCst),
+            1,
+            "A→B→A must not re-download A's body"
+        );
+        assert_eq!(second_counters.gets.load(Ordering::SeqCst), 1);
+    }
+
+    /// The recency mark of a confirmed hit is written in the background: the
+    /// prepared lease is returned long before the mark is on disk.
+    #[tokio::test]
+    async fn a_confirmed_hit_is_marked_in_the_background_and_never_delays_the_lease() {
+        let original = vec![61_u8; 16 * 1024];
+        let counters = Arc::new(StreamCounters::default());
+        let router = tracked_streams(&[(TRACK_ID.to_owned(), original.clone(), counters.clone())]);
+        let http = HttpFixture::start(with_login(router)).await;
+        let temporary = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let pause = RecencyPause::new();
+        let client = fixture_client_with_recency_pause(&http, &temporary, &cache, &pause).await;
+        let track = sample_track_with(TRACK_ID, original.len());
+        let key = cache_key(&http.origin, USER_ID, TRACK_ID);
+
+        // Cold: the entry is published in the background.
+        let prepared = client
+            .prepare(&track, CancellationToken::new(), progress().0)
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(prepared.path()).unwrap(), original);
+        drop(prepared);
+        await_publication(&client, &key).await;
+        let published = sidecar_saved_at(cache.path(), &key);
+
+        // Warm: the lease is returned while the mark of the hit is still held.
+        let warm = client
+            .prepare(&track, CancellationToken::new(), progress().0)
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(warm.path()).unwrap(), original);
+        eventually(|| pause.entered.load(Ordering::SeqCst) == 1).await;
+        assert_eq!(
+            pause.finished.load(Ordering::SeqCst),
+            0,
+            "the mark must still be running when the lease is returned"
+        );
+        assert_eq!(
+            counters.gets.load(Ordering::SeqCst),
+            1,
+            "a warm hit transfers no body"
+        );
+        assert_eq!(
+            sidecar_saved_at(cache.path(), &key),
+            published,
+            "the held mark has written nothing yet"
+        );
+
+        // Releasing the mark refreshes the recency of the entry.
+        pause.release();
+        eventually(|| pause.finished.load(Ordering::SeqCst) == 1).await;
+        eventually(|| sidecar_saved_at(cache.path(), &key) > published).await;
+    }
+
+    /// A mark that cannot be applied changes nothing: the prepared lease stays
+    /// the verified original and the cache keeps no staging file.
+    #[tokio::test]
+    async fn a_recency_mark_that_cannot_be_applied_does_not_affect_the_lease() {
+        let original = vec![62_u8; 16 * 1024];
+        let counters = Arc::new(StreamCounters::default());
+        let router = tracked_streams(&[(TRACK_ID.to_owned(), original.clone(), counters.clone())]);
+        let http = HttpFixture::start(with_login(router)).await;
+        let temporary = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let pause = RecencyPause::new();
+        let client = fixture_client_with_recency_pause(&http, &temporary, &cache, &pause).await;
+        let track = sample_track_with(TRACK_ID, original.len());
+        let key = cache_key(&http.origin, USER_ID, TRACK_ID);
+
+        let prepared = client
+            .prepare(&track, CancellationToken::new(), progress().0)
+            .await
+            .unwrap();
+        drop(prepared);
+        await_publication(&client, &key).await;
+
+        // The warm hit is held in its mark; the record disappears meanwhile.
+        let warm = client
+            .prepare(&track, CancellationToken::new(), progress().0)
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(warm.path()).unwrap(), original);
+        eventually(|| pause.entered.load(Ordering::SeqCst) == 1).await;
+        std::fs::remove_file(media_cache::sidecar_path(cache.path(), &key)).unwrap();
+        pause.release();
+        eventually(|| pause.finished.load(Ordering::SeqCst) == 1).await;
+
+        // The mark found nothing and wrote nothing: the lease is unaffected.
+        assert_eq!(std::fs::read(warm.path()).unwrap(), original);
+        assert!(!media_cache::sidecar_path(cache.path(), &key).exists());
+        assert_eq!(
+            staging_files(&media_cache::account_root(cache.path(), &key)),
+            0,
+            "a mark that cannot be applied leaves no staging file"
+        );
+    }
+
+    /// A sign-out stops a running recency mark: the mark observes the client
+    /// lifetime, writes nothing and leaves no staging file behind.
+    #[tokio::test]
+    async fn a_sign_out_stops_a_running_recency_mark() {
+        let original = vec![63_u8; 16 * 1024];
+        let counters = Arc::new(StreamCounters::default());
+        let router = tracked_streams(&[(TRACK_ID.to_owned(), original.clone(), counters.clone())]);
+        let http = HttpFixture::start(with_login(router)).await;
+        let temporary = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let pause = RecencyPause::new();
+        let client = fixture_client_with_recency_pause(&http, &temporary, &cache, &pause).await;
+        let track = sample_track_with(TRACK_ID, original.len());
+        let key = cache_key(&http.origin, USER_ID, TRACK_ID);
+
+        let prepared = client
+            .prepare(&track, CancellationToken::new(), progress().0)
+            .await
+            .unwrap();
+        drop(prepared);
+        await_publication(&client, &key).await;
+        let published = sidecar_saved_at(cache.path(), &key);
+
+        let warm = client
+            .prepare(&track, CancellationToken::new(), progress().0)
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(warm.path()).unwrap(), original);
+        eventually(|| pause.entered.load(Ordering::SeqCst) == 1).await;
+
+        // The sign-out cancels the client lifetime; the mark stops with it.
+        client.logout(CancellationToken::new()).await.unwrap();
+        pause.release();
+        eventually(|| pause.finished.load(Ordering::SeqCst) == 1).await;
+        assert_eq!(
+            sidecar_saved_at(cache.path(), &key),
+            published,
+            "a stopped mark writes nothing"
+        );
+        assert_eq!(
+            staging_files(&media_cache::account_root(cache.path(), &key)),
+            0,
+            "a stopped mark leaves no staging file"
+        );
     }
 
     #[tokio::test]

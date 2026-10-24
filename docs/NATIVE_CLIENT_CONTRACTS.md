@@ -241,8 +241,12 @@ requires the sidecar to match the response and the cached descriptor to re-hash
 to that ETag; the same fd is rewound for decode. A denial never consults cached
 bytes. Misses keep the unchanged whole-file size+BLAKE3 unnamed lease, then warm
 the cache best-effort with unique staging, fsync and atomic publish. Bounds are
-200 entries/2GiB per account, staging/orphans counted, cache-only FIFO eviction;
-pinned offline copies live elsewhere and are never evicted. ADR
+200 entries/2GiB per account, staging/orphans counted, cache-only eviction of
+the least recently played pairs; pinned offline copies live elsewhere and are
+never evicted. A confirmed hit refreshes the recency of its entry in the
+background: only the sidecar's `saved_at` is replaced, the cached original is
+not touched, and the mark is bound to the client lifetime, not to the
+per-selection cancel token. ADR
 [DECISIONS/0022](DECISIONS/0022-native-media-cache.md). Real-process body
 counters, ENOSPC and production-budget eviction remain NOT_RUN.
 
