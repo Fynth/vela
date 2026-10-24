@@ -44,6 +44,34 @@ contract. ADR0022 explicitly requires a separate ADR before that relaxation.
    W03 needs its own ADR naming the exact trust model, the bounded fallback and
    the verified path it keeps.
 
+## Round 2 corrections (2026-10-24)
+
+The first implementation of decision 2 was rejected in review with three P1
+defects in the coordination itself. The corrections keep the decision and
+change its mechanics:
+
+1. **The wait never holds the transfer admission.** The `preparing` semaphore
+   covers the transfer itself (and the cache read that serves a hit), never the
+   wait for a running publication. A `prepare` that waits for a publication of
+   track A therefore cannot refuse the play of track B with `PREPARE_BUSY`.
+   The admission is taken after the wait, and the state is re-checked with it
+   held: the cache is read again, and a publication of the same key that runs
+   now is waited for without the admission and taken again for the transfer.
+2. **The single-flight slot is observed before the cache is read.** A
+   publication that ends between the cache miss and the decision can no longer
+   be mistaken for a cold cache: the slot was captured first, the wait returns
+   immediately, and the cache is read again instead of a second body being
+   transferred. The slot carries an explicit *ended* flag that flips only after
+   the cache entry was published (or the copy failed), so a waiter that observes
+   the end knows the state of the cache.
+3. **A live publication is never replaced.** `register_publication` joins a
+   running publication of the same key instead of overwriting its entry: a
+   second publication would copy the very same bytes. An expired wait therefore
+   creates no second publisher, and a new publication of that key is possible
+   only after the previous one really ended. The registry bound counts *live*
+   publications, not dictionary entries: an entry of a publication that ended
+   describes nothing that runs.
+
 ## Consequences
 
 - Cold playback no longer pays a second full copy before the first sample.
@@ -51,6 +79,12 @@ contract. ADR0022 explicitly requires a separate ADR before that relaxation.
   waits for the publication rather than re-downloading.
 - A publication aborted by logout/cancel leaves no lease, no staging file and no
   half-published entry; a later `prepare` re-verifies from the origin.
+- A pending publication never blocks another track: the wait for it holds no
+  transfer admission.
+- A publication that ends between the cache miss and the single-flight
+  decision costs no second body; the cache is read again.
+- An expired wait costs one ordinary transfer and no second publisher; the
+  running publication keeps the single-flight slot of its key.
 - Eviction remains insertion-age FIFO; this ADR changes neither budgets nor
   integrity checks.
 - Progressive playback stays a follow-up with its own ADR and its own evidence.
@@ -62,5 +96,11 @@ publication completes; A→B→A performs one GET per track with unchanged body
 counters; a concurrent second `prepare` during publication issues zero extra
 GETs; a failed publication still plays and re-fetches exactly once; logout
 during publication stops it and leaves no orphan staging permanently behind.
+Round 2 adds: a pending publication does not block the play of another track
+(the other track is leased, not refused as busy); a publication that ends
+between the cache miss and the single-flight decision costs no second body
+(1 GET, 65536 bytes, not 2 GETs and 131072 bytes); an expired wait starts no
+second publisher and leaves exactly one live registry entry, and exactly one
+new publication runs after the first one ended.
 Existing desktop suite (129 passed / 0 failed / 3 ignored at baseline) must stay
 green.

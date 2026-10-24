@@ -1,5 +1,40 @@
 # Unsupported and unverified functionality
 
+## TL-01 step 1 round 2 — the publication coordination no longer blocks, duplicates or lies (native) — 2026-10-24
+
+The three coordination defects of round 1 are fixed and proven. What is **not**
+covered by that increment is here.
+
+- **A publication that starts in a narrow window can still cost a second
+  body.** The single-flight slot is observed before the cache is read, and the
+  cache is read again after the transfer admission is taken. A publication of
+  the same key that starts *between* that observation and the transfer is
+  caught by the post-admission re-check, which waits for it without holding the
+  admission. A publication that starts after that re-check is not waited for,
+  and the transfer costs a second body for that key. The window is a single
+  cache read plus one admission, and it was not measured under real
+  concurrent load.
+- **The wait is bounded, not cancelled by the per-selection token.** The wait
+  for a running publication observes the caller's cancel token and the client
+  lifetime, and it runs out after 60 s. It does not observe the per-selection
+  cancel token of the publication itself, which is deliberate (see ADR0026).
+- **The registry bound was not measured under real concurrent load.** At 32
+  live publications the warm-up stays inside `prepare` again, so the first
+  sound can pay the copy cost again in that corner. Only the refusal, the
+  fallback and the live-publication accounting are asserted.
+- **The expired-wait path was exercised with a shortened wait.** The
+  production wait is 60 s; the test shortens it to 200 ms so the path is
+  reachable inside a suite. The 60 s production value itself was not waited
+  out in a test, and the real 60.014 s reviewer timeline was not re-measured
+  after the fix.
+- **The concurrency was exercised in-process.** The three coordination tests
+  run against the in-process Vela server fixture with one client and one
+  account. Parallel *clients* against a real origin, and a real origin under
+  load, were not exercised.
+- **The browser surfaces were not re-rendered.** No web file, CSS or asset
+  changed in this increment; `apps/web/**` is byte-identical and only
+  `cargo test -p vela-web` and the wasm build were executed.
+
 ## TL-01 step 1 — the warm cache no longer delays the first sound (native) — 2026-10-23
 
 The native cache warm-up left the path to the decoder. What is **not** covered

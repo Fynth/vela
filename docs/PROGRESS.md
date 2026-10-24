@@ -1,5 +1,71 @@
 # Verified progress
 
+## TL-01 step 1 round 2 — the publication coordination no longer blocks, duplicates or lies (native) — 2026-10-24
+
+The round-1 slice was rejected in review with three P1 defects in the
+coordination of the cache publications themselves. All three are fixed in
+`apps/desktop/src/client.rs`; the trust model, the web client, the server, the
+domain API, the migrations and the workspace manifest/lock are untouched.
+
+**Defect 1 — the wait for a publication held the transfer admission.** The
+`preparing` semaphore was taken at the very beginning of `prepare` and held
+through the whole wait for a running publication (up to 60 s). A held
+publication of track A plus an offline preparation of A therefore refused the
+play of track B with `PREPARE_BUSY` after one second. The admission now covers
+the transfer itself only: it is taken *after* the wait, and the wait itself
+never holds it. The state is re-checked with the admission held — the cache is
+read again, and a publication of the same key that runs now is waited for
+without the admission, which is then taken again for the transfer.
+
+**Defect 2 — a publication that ended between the cache miss and the
+single-flight decision was lost.** The registry held a `Weak` to a gate: a
+publication that finished in that window made the `Weak` dead, the wait was
+skipped and a second body was transferred even though the sidecar was already
+published (2 GETs, 131072 bytes instead of 1 GET, 65536 bytes). The
+single-flight slot is now observed *before* the cache is read and carries an
+explicit *ended* flag that flips only after the cache entry was published (or
+the copy failed). A publication that ends in that window is still waited for
+(the wait returns immediately) and the cache is read again: the entry is never
+mistaken for a cold cache.
+
+**Defect 3 — an expired wait created a second publisher.** `register_publication`
+replaced the entry of the same key, so after a 60 s wait a second publication
+ran for the same key while the first one was still alive (2 live publications,
+1 registry entry, and `registry.len() <= 32` did not bound the real tasks). A
+live publication of a key is now never replaced: a second publication *joins*
+it, because it would copy the very same bytes. The bound counts live
+publications, and the entry of a publication that ended describes nothing that
+runs. An expired wait therefore costs one ordinary transfer and no second
+publisher.
+
+**Tests.** Three new desktop tests cover exactly the three defects:
+`a_pending_publication_does_not_block_the_play_of_another_track`,
+`a_publication_that_ends_between_the_cache_miss_and_the_decision_does_not_transfer_twice`
+and `an_expired_wait_does_not_start_a_second_publisher`. The bounded-registry
+test was extended to prove that the bound counts live publications and not
+dictionary entries. All three new tests fail on the round-1 behaviour and pass
+now; the failure output is in
+[QA_EVIDENCE](QA_EVIDENCE.md#tl-01-step-1-round-2--the-publication-coordination-no-longer-blocks-duplicates-or-lies-native--2026-10-24).
+
+**Measured.** `cargo fmt --all -- --check` exit 0; strict Clippy
+`--workspace --all-targets` and `-p vela-desktop --all-targets --features
+native-qa` exit 0; `cargo test --locked -p vela-desktop -- --test-threads=2`
+**138 passed / 0 failed / 3 ignored** (135 at round 1, 129 at the baseline,
+all kept); `cargo test --locked -p vela-web` 57 passed; the wasm release build
+of `vela-web` exit 0; the real X11 native QA
+(`scripts/verify_native_client.py --backend x11 --test-preparation`) exit 0
+with `report.json` `ok=true` (**314 checks, 24 screenshots, 0 temporary
+originals**), including the real preparation journey ("real 65536-byte partial
+transfer canceled on socket, generation 3→4, no late load and successful Play
+retry"). Evidence: `target/checks/tl01-round2-native/`.
+
+**Still not run.** Progressive decode and Range playback (W03, own ADR), a
+real-process ENOSPC/eviction run, the production 200-entry/2GiB budget,
+hardware audio output, a Wayland session, screen readers, physical media keys
+and every non-Linux target. The browser surfaces were not re-rendered: this
+increment changes no web file, no CSS and no asset, and `apps/web/**` is
+byte-identical.
+
 ## TL-01 step 1 — the warm cache no longer delays the first sound (native) — 2026-10-23
 
 `VelaClient::prepare` verified the original and then *synchronously awaited* the

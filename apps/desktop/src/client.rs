@@ -11,7 +11,7 @@ use futures_util::StreamExt;
 use reqwest::{Client, Method, Response, StatusCode, header};
 use serde::de::DeserializeOwned;
 #[cfg(test)]
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::{
     collections::HashMap,
     future::Future,
@@ -183,10 +183,62 @@ impl ArtworkError {
 pub struct VelaClient {
     inner: Arc<Inner>,
 }
-/// The gate one running cache publication holds for its whole duration. A second
-/// prepare of the same key waits for the gate instead of starting a second full
-/// transfer.
-type PublicationGate = tokio::sync::Mutex<()>;
+/// The single-flight slot of one running cache publication.
+///
+/// A second prepare of the same key waits for the slot instead of starting a
+/// second full transfer. The slot is registered in the registry before the
+/// publication starts and released when it ends, so the registry counts live
+/// publications and not dictionary entries.
+struct Publication {
+    /// Flips once the publication ended. The cache entry was published (or the
+    /// copy failed) before that, so a waiter that observes the end knows the
+    /// state of the cache.
+    ended: watch::Sender<bool>,
+}
+impl Publication {
+    fn new() -> Arc<Self> {
+        let (ended, _) = watch::channel(false);
+        Arc::new(Self { ended })
+    }
+    /// True once the publication ended.
+    fn ended(&self) -> bool {
+        *self.ended.borrow()
+    }
+    /// Mark the publication as ended.
+    fn finish(&self) {
+        self.ended.send_replace(true);
+    }
+}
+
+/// Releases the single-flight slot of a publication when it ends, even when the
+/// publication task is aborted.
+struct PublicationRun {
+    inner: Weak<Inner>,
+    key: media_cache::CacheKey,
+    publication: Arc<Publication>,
+}
+impl Drop for PublicationRun {
+    fn drop(&mut self) {
+        // The publication ended: the cache entry was published (or the copy
+        // failed) before this point, so a waiter that observes the end can
+        // trust the state of the cache.
+        self.publication.finish();
+        let Some(inner) = self.inner.upgrade() else {
+            return;
+        };
+        let Ok(mut registry) = inner.publications.lock() else {
+            return;
+        };
+        // Only this publication's own entry is removed: a newer publication of
+        // the same key must never be dropped.
+        if registry
+            .get(&self.key)
+            .is_some_and(|entry| Weak::ptr_eq(entry, &Arc::downgrade(&self.publication)))
+        {
+            registry.remove(&self.key);
+        }
+    }
+}
 struct Inner {
     http: Client,
     origin: Url,
@@ -196,16 +248,25 @@ struct Inner {
     token: String,
     lifetime: CancellationToken,
     preparing: Arc<Semaphore>,
-    /// Cache publications that are still running. A second prepare of the same key
-    /// waits for the running publication instead of starting a second full
-    /// transfer, so one body per track is transferred once.
-    publications: Mutex<HashMap<media_cache::CacheKey, Weak<PublicationGate>>>,
+    /// Cache publications that are still running, keyed by the cache key they
+    /// publish. A second prepare of the same key waits for the running
+    /// publication instead of starting a second full transfer, so one body per
+    /// track is transferred once. The entry is a weak reference to the
+    /// publication's single-flight slot: it disappears with the publication it
+    /// describes.
+    publications: Mutex<HashMap<media_cache::CacheKey, Weak<Publication>>>,
+    /// The bounded wait for a running publication of the same key. Production
+    /// always uses `PUBLICATION_WAIT`; the tests shorten it to keep the suite
+    /// fast.
+    publication_wait: Duration,
     #[cfg(test)]
     temporary_directory: Option<PathBuf>,
     #[cfg(test)]
     cache_directory: Option<PathBuf>,
     #[cfg(test)]
     publication_pause: Mutex<Option<Arc<PublicationPause>>>,
+    #[cfg(test)]
+    cache_miss_barrier: Mutex<Option<Arc<CacheMissBarrier>>>,
 }
 #[derive(Clone)]
 struct Session {
@@ -291,12 +352,15 @@ impl VelaClient {
                     lifetime,
                     preparing: Arc::new(Semaphore::new(1)),
                     publications: Mutex::new(HashMap::new()),
+                    publication_wait: PUBLICATION_WAIT,
                     #[cfg(test)]
                     temporary_directory: None,
                     #[cfg(test)]
                     cache_directory: None,
                     #[cfg(test)]
                     publication_pause: Mutex::new(None),
+                    #[cfg(test)]
+                    cache_miss_barrier: Mutex::new(None),
                 }),
             },
             auth,
@@ -370,12 +434,15 @@ impl VelaClient {
                     lifetime,
                     preparing: Arc::new(Semaphore::new(1)),
                     publications: Mutex::new(HashMap::new()),
+                    publication_wait: PUBLICATION_WAIT,
                     #[cfg(test)]
                     temporary_directory: None,
                     #[cfg(test)]
                     cache_directory: None,
                     #[cfg(test)]
                     publication_pause: Mutex::new(None),
+                    #[cfg(test)]
+                    cache_miss_barrier: Mutex::new(None),
                 }),
             },
             auth,
@@ -464,15 +531,6 @@ impl VelaClient {
             &self.inner.lifetime,
             Duration::from_secs(300),
             async {
-                // A canceled prior writer retains admission through actual cleanup.
-                // Give normal rapid selections a short, cancellable cleanup window.
-                let permit = tokio::time::timeout(
-                    Duration::from_secs(1),
-                    self.inner.preparing.clone().acquire_owned(),
-                )
-                .await
-                .map_err(|_| PREPARE_BUSY.to_owned())?
-                .map_err(|_| PREPARE_BUSY.to_owned())?;
                 progress.send_replace(DownloadProgress {
                     received_bytes: 0,
                     total_bytes: expected,
@@ -493,24 +551,20 @@ impl VelaClient {
                         Some(_) | None => {}
                     }
                 }
+                // At most one wait for a running publication runs per prepare:
+                // a publication that does not end in time must not turn into a
+                // second body per track, and the ordinary verified transfer
+                // decides after that.
+                let mut waited = false;
                 if let (Some(scope), Some(etag)) = (&scope, &validator) {
-                    // (b) A hit re-hashes its own bytes from the very descriptor the
-                    // decoder receives, so a hit is a verified complete original.
-                    if let Some(cached) = scope.open_verified(expected, etag, &cancel).await? {
-                        progress.send_replace(DownloadProgress {
-                            received_bytes: expected,
-                            total_bytes: expected,
-                        });
-                        return Ok(cached);
-                    }
-                    // (b2) A publication of this exact key may still be running: its
-                    // verified bytes are already on their way to the cache. Waiting
-                    // for it is cheaper than a second full transfer, and the cache is
-                    // then re-checked once. A publication that failed leaves the
-                    // cache cold, and the ordinary transfer below decides.
-                    if let Some(publication) = self.in_flight_publication(&scope.key)
-                        && self.wait_for_publication(&publication, &cancel).await?
-                        && let Some(cached) = scope.open_verified(expected, etag, &cancel).await?
+                    // (b) The reusable cache of this account on this origin. A
+                    // running publication of the same key is waited for instead
+                    // of a second full transfer, and that wait never holds the
+                    // transfer admission: a pending publication of one track can
+                    // never block the play of another track.
+                    if let Some(cached) = self
+                        .cached_lease(scope, expected, etag, &cancel, &mut waited)
+                        .await?
                     {
                         progress.send_replace(DownloadProgress {
                             received_bytes: expected,
@@ -519,6 +573,30 @@ impl VelaClient {
                         return Ok(cached);
                     }
                 }
+                // The transfer admission covers the transfer itself only. It is
+                // taken after the wait above, so a pending publication of one
+                // track can never block the play of another track.
+                let mut admission = Some(self.admit().await?);
+                if let (Some(scope), Some(etag)) = (&scope, &validator) {
+                    // The admission is not a promise about the world: the cache
+                    // and the running publication are re-checked, not assumed.
+                    if let Some(cached) = self
+                        .recheck_cache(scope, expected, etag, &cancel, &mut admission, &mut waited)
+                        .await?
+                    {
+                        progress.send_replace(DownloadProgress {
+                            received_bytes: expected,
+                            total_bytes: expected,
+                        });
+                        return Ok(cached);
+                    }
+                }
+                // The transfer itself always runs under the admission. A wait
+                // above may have released it, and the transfer takes it again.
+                let permit = match admission {
+                    Some(permit) => permit,
+                    None => self.admit().await?,
+                };
                 let response = self
                     .request(
                         Method::GET,
@@ -606,15 +684,25 @@ impl VelaClient {
                 // copy runs in the background: the first sound never waits for it.
                 // A full cache, a full disk or a canceled copy must never fail or
                 // invalidate playback that already succeeded.
-                if let Some(scope) = &scope
-                    && !self
+                if let Some(scope) = &scope {
+                    match self
                         .publish(scope, prepared.clone(), verified_hash.clone())
                         .await
-                {
-                    // The registry of running publications is full: keep the
-                    // previous synchronous publication instead of silently
-                    // skipping the warm-up.
-                    scope.store(&prepared, &verified_hash, &cancel).await;
+                    {
+                        // The copy runs in the background.
+                        PublicationStart::Started(_) => {}
+                        // A live publication of the same key already publishes the
+                        // very same bytes: a second copy would only duplicate the
+                        // work, and the running publication keeps the single-flight
+                        // slot of the key.
+                        PublicationStart::Joined => {}
+                        // The registry of running publications is full: keep the
+                        // previous synchronous publication instead of silently
+                        // skipping the warm-up.
+                        PublicationStart::Refused => {
+                            scope.store(&prepared, &verified_hash, &cancel).await;
+                        }
+                    }
                 }
                 Ok(prepared)
             },
@@ -1782,35 +1870,46 @@ impl VelaClient {
 
     /// The publication that is still running for this key, if any.
     ///
-    /// The registry holds a weak reference to the gate, so an entry disappears as
-    /// soon as its publication ended.
-    fn in_flight_publication(&self, key: &media_cache::CacheKey) -> Option<Arc<PublicationGate>> {
+    /// The registry holds a weak reference to the publication's single-flight
+    /// slot, so an entry disappears as soon as its publication ended. A slot
+    /// that already ended is not a running publication: its bytes are in the
+    /// cache (or the copy failed), and the cache answers for the key.
+    fn in_flight_publication(&self, key: &media_cache::CacheKey) -> Option<Arc<Publication>> {
         let registry = self.inner.publications.lock().ok()?;
-        registry.get(key).and_then(Weak::upgrade)
+        let publication = registry.get(key)?.upgrade()?;
+        if publication.ended() {
+            return None;
+        }
+        Some(publication)
     }
 
     /// Register a publication that is about to run.
     ///
-    /// The gate is taken before the entry becomes visible, so a waiter can never
-    /// observe an unlocked publication. The registry is bounded: at the limit the
-    /// caller keeps the previous synchronous publication instead of accumulating
-    /// unbounded background copies.
-    async fn register_publication(
-        &self,
-        key: &media_cache::CacheKey,
-    ) -> Option<tokio::sync::OwnedMutexGuard<()>> {
-        let gate = Arc::new(tokio::sync::Mutex::new(()));
-        let guard = gate.clone().lock_owned().await;
+    /// A live publication of the same key is never replaced: the new
+    /// publication joins it, because a second publication would copy the very
+    /// same bytes. The registry is bounded by the number of *live* publications
+    /// and not by the number of entries: an entry of a publication that ended
+    /// counts for nothing.
+    fn register_publication(&self, key: &media_cache::CacheKey) -> PublicationStart {
         let Ok(mut registry) = self.inner.publications.lock() else {
-            return None;
+            return PublicationStart::Refused;
         };
         // A publication that already ended is not in flight any more.
-        registry.retain(|_, gate| gate.strong_count() > 0);
-        if registry.len() >= MAX_IN_FLIGHT_PUBLICATIONS {
-            return None;
+        registry.retain(|_, publication| {
+            publication
+                .upgrade()
+                .is_some_and(|publication| !publication.ended())
+        });
+        if registry.contains_key(key) {
+            // A live publication of this key exists: it is never replaced.
+            return PublicationStart::Joined;
         }
-        registry.insert(key.clone(), Arc::downgrade(&gate));
-        Some(guard)
+        if registry.len() >= MAX_IN_FLIGHT_PUBLICATIONS {
+            return PublicationStart::Refused;
+        }
+        let publication = Publication::new();
+        registry.insert(key.clone(), Arc::downgrade(&publication));
+        PublicationStart::Started(publication)
     }
 
     /// Wait for a running publication of the same key to end.
@@ -1821,21 +1920,157 @@ impl VelaClient {
     /// an ordinary verified transfer.
     async fn wait_for_publication(
         &self,
-        publication: &Arc<PublicationGate>,
+        publication: &Arc<Publication>,
         cancel: &CancellationToken,
     ) -> Result<bool, String> {
+        let mut ended = publication.ended.subscribe();
         tokio::select! {
             biased;
             _ = cancel.cancelled() => Err(CANCELED.into()),
             _ = self.inner.lifetime.cancelled() => Err(SIGNED_OUT.into()),
-            result = tokio::time::timeout(PUBLICATION_WAIT, publication.lock()) => {
+            result = tokio::time::timeout(self.inner.publication_wait, async {
+                loop {
+                    if *ended.borrow_and_update() {
+                        break;
+                    }
+                    if ended.changed().await.is_err() {
+                        break;
+                    }
+                }
+            }) => {
                 match result {
-                    // The guard is released here: the publication is over and the
-                    // next publication of this key may run.
-                    Ok(_guard) => Ok(true),
+                    // The publication is over: its bytes are in the cache (or the
+                    // copy failed) and the next publication of this key may run.
+                    Ok(()) => Ok(true),
                     Err(_elapsed) => Ok(false),
                 }
             },
+        }
+    }
+
+    /// The verified lease of a warm cache entry for this key, or `None` when the
+    /// cache is cold and the caller has to do an ordinary verified transfer.
+    ///
+    /// The publication of a key is single-flight: while a publication of this
+    /// exact key runs, this waits for it instead of letting the caller start a
+    /// second full transfer, and the cache is read again afterwards. The
+    /// single-flight slot is observed *before* the cache is read, so a
+    /// publication that ends between the two is never mistaken for a cold
+    /// cache: the cache is read again instead of a second body being
+    /// transferred.
+    ///
+    /// The wait is bounded, honors the caller's cancellation and the client's
+    /// lifetime, and never holds the transfer admission: a pending publication
+    /// of one track can never block the play of another track.
+    async fn cached_lease(
+        &self,
+        scope: &CacheScope,
+        expected: u64,
+        etag: &str,
+        cancel: &CancellationToken,
+        waited: &mut bool,
+    ) -> Result<Option<Arc<PreparedAudio>>, String> {
+        loop {
+            let publication = self.in_flight_publication(&scope.key);
+            // A hit re-hashes its own bytes from the very descriptor the decoder
+            // receives, so a hit is a verified complete original.
+            if let Some(cached) = scope.open_verified(expected, etag, cancel).await? {
+                return Ok(Some(cached));
+            }
+            #[cfg(test)]
+            self.reach_cache_miss().await;
+            let Some(publication) = publication else {
+                // Nothing publishes this key and the cache is cold: the caller
+                // does the ordinary verified transfer.
+                return Ok(None);
+            };
+            if *waited {
+                // One wait already ran out for this key: the caller does the
+                // ordinary verified transfer. The running publication keeps the
+                // single-flight slot of the key; it is never replaced.
+                return Ok(None);
+            }
+            *waited = true;
+            if self.wait_for_publication(&publication, cancel).await? {
+                // The publication ended: its bytes are in the cache now, and the
+                // cache is read again at the top of the loop.
+                continue;
+            }
+            // The wait ran out: the caller does the ordinary verified transfer.
+            return Ok(None);
+        }
+    }
+
+    /// Re-check the reusable cache with the transfer admission held.
+    ///
+    /// An admission is not a promise about the world: the cache is read again,
+    /// and a publication of the same key that runs now is waited for instead of
+    /// a second full transfer. That wait never holds the admission, so a
+    /// pending publication of one track can never block the play of another
+    /// track: the admission is released for the wait and taken again for the
+    /// transfer.
+    async fn recheck_cache(
+        &self,
+        scope: &CacheScope,
+        expected: u64,
+        etag: &str,
+        cancel: &CancellationToken,
+        admission: &mut Option<OwnedSemaphorePermit>,
+        waited: &mut bool,
+    ) -> Result<Option<Arc<PreparedAudio>>, String> {
+        if let Some(cached) = scope.open_verified(expected, etag, cancel).await? {
+            return Ok(Some(cached));
+        }
+        let Some(publication) = self.in_flight_publication(&scope.key) else {
+            return Ok(None);
+        };
+        if *waited {
+            // One wait already ran out for this key: the ordinary verified
+            // transfer below decides. The running publication keeps the
+            // single-flight slot of the key; it is never replaced.
+            return Ok(None);
+        }
+        *waited = true;
+        // The wait does not hold the admission.
+        *admission = None;
+        if !self.wait_for_publication(&publication, cancel).await? {
+            // The wait ran out: the ordinary verified transfer below decides. The
+            // running publication keeps the single-flight slot of the key; it is
+            // never replaced.
+            return Ok(None);
+        }
+        // The publication ended: its bytes are in the cache now.
+        scope.open_verified(expected, etag, cancel).await
+    }
+
+    /// Take the transfer admission.
+    ///
+    /// The admission covers the transfer itself only. A canceled prior writer
+    /// retains it through its actual cleanup, so normal rapid selections get a
+    /// short, cancellable window.
+    async fn admit(&self) -> Result<OwnedSemaphorePermit, String> {
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            self.inner.preparing.clone().acquire_owned(),
+        )
+        .await
+        .map_err(|_| PREPARE_BUSY.to_owned())?
+        .map_err(|_| PREPARE_BUSY.to_owned())
+    }
+
+    /// Hold a cold cache right before the single-flight decision, so a test can
+    /// end a running publication exactly between the cache miss and the
+    /// decision.
+    #[cfg(test)]
+    async fn reach_cache_miss(&self) {
+        let barrier = self
+            .inner
+            .cache_miss_barrier
+            .lock()
+            .ok()
+            .and_then(|slot| slot.clone());
+        if let Some(barrier) = barrier {
+            barrier.reach().await;
         }
     }
 
@@ -1851,20 +2086,27 @@ impl VelaClient {
     /// warm-up of the track that just played would break the A→B→A guarantee
     /// that one body per track is transferred once.
     ///
-    /// Returns `false` when the registry of running publications is full; the
-    /// caller then keeps the previous synchronous publication.
+    /// A live publication of the same key is never replaced: the caller joins
+    /// it, because a second publication would copy the very same bytes. When
+    /// the registry of running publications is full the publication is refused
+    /// and the caller keeps the previous synchronous publication.
     async fn publish(
         &self,
         scope: &CacheScope,
         prepared: Arc<PreparedAudio>,
         etag: String,
-    ) -> bool {
-        let Some(guard) = self.register_publication(&scope.key).await else {
-            return false;
+    ) -> PublicationStart {
+        let start = self.register_publication(&scope.key);
+        let PublicationStart::Started(publication) = start else {
+            return start;
         };
+        // The caller only needs to know which way the warm-up went; the slot
+        // itself belongs to the publication task.
+        let outcome = PublicationStart::Started(publication.clone());
         let root = scope.root.clone();
         let key = scope.key.clone();
         let lifetime = self.inner.lifetime.clone();
+        let inner = Arc::downgrade(&self.inner);
         let lease = prepared.clone();
         #[cfg(test)]
         let pause = self
@@ -1874,9 +2116,15 @@ impl VelaClient {
             .ok()
             .and_then(|slot| slot.clone());
         tokio::spawn(async move {
-            // The gate is held for the whole publication, so a second prepare of the
-            // same key waits for it instead of starting a second transfer.
-            let _guard = guard;
+            // The single-flight slot is held for the whole publication, so a
+            // second prepare of the same key waits for it instead of starting a
+            // second transfer. It is released when the task ends, even when the
+            // task is aborted.
+            let _run = PublicationRun {
+                inner,
+                key: key.clone(),
+                publication,
+            };
             #[cfg(test)]
             if let Some(pause) = &pause {
                 pause.enter().await;
@@ -1893,8 +2141,22 @@ impl VelaClient {
                 pause.finished();
             }
         });
-        true
+        outcome
     }
+}
+
+/// How the warm-up of one verified original was placed.
+enum PublicationStart {
+    /// The publication owns the single-flight slot of its key and copies the
+    /// verified bytes in the background.
+    Started(Arc<Publication>),
+    /// A live publication of the same key already publishes the very same
+    /// bytes: a second copy would only duplicate the work, and the running
+    /// publication keeps the single-flight slot of the key.
+    Joined,
+    /// The registry of running publications is full: the caller keeps the
+    /// previous synchronous publication.
+    Refused,
 }
 
 /// A test-only gate that holds a running cache publication, so a test can observe
@@ -1932,6 +2194,58 @@ impl PublicationPause {
     /// Let the held publication continue.
     fn release(&self) {
         self.released.send_replace(true);
+    }
+    /// Hold the next publication again, so a test can observe a second
+    /// publication of the same key.
+    fn arm(&self) {
+        self.released.send_replace(false);
+    }
+}
+
+/// A test-only barrier that holds a cold cache right before the single-flight
+/// decision, so a test can end a running publication exactly between the cache
+/// miss and that decision.
+#[cfg(test)]
+struct CacheMissBarrier {
+    armed: AtomicBool,
+    reached: AtomicUsize,
+    released: watch::Sender<bool>,
+}
+#[cfg(test)]
+impl CacheMissBarrier {
+    fn new() -> Arc<Self> {
+        let (released, _) = watch::channel(true);
+        Arc::new(Self {
+            armed: AtomicBool::new(false),
+            reached: AtomicUsize::new(0),
+            released,
+        })
+    }
+    /// Arm the barrier: the next cold cache holds until the test releases it.
+    fn arm(&self) {
+        self.armed.store(true, Ordering::SeqCst);
+        self.released.send_replace(false);
+    }
+    /// Let the held cache continue.
+    fn release(&self) {
+        self.released.send_replace(true);
+    }
+    /// How many cold caches were held.
+    fn reached(&self) -> usize {
+        self.reached.load(Ordering::SeqCst)
+    }
+    /// Hold the cold cache until the test releases it.
+    async fn reach(&self) {
+        if !self.armed.load(Ordering::SeqCst) {
+            return;
+        }
+        self.reached.fetch_add(1, Ordering::SeqCst);
+        let mut released = self.released.subscribe();
+        while !*released.borrow_and_update() {
+            if released.changed().await.is_err() {
+                break;
+            }
+        }
     }
 }
 
@@ -2338,6 +2652,7 @@ mod tests {
     const PASSWORD: &str = "isolated native test password";
     const USER_ID: &str = "10000000-0000-4000-8000-000000000001";
     const TRACK_ID: &str = "20000000-0000-4000-8000-000000000001";
+    const OTHER_TRACK_ID: &str = "20000000-0000-4000-8000-000000000002";
 
     struct HttpFixture {
         origin: String,
@@ -3697,6 +4012,22 @@ mod tests {
         client
     }
 
+    /// A fixture client with the background publication gate and the cold-cache
+    /// barrier: a test can end a running publication exactly between the cache
+    /// miss and the single-flight decision.
+    async fn fixture_client_with_barrier(
+        http: &HttpFixture,
+        directory: &tempfile::TempDir,
+        cache: &tempfile::TempDir,
+        pause: &Arc<PublicationPause>,
+        barrier: &Arc<CacheMissBarrier>,
+    ) -> VelaClient {
+        let mut client = fixture_client_with_pause(http, directory, cache, pause).await;
+        let inner = Arc::get_mut(&mut client.inner).unwrap();
+        inner.cache_miss_barrier = std::sync::Mutex::new(Some(barrier.clone()));
+        client
+    }
+
     #[tokio::test]
     async fn tampered_cached_bytes_are_downloaded_again_instead_of_served() {
         let original = vec![7_u8; 4 * 1024];
@@ -4009,18 +4340,28 @@ mod tests {
     #[tokio::test]
     async fn the_registry_of_running_publications_is_bounded() {
         let original = vec![53_u8; 16 * 1024];
+        let other_original = vec![54_u8; 16 * 1024];
         let counters = Arc::new(StreamCounters::default());
-        let router = tracked_streams(&[(TRACK_ID.to_owned(), original.clone(), counters.clone())]);
+        let other_counters = Arc::new(StreamCounters::default());
+        let router = tracked_streams(&[
+            (TRACK_ID.to_owned(), original.clone(), counters.clone()),
+            (
+                OTHER_TRACK_ID.to_owned(),
+                other_original.clone(),
+                other_counters.clone(),
+            ),
+        ]);
         let http = HttpFixture::start(with_login(router)).await;
         let temporary = tempfile::tempdir().unwrap();
         let cache = tempfile::tempdir().unwrap();
-        let client = fixture_client(&http, &temporary, &cache).await;
+        let pause = PublicationPause::new();
+        let client = fixture_client_with_pause(&http, &temporary, &cache, &pause).await;
         let track = sample_track_with(TRACK_ID, original.len());
         let cached_audio =
             media_cache::audio_path(cache.path(), &cache_key(&http.origin, USER_ID, TRACK_ID));
 
         // Fill the registry with the maximum number of running publications.
-        let mut gates = Vec::new();
+        let mut running = Vec::new();
         {
             let mut registry = client.inner.publications.lock().unwrap();
             for index in 0..MAX_IN_FLIGHT_PUBLICATIONS {
@@ -4029,9 +4370,9 @@ mod tests {
                     USER_ID,
                     &format!("30000000-0000-4000-8000-{index:012x}"),
                 );
-                let gate = Arc::new(tokio::sync::Mutex::new(()));
-                registry.insert(other, Arc::downgrade(&gate));
-                gates.push(gate);
+                let publication = Publication::new();
+                registry.insert(other, Arc::downgrade(&publication));
+                running.push(publication);
             }
             assert_eq!(registry.len(), MAX_IN_FLIGHT_PUBLICATIONS);
         }
@@ -4048,7 +4389,301 @@ mod tests {
             cached_audio.exists(),
             "a full registry keeps the previous synchronous publication"
         );
+        assert_eq!(
+            pause.entered.load(Ordering::SeqCst),
+            0,
+            "a refused publication starts no background copy"
+        );
         assert_eq!(counters.gets.load(Ordering::SeqCst), 1);
+
+        // The limit counts live publications, not dictionary entries: the
+        // entries of publications that ended describe nothing that runs and do
+        // not block a new publication.
+        drop(running);
+        {
+            let mut registry = client.inner.publications.lock().unwrap();
+            for index in 0..MAX_IN_FLIGHT_PUBLICATIONS {
+                let other = cache_key(
+                    &http.origin,
+                    USER_ID,
+                    &format!("30000000-0000-4000-8000-{index:012x}"),
+                );
+                let publication = Publication::new();
+                registry.insert(other, Arc::downgrade(&publication));
+                // The publication ends without a task: its entry stays in the
+                // dictionary but describes nothing that runs.
+                publication.finish();
+            }
+            assert_eq!(registry.len(), MAX_IN_FLIGHT_PUBLICATIONS);
+        }
+        let other = sample_track_with(OTHER_TRACK_ID, other_original.len());
+        let prepared = client
+            .prepare(&other, CancellationToken::new(), progress().0)
+            .await
+            .unwrap();
+        drop(prepared);
+        assert_eq!(other_counters.gets.load(Ordering::SeqCst), 1);
+        eventually(|| pause.entered.load(Ordering::SeqCst) == 1).await;
+        assert_eq!(
+            client.inner.publications.lock().unwrap().len(),
+            1,
+            "the limit counts the live publications, not the dictionary entries"
+        );
+        pause.release();
+    }
+
+    /// A pending cache publication must never block the play of another track:
+    /// the wait for a running publication never holds the transfer admission.
+    #[tokio::test]
+    async fn a_pending_publication_does_not_block_the_play_of_another_track() {
+        let first_bytes = vec![61_u8; 64 * 1024];
+        let second_bytes = vec![62_u8; 64 * 1024];
+        let first_counters = Arc::new(StreamCounters::default());
+        let second_counters = Arc::new(StreamCounters::default());
+        let router = tracked_streams(&[
+            (
+                TRACK_ID.to_owned(),
+                first_bytes.clone(),
+                first_counters.clone(),
+            ),
+            (
+                OTHER_TRACK_ID.to_owned(),
+                second_bytes.clone(),
+                second_counters.clone(),
+            ),
+        ]);
+        let http = HttpFixture::start(with_login(router)).await;
+        let temporary = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let pause = PublicationPause::new();
+        let client = fixture_client_with_pause(&http, &temporary, &cache, &pause).await;
+        let first = sample_track_with(TRACK_ID, first_bytes.len());
+        let second = sample_track_with(OTHER_TRACK_ID, second_bytes.len());
+
+        // The first track is prepared and its cache publication is held.
+        let prepared = client
+            .prepare(&first, CancellationToken::new(), progress().0)
+            .await
+            .unwrap();
+        drop(prepared);
+        eventually(|| pause.entered.load(Ordering::SeqCst) == 1).await;
+
+        // The offline preparation of the very same track waits for the running
+        // publication: it must not hold the transfer admission while it waits.
+        let offline = {
+            let client = client.clone();
+            let first = first.clone();
+            tokio::spawn(async move {
+                client
+                    .prepare(&first, CancellationToken::new(), progress().0)
+                    .await
+            })
+        };
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(
+            !offline.is_finished(),
+            "the offline preparation waits for the running publication"
+        );
+
+        // The transfer admission gives up after one second. The play of
+        // another track must not be refused as busy because a publication of
+        // the first track is still pending.
+        tokio::time::sleep(Duration::from_millis(1_100)).await;
+        let other = tokio::time::timeout(
+            Duration::from_secs(10),
+            client.prepare(&second, CancellationToken::new(), progress().0),
+        )
+        .await
+        .expect("the play of another track must not be blocked by a pending publication")
+        .expect("the play of another track must not be refused as busy");
+        assert_eq!(std::fs::read(other.path()).unwrap(), second_bytes);
+        assert_eq!(
+            second_counters.gets.load(Ordering::SeqCst),
+            1,
+            "the other track is transferred once"
+        );
+        assert_eq!(
+            first_counters.gets.load(Ordering::SeqCst),
+            1,
+            "the waiting preparation transfers nothing"
+        );
+
+        // The publication ends: the waiting preparation is served from the
+        // cache and no track ever saw a second body.
+        pause.release();
+        let offline_lease = tokio::time::timeout(Duration::from_secs(5), offline)
+            .await
+            .expect("the offline preparation did not finish")
+            .unwrap()
+            .unwrap();
+        assert_eq!(std::fs::read(offline_lease.path()).unwrap(), first_bytes);
+        assert_eq!(
+            first_counters.gets.load(Ordering::SeqCst),
+            1,
+            "one body per track is transferred once"
+        );
+        assert_eq!(
+            first_counters.body_bytes.load(Ordering::SeqCst),
+            first_bytes.len()
+        );
+        assert_eq!(
+            second_counters.body_bytes.load(Ordering::SeqCst),
+            second_bytes.len()
+        );
+    }
+
+    /// A publication that ends exactly between the cache miss and the
+    /// single-flight decision must not cost a second body: the cache is read
+    /// again instead of the transfer being started.
+    #[tokio::test]
+    async fn a_publication_that_ends_between_the_cache_miss_and_the_decision_does_not_transfer_twice()
+     {
+        let original = vec![63_u8; 64 * 1024];
+        let counters = Arc::new(StreamCounters::default());
+        let router = tracked_streams(&[(TRACK_ID.to_owned(), original.clone(), counters.clone())]);
+        let http = HttpFixture::start(with_login(router)).await;
+        let temporary = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let pause = PublicationPause::new();
+        let barrier = CacheMissBarrier::new();
+        let client = fixture_client_with_barrier(&http, &temporary, &cache, &pause, &barrier).await;
+        let track = sample_track_with(TRACK_ID, original.len());
+        let key = cache_key(&http.origin, USER_ID, TRACK_ID);
+
+        // The first prepare transfers the body and starts the cache publication.
+        let first = client
+            .prepare(&track, CancellationToken::new(), progress().0)
+            .await
+            .unwrap();
+        drop(first);
+        eventually(|| pause.entered.load(Ordering::SeqCst) == 1).await;
+
+        // The second prepare finds a cold cache and is held right before the
+        // single-flight decision.
+        barrier.arm();
+        let second = {
+            let client = client.clone();
+            let track = track.clone();
+            tokio::spawn(async move {
+                client
+                    .prepare(&track, CancellationToken::new(), progress().0)
+                    .await
+            })
+        };
+        eventually(|| barrier.reached() >= 1).await;
+
+        // The publication ends exactly between the cache miss and the decision.
+        pause.release();
+        await_publication(&client, &key).await;
+        barrier.release();
+
+        let second = tokio::time::timeout(Duration::from_secs(5), second)
+            .await
+            .expect("the second prepare did not finish")
+            .unwrap()
+            .unwrap();
+        assert_eq!(std::fs::read(second.path()).unwrap(), original);
+        assert_eq!(
+            counters.gets.load(Ordering::SeqCst),
+            1,
+            "a publication that ended between the miss and the decision must not cost a second body"
+        );
+        assert_eq!(counters.body_bytes.load(Ordering::SeqCst), original.len());
+    }
+
+    /// An expired wait must not start a second publisher: the running
+    /// publication keeps the single-flight slot of its key, and exactly one new
+    /// publication may run after it ended.
+    #[tokio::test]
+    async fn an_expired_wait_does_not_start_a_second_publisher() {
+        let original = vec![64_u8; 32 * 1024];
+        let counters = Arc::new(StreamCounters::default());
+        let router = tracked_streams(&[(TRACK_ID.to_owned(), original.clone(), counters.clone())]);
+        let http = HttpFixture::start(with_login(router)).await;
+        let temporary = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        // The cache root is a regular file: every publication fails, so the
+        // cache stays cold and a later prepare is a new transfer.
+        let blocked = cache.path().join("blocked");
+        std::fs::write(&blocked, b"not a directory").unwrap();
+        let pause = PublicationPause::new();
+        let mut client = fixture_client_with_pause(&http, &temporary, &cache, &pause).await;
+        {
+            let inner = Arc::get_mut(&mut client.inner).unwrap();
+            inner.cache_directory = Some(blocked);
+            // The wait for a running publication runs out quickly here.
+            inner.publication_wait = Duration::from_millis(200);
+        }
+        let track = sample_track_with(TRACK_ID, original.len());
+        let key = cache_key(&http.origin, USER_ID, TRACK_ID);
+
+        // The first prepare transfers the body and starts the cache publication,
+        // which is held.
+        let first = client
+            .prepare(&track, CancellationToken::new(), progress().0)
+            .await
+            .unwrap();
+        drop(first);
+        eventually(|| pause.entered.load(Ordering::SeqCst) == 1).await;
+
+        // The second prepare waits for the running publication, the wait runs
+        // out and the ordinary transfer decides.
+        let second = {
+            let client = client.clone();
+            let track = track.clone();
+            tokio::spawn(async move {
+                client
+                    .prepare(&track, CancellationToken::new(), progress().0)
+                    .await
+            })
+        };
+        tokio::time::timeout(Duration::from_secs(10), second)
+            .await
+            .expect("the second prepare did not finish")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            counters.gets.load(Ordering::SeqCst),
+            2,
+            "the expired wait costs exactly one new transfer"
+        );
+
+        // The running publication keeps the single-flight slot: the expired
+        // wait started no second publisher.
+        assert_eq!(
+            pause.entered.load(Ordering::SeqCst),
+            1,
+            "an expired wait must not start a second publisher"
+        );
+        {
+            let registry = client.inner.publications.lock().unwrap();
+            assert_eq!(registry.len(), 1, "the registry holds one live entry");
+            assert!(registry.get(&key).is_some());
+        }
+
+        // The first publication ends: the slot is free again.
+        pause.release();
+        await_publication(&client, &key).await;
+        assert!(
+            client.inner.publications.lock().unwrap().is_empty(),
+            "the ended publication released its slot"
+        );
+
+        // A later prepare of the same key starts exactly one new publication.
+        pause.arm();
+        let third = client
+            .prepare(&track, CancellationToken::new(), progress().0)
+            .await
+            .unwrap();
+        drop(third);
+        eventually(|| pause.entered.load(Ordering::SeqCst) == 2).await;
+        assert_eq!(
+            pause.entered.load(Ordering::SeqCst),
+            2,
+            "exactly one new publication runs after the first one ended"
+        );
+        assert_eq!(client.inner.publications.lock().unwrap().len(), 1);
+        pause.release();
     }
 
     const ARTWORK_ID: &str = "30000000-0000-4000-8000-000000000001";

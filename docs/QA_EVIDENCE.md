@@ -1,5 +1,91 @@
 # Verified0.12.0 package and preserved runtime checkpoint
 
+## TL-01 step 1 round 2 — the publication coordination no longer blocks, duplicates or lies (native) — 2026-10-24
+
+Only the native client changed: `apps/desktop/src/client.rs`. The audio
+adapter, the output thread, the HTTP/account boundary, the server, the domain
+API, the web client, every web asset, the migrations and the workspace
+manifest/lock are untouched. No new dependency: `Cargo.toml` and `Cargo.lock`
+are byte-identical.
+
+### The commands and their real output
+
+| Command | Result |
+| --- | --- |
+| `cargo fmt --all -- --check` | exit 0 |
+| `cargo clippy --locked --workspace --all-targets -- -D warnings` | exit 0, no warnings |
+| `cargo clippy --locked -p vela-desktop --all-targets --features native-qa -- -D warnings` | exit 0, no warnings |
+| `cargo test --locked -p vela-desktop -- --test-threads=2` | `138 passed; 0 failed; 3 ignored` (135 at round 1, the 129 baseline tests are all kept) |
+| `cargo test --locked -p vela-web` | `57 passed; 0 failed; 0 ignored` |
+| `cargo build --locked -p vela-web --target wasm32-unknown-unknown --release` | exit 0 |
+| `cargo build --locked -p vela-server` | exit 0 |
+| `cargo build --locked -p vela-desktop --example native-ui-qa --features native-qa` | exit 0 |
+| `DISPLAY=:99 python3 scripts/verify_native_client.py --backend x11 --server target/debug/vela-server --test-preparation --evidence target/checks/tl01-round2-native` | **exit 0** — `report.json` `ok=true`, **314 checks**, **24 screenshots**, `temporary_originals_after_exit=0`; the separate reduced-motion window `reduced-report.json` `ok=true` (8 checks) |
+
+The ten publication-related desktop tests were run ten times in a row
+(`cargo test --locked -p vela-desktop --lib -- --test-threads=2 publication`):
+`10 passed; 0 failed` in every one of the ten runs, so the new coordination is
+not timing-flaky.
+
+### The new tests and what each one proves
+
+| Test | What it proves |
+| --- | --- |
+| `a_pending_publication_does_not_block_the_play_of_another_track` | A held publication of track A plus an offline preparation of A does not hold the transfer admission: the play of track B is **leased** (not `PREPARE_BUSY`) and its GET starts. The body counters stay at one body per track: A `gets == 1`, B `gets == 1`, `body_bytes` equal to the original length for both. |
+| `a_publication_that_ends_between_the_cache_miss_and_the_decision_does_not_transfer_twice` | A test barrier ends the publication exactly between the cache miss and the single-flight decision: the result is **1 GET and 65536 bytes**, not 2 GETs and 131072 bytes. |
+| `an_expired_wait_does_not_start_a_second_publisher` | A publication that is held while the wait for it runs out starts **no** second publisher (`entered == 1`), the registry holds exactly **one** live entry for that key, and after the first publication ended exactly **one** new publication runs (`entered == 2`), not two. |
+| `the_registry_of_running_publications_is_bounded` (extended) | At 32 running publications the next publication is refused and the warm-up stays inside `prepare`; the entries of publications that **ended** do not count against the bound, so the bound counts live publications and not dictionary entries. |
+
+### The failure proof on the round-1 behaviour
+
+The round-1 `client.rs` (`fbef0b8`) was restored and the three new tests were
+run against it unchanged. The only additions to that tree were the test-only
+hooks the new tests need: the cold-cache barrier (`cache_miss_barrier`,
+`CacheMissBarrier`, `reach_cache_miss`, `fixture_client_with_barrier`) and, for
+the expired-wait test, `PUBLICATION_WAIT` shortened from 60 s to 200 ms so the
+expired-wait path is reachable inside a test. The defect-1 reproduction was run
+with the production 60 s wait.
+
+```
+---- client::tests::a_pending_publication_does_not_block_the_play_of_another_track stdout ----
+thread 'client::tests::a_pending_publication_does_not_block_the_play_of_another_track' panicked at apps/desktop/src/client.rs:4199:10:
+the play of another track must not be refused as busy: "Busy: another track is preparing. Cancel it first."
+
+---- client::tests::a_publication_that_ends_between_the_cache_miss_and_the_decision_does_not_transfer_twice stdout ----
+thread 'client::tests::a_publication_that_ends_between_the_cache_miss_and_the_decision_does_not_transfer_twice' panicked at apps/desktop/src/client.rs:4288:9:
+assertion `left == right` failed: a publication that ended between the miss and the decision must not cost a second body
+  left: 2
+ right: 1
+
+---- client::tests::an_expired_wait_does_not_start_a_second_publisher stdout ----
+thread 'client::tests::an_expired_wait_does_not_start_a_second_publisher' panicked at apps/desktop/src/client.rs:4354:9:
+assertion `left == right` failed: an expired wait must not start a second publisher
+  left: 2
+ right: 1
+
+test result: FAILED. 0 passed; 3 failed; 0 ignored; 0 measured; 138 filtered out; finished in 1.58s
+```
+
+The three failures are the reviewer's three observations, reproduced: the
+`PREPARE_BUSY` refusal of the other track, the second body of the same track
+(2 GETs), and the second publisher of the same key. The transferred bytes were
+measured separately with the byte assertion first: `left: 131072, right: 65536`
+— exactly the reviewer's number.
+
+The round-1 tree was then restored and the same suite reported
+`138 passed; 0 failed; 3 ignored`.
+
+### What was not measured
+
+Progressive decode and Range playback, a real-process ENOSPC/eviction run, the
+production 200-entry/2GiB budget, hardware audio output, a Wayland session,
+screen readers, physical media keys and every non-Linux target. The browser
+surfaces were not re-rendered: no web file, CSS or asset changed, and
+`apps/web/**` is byte-identical; only `cargo test -p vela-web` and the wasm
+build were executed for the web crate. The concurrency of the coordination was
+exercised in the in-process server tests, not with real parallel clients
+against a real origin.
+
 ## TL-01 step 1 — the warm cache no longer delays the first sound (native) — 2026-10-23
 
 Only the native client changed: `apps/desktop/src/client.rs` and

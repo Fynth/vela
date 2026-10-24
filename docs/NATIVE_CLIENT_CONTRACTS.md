@@ -257,12 +257,22 @@ as soon as another track is selected, and aborting the warm-up of the track that
 just played would break the one-body-per-track guarantee.
 
 A bounded registry of running publications (keyed by `media_cache::CacheKey`, at
-most 32 in flight) makes a second `prepare` of the same track wait for the
-running publication instead of starting another GET, and then re-check the
-cache. A publication that failed leaves the cache cold and the next `prepare`
-falls back to the ordinary verified GET. At the registry limit the publication
-stays inside `prepare` (the previous synchronous behaviour) instead of growing
-an unbounded number of background copies. ADR
+most 32 live publications in flight) makes a second `prepare` of the same track
+wait for the running publication instead of starting another GET, and then
+re-check the cache. The wait never holds the transfer admission: the admission
+covers the transfer itself, so a pending publication of one track can never
+refuse the play of another track with a busy error. The single-flight slot is
+observed *before* the cache is read and carries an explicit *ended* flag that
+flips only after the cache entry was published (or the copy failed), so a
+publication that ends between the cache miss and the decision costs no second
+body: the cache is read again. A live publication is never replaced — a second
+publication of the same key joins it, because it would copy the very same
+bytes — so an expired wait starts no second publisher, and the bound counts
+live publications rather than dictionary entries. A publication that failed
+leaves the cache cold and the next `prepare` falls back to the ordinary
+verified GET. At the registry limit the publication stays inside `prepare` (the
+previous synchronous behaviour) instead of growing an unbounded number of
+background copies. ADR
 [DECISIONS/0026](DECISIONS/0026-native-warm-cache-publication.md).
 
 ## Opt-in saved session
