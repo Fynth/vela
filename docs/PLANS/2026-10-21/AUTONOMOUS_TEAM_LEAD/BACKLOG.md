@@ -49,7 +49,7 @@ DR-03 → DR-08. Serious-находки DV-01/02/12 чинятся **до** glas
 
 | ID | Название | Приоритет | Статус |
 |---|---|---|---|
-| TL-01 | Progressive native playback: старт звука до конца файла (сейчас `client.rs::prepare` тянет весь оригинал, `audio.rs::decode` открывает файл целиком) | P1 | PROPOSED |
+| TL-01 | Progressive native playback: старт звука до конца файла (сейчас `client.rs::prepare` тянет весь оригинал, `audio.rs::decode` открывает файл целиком) | P1 | IN_PROGRESS. Шаг 1 (убрать публикацию кэша с пути к первому звуку) — ветка `feat/vela-tl01-r3-p1`, коммиты `fbef0b8` + `13eabe8` + раунд 3; раунды 1–2 отклонены ревью, раунд 3 закрывает последний P1 координации. Progressive decode / Range **не начат**: нужен отдельный ADR (0026 его прямо запрещает). Подробности — `docs/DECISIONS/0026-native-warm-cache-publication.md` |
 | TL-02 | Одноразовый кэш без повторной загрузки A→B→A (в `media_cache.rs` уже есть BLAKE3+sidecar, нужна проверка повторного возврата) | P1 | PROPOSED |
 | TL-03 | Single-flight подготовка следующего трека по очереди (спекулятивный next из occurrence-модели) | P2 | PROPOSED |
 | TL-04 | Холодный офлайн-старт native (манифесты v2 уже есть в `offline.rs`) | P2 | PROPOSED |

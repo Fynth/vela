@@ -1,5 +1,43 @@
 # Verified progress
 
+## TL-01 step 1 round 4 — the warm re-read leaves the transfer admission (native) — 2026-10-24
+
+Round 4 closes the two documentary P2s and three P3s of the round-3 reviews. One
+of them was not a wording defect: the **warm re-read** in `recheck_cache` — the
+one that answers a publication seen alive and then ended — still ran with the
+transfer admission held, while ADR0026 declared that read free of it. That read
+re-hashes a whole published original (up to 250 MiB), so a held re-read refused
+the play of another track with `PREPARE_BUSY` after the one-second admission
+timeout, reintroducing the round-2 symptom on a new path. The admission is now
+released before that read too; the transfer takes it again if the re-read misses
+(`admit()` on the `None` branch, which already existed).
+
+Two independent reviews of round 3 (`7958a14`) agreed on the wording of the same
+ADR and on the test layer: `media_cache::copy_gate::Installed` restored the
+*previous* gate unconditionally, so a guard whose slot had been taken by another
+test would remove that other gate. The guard now restores only the gate it
+installed (`Arc::ptr_eq`), with a regression test that fails on the old
+behaviour.
+
+Both new regressions were proven by mutation and the tree was restored: removing
+the admission release fails with `the play of another track must not be refused
+as busy`; restoring the previous gate unconditionally fails with `the foreign gate
+must survive`. Full gate on the final tree: fmt exit 0, strict workspace clippy
+exit 0, `cargo test --locked --workspace` all green (`vela-desktop` **142 passed
+/ 0 failed / 3 ignored**, `vela-web` 57), wasm release exit 0, and the native X11
+window **314 checks / 24 PNG / exit 0** with `temporary_originals_after_exit=0`,
+regenerated after the last code edit so it belongs to this slice.
+
+Only `apps/desktop/src/client.rs` and `apps/desktop/src/media_cache.rs` changed.
+The trust model is untouched: the decoder still receives one complete verified
+original of the exact size with a whole-file BLAKE3. The descriptor differs by
+path, and the difference is stated instead of flattened: a **cold** transfer is
+leased as an unnamed private `0600` file with `nlink() == 0` on Linux, while a
+**warm hit** leases the *published* cache file, which keeps its single name and
+therefore reports `nlink() == 1` (asserted in `client.rs`). Both are `0600`
+regular files that were re-hashed from the very descriptor the decoder receives.
+Progressive decode and Range remain unapproved.
+
 ## TL-01 step 1 round 3 — the post-admission read observes the slot first (native) — 2026-10-24
 
 Round 2 fixed three coordination defects but left one, found by the deciding
@@ -41,8 +79,13 @@ claiming the token is never observed.
 
 Only `apps/desktop/src/client.rs` and `apps/desktop/src/media_cache.rs` changed.
 The trust model is untouched: the decoder still receives one complete verified
-original of the exact size with a whole-file BLAKE3, unnamed private `0600`,
-`nlink() == 0` on Linux. Progressive decode and Range remain unapproved.
+original of the exact size with a whole-file BLAKE3. The descriptor differs by
+path, and the difference is stated instead of flattened: a **cold** transfer is
+leased as an unnamed private `0600` file with `nlink() == 0` on Linux, while a
+**warm hit** leases the *published* cache file, which keeps its single name and
+therefore reports `nlink() == 1` (asserted in `client.rs`). Both are `0600`
+regular files that were re-hashed from the very descriptor the decoder receives.
+Progressive decode and Range remain unapproved.
 
 ## TL-01 step 1 round 2 — the publication coordination no longer blocks, duplicates or lies (native) — 2026-10-24
 

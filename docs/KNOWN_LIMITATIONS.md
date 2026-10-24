@@ -1,5 +1,43 @@
 # Unsupported and unverified functionality
 
+## TL-01 step 1 round 4 — the warm re-read leaves the transfer admission (native) — 2026-10-24
+
+Round 4 closed the round-3 reviews' two P2s and three P3s. What this increment
+still does **not** cover is here.
+
+- **The warm re-read now runs without the admission, so it is not counted against
+  the "one transfer at a time" bound.** That is deliberate — a warm hit must never
+  be answered with `PREPARE_BUSY` — but it means two concurrent warm hits of two
+  different tracks can both re-hash whole published originals (up to 250 MiB each)
+  at the same time, outside the admission that bounds cold transfers. The extra
+  peak read cost is a reading of the code paths, **not a measurement**.
+- **The new regression proves the admission release, not the timing of a real
+  origin.** `the_warm_reread_after_an_expired_wait_does_not_hold_the_admission`
+  holds the re-read with a test barrier and asserts that another track is leased
+  within the admission timeout. It does not run two real transfers against a real
+  origin under real concurrent load.
+- **The gate guard's regression is single-threaded.** It installs two gates from
+  one test and asserts which one the slot keeps. It does not prove that two *test
+  threads* installing gates concurrently never interfere, and it cannot: the gate
+  slot is process-global by design.
+- **The native artifact belongs to this slice but is one run.** 314 checks / 24
+  PNG were produced after the last code edit on this tree; it is one run of the
+  native window class, not repeated runs, and not a browser render.
+- **The second `admit()` after an expired wait can still end as `PREPARE_BUSY`**
+  (unchanged from round 3): the publication wait is bounded at 60 s; when it runs
+  out, `prepare` continues to the transfer and takes the admission again with a
+  fresh 1 s timeout. A `prepare` can therefore spend 60 s + 2×1 s and then return
+  "Busy: another track is preparing. Cancel it first.", although the cause was an
+  expired wait and not a busy transfer. The "one wait per prepare" budget is
+  documented; this second admission is not bounded by it.
+- **Staging is still written before the budget is checked, the `Refused` fallback
+  still keeps the per-selection token, and the copy still runs on a blocking
+  worker that is canceled between 64 KiB blocks.** All three are unchanged from
+  round 3 and are recorded there.
+- **The browser surfaces were not re-rendered.** No web file, CSS or asset changed
+  in this increment; `apps/web/**` is byte-identical and only `cargo test -p
+  vela-web` and the wasm build were executed for the web crate.
+
 ## TL-01 step 1 round 3 — the post-admission read observes the slot first (native) — 2026-10-24
 
 Round 3 closed the last coordination P1 (the post-admission cache read observed

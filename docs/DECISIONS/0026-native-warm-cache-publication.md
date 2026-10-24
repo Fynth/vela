@@ -37,8 +37,13 @@ contract. ADR0022 explicitly requires a separate ADR before that relaxation.
    same track await the in-progress publication instead of starting another
    GET. A failed publication degrades to the ordinary verified GET.
 3. **Trust is unchanged.** The decoder still only ever receives a lease whose
-   exact size and whole-file BLAKE3 were verified against the origin ETag; the
-   lease remains an unnamed private `0600` file with `nlink() == 0` on Linux.
+   exact size and whole-file BLAKE3 were verified against the origin ETag. Two
+   kinds of lease exist and the difference is named, not flattened: a **cold**
+   transfer is leased as an unnamed private `0600` file with `nlink() == 0` on
+   Linux, and a **warm hit** leases the published cache file itself, which keeps
+   its single name and reports `nlink() == 1`. Both are `0600` regular files that
+   were re-hashed from the very descriptor the decoder receives; the cache file
+   is re-verified on every hit.
 4. **Progressive decoding remains unapproved.** This ADR does not authorize
    partial-byte decode, Range-based playback, or a weaker verification mode.
    W03 needs its own ADR naming the exact trust model, the bounded fallback and
@@ -59,7 +64,10 @@ change its mechanics:
    same key that runs now is waited for without the admission and taken again for
    the transfer. Only the first of the two post-admission reads runs under the
    admission; the second one runs after the admission was released for the wait,
-   because a warm hit must never be answered with `PREPARE_BUSY`.
+   because a warm hit must never be answered with `PREPARE_BUSY`. The warm re-read
+   that answers a publication that ended inside the first read is released from
+   the admission for the same reason (round 4): it also re-hashes a whole
+   published original, and the transfer takes the admission again if it misses.
 2. **The single-flight slot is observed before the cache is read.** A
    publication that ends between the cache miss and the decision can no longer
    be mistaken for a cold cache: the slot was captured first, the wait returns
@@ -111,8 +119,10 @@ live publications to be reachable.
   transfer admission.
 - A publication that ends between the cache miss and the single-flight
   decision costs no second body; the cache is read again.
-- An expired wait costs one ordinary transfer and no second publisher; the
-  running publication keeps the single-flight slot of its key.
+- An expired wait costs one ordinary transfer **unless the publication ends
+  inside the first post-admission read, which is answered with a second read of
+  the cache instead**; it never starts a second publisher, and the running
+  publication keeps the single-flight slot of its key.
 - Eviction remains insertion-age FIFO; this ADR changes neither budgets nor
   integrity checks.
 - Progressive playback stays a follow-up with its own ADR and its own evidence.
@@ -130,5 +140,16 @@ between the cache miss and the single-flight decision costs no second body
 (1 GET, 65536 bytes, not 2 GETs and 131072 bytes); an expired wait starts no
 second publisher and leaves exactly one live registry entry, and exactly one
 new publication runs after the first one ended.
+Round 3 adds: a publication that ends between the post-admission miss and the
+single-flight decision costs no second body (the slot is observed before that
+read); a publication that ends inside the first post-admission read *after* an
+expired wait costs no second body either (the `ended` branch); a publication
+that ignores the client lifetime publishes nothing and leaves no staging file
+once its copy has really started.
+Round 4 adds: the warm re-read that answers an ended publication runs without
+the transfer admission — a held re-read does not refuse the play of another
+track with `PREPARE_BUSY`, and the track is still transferred once. The test
+gate also restores only the gate it installed, so two tests installing it
+concurrently cannot steal each other's slot.
 Existing desktop suite (129 passed / 0 failed / 3 ignored at baseline) must stay
 green.

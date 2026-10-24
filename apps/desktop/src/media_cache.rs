@@ -497,10 +497,18 @@ pub(crate) mod copy_gate {
         slot().lock().ok().and_then(|mut slot| slot.replace(gate))
     }
 
-    /// Remove the gate, restoring the previous one.
-    pub(crate) fn restore(previous: Option<Arc<CopyGate>>) {
+    /// Remove *this* gate only if the slot still holds it, restoring the
+    /// previous one. A guard whose gate was already replaced by another test
+    /// (the suite runs with more than one thread) must not steal the slot of a
+    /// gate it does not own.
+    fn restore_owned(gate: &Arc<CopyGate>, previous: Option<Arc<CopyGate>>) {
         if let Ok(mut slot) = slot().lock() {
-            *slot = previous;
+            let owned = slot
+                .as_ref()
+                .is_some_and(|current| Arc::ptr_eq(current, gate));
+            if owned {
+                *slot = previous;
+            }
         }
     }
 
@@ -517,10 +525,11 @@ pub(crate) mod copy_gate {
 
     impl Drop for Installed {
         fn drop(&mut self) {
-            if let Some(gate) = self.gate.take() {
-                gate.release();
-            }
-            restore(self.previous.take());
+            let Some(gate) = self.gate.take() else {
+                return;
+            };
+            gate.release();
+            restore_owned(&gate, self.previous.take());
         }
     }
 
@@ -530,6 +539,19 @@ pub(crate) mod copy_gate {
         Installed {
             gate: Some(gate),
             previous,
+        }
+    }
+
+    /// The installed gate, for a test that asserts which gate owns the slot.
+    pub(crate) fn installed() -> Option<Arc<CopyGate>> {
+        slot().lock().ok().and_then(|slot| slot.clone())
+    }
+
+    /// Remove whatever gate is installed. Only the tests that install a gate
+    /// outside a guard need it.
+    pub(crate) fn clear() {
+        if let Ok(mut slot) = slot().lock() {
+            *slot = None;
         }
     }
 
@@ -811,6 +833,7 @@ fn saved_at_now() -> u64 {
 mod tests {
     use super::*;
     use std::cell::Cell;
+    use std::sync::Arc;
 
     const ORIGIN: &str = "https://music.example.org/";
     const OTHER_ORIGIN: &str = "https://other.example.org/";
@@ -1593,5 +1616,46 @@ mod tests {
         assert!(!sidecar_path(root, &key).exists());
         assert!(namespace.join("foreign.tmp").exists());
         assert_eq!(usage_at(&namespace).unwrap(), (0, 0));
+    }
+
+    /// A guard removes only the gate it installed. Two tests that install a gate
+    /// concurrently (the suite runs with more than one thread) must not steal each
+    /// other's slot: the second test's copy would otherwise run unheld, and its
+    /// assertion would fail for the wrong reason.
+    #[test]
+    fn a_copy_gate_guard_restores_only_the_gate_it_installed() {
+        let root = tempfile::tempdir().unwrap();
+        copy_gate::clear();
+        let first = copy_gate::CopyGate::new(root.path());
+        let second = copy_gate::CopyGate::new(root.path());
+        let outer = copy_gate::install_scoped(first.clone());
+        {
+            let inner = copy_gate::install_scoped(second.clone());
+            assert!(Arc::ptr_eq(
+                &copy_gate::installed().expect("the inner gate is installed"),
+                &second
+            ));
+            drop(inner);
+            assert!(
+                Arc::ptr_eq(
+                    &copy_gate::installed().expect("the outer gate is restored"),
+                    &first
+                ),
+                "an inner guard must restore the gate it replaced"
+            );
+        }
+        // The slot now belongs to a gate this guard never installed: dropping the
+        // outer guard must leave it alone.
+        let _ = copy_gate::install(second.clone());
+        drop(outer);
+        assert!(
+            Arc::ptr_eq(
+                &copy_gate::installed().expect("the foreign gate must survive"),
+                &second
+            ),
+            "a guard must not remove a gate it does not own"
+        );
+        copy_gate::clear();
+        assert!(copy_gate::installed().is_none());
     }
 }

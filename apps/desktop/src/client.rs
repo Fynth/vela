@@ -272,6 +272,12 @@ struct Inner {
     /// post-admission read of the same prepare independently.
     #[cfg(test)]
     recheck_barrier: Mutex<Option<Arc<CacheMissBarrier>>>,
+    /// The barrier of the *second* post-admission read of the same path: the
+    /// one that runs after a publication of the key was seen alive and then
+    /// ended. It is separate from the miss barrier, so a test can hold that
+    /// read and watch what the transfer admission does while it runs.
+    #[cfg(test)]
+    ended_read_barrier: Mutex<Option<Arc<CacheMissBarrier>>>,
 }
 #[derive(Clone)]
 struct Session {
@@ -368,6 +374,8 @@ impl VelaClient {
                     cache_miss_barrier: Mutex::new(None),
                     #[cfg(test)]
                     recheck_barrier: Mutex::new(None),
+                    #[cfg(test)]
+                    ended_read_barrier: Mutex::new(None),
                 }),
             },
             auth,
@@ -452,6 +460,8 @@ impl VelaClient {
                     cache_miss_barrier: Mutex::new(None),
                     #[cfg(test)]
                     recheck_barrier: Mutex::new(None),
+                    #[cfg(test)]
+                    ended_read_barrier: Mutex::new(None),
                 }),
             },
             auth,
@@ -2056,6 +2066,13 @@ impl VelaClient {
         // that finished inside this read, so the cache must be read again
         // before a second body is transferred.
         if publication.ended() {
+            // A warm hit must never be answered with `PREPARE_BUSY`: this read
+            // re-hashes the whole published original (up to 250 MiB), so it is
+            // released from the transfer admission exactly like the wait below.
+            // The transfer takes the admission again if the re-read misses.
+            *admission = None;
+            #[cfg(test)]
+            self.reach_ended_read().await;
             return scope.open_verified(expected, etag, cancel).await;
         }
         if *waited {
@@ -2118,6 +2135,22 @@ impl VelaClient {
         let barrier = self
             .inner
             .recheck_barrier
+            .lock()
+            .ok()
+            .and_then(|slot| slot.clone());
+        if let Some(barrier) = barrier {
+            barrier.reach().await;
+        }
+    }
+
+    /// Hold the second post-admission cache read — the one that runs after a
+    /// publication of the key was seen alive and has ended since — so a test can
+    /// assert what the transfer admission does while that read runs.
+    #[cfg(test)]
+    async fn reach_ended_read(&self) {
+        let barrier = self
+            .inner
+            .ended_read_barrier
             .lock()
             .ok()
             .and_then(|slot| slot.clone());
@@ -4137,6 +4170,25 @@ mod tests {
         client
     }
 
+    /// A fixture client that also holds the second post-admission read, the one
+    /// answered after a publication of the key was seen alive and has ended.
+    async fn fixture_client_with_ended_read_barrier(
+        http: &HttpFixture,
+        directory: &tempfile::TempDir,
+        cache: &tempfile::TempDir,
+        pause: &Arc<PublicationPause>,
+        barrier: &Arc<CacheMissBarrier>,
+        recheck: &Arc<CacheMissBarrier>,
+        ended: &Arc<CacheMissBarrier>,
+    ) -> VelaClient {
+        let mut client =
+            fixture_client_with_recheck_barrier(http, directory, cache, pause, barrier, recheck)
+                .await;
+        let inner = Arc::get_mut(&mut client.inner).unwrap();
+        inner.ended_read_barrier = std::sync::Mutex::new(Some(ended.clone()));
+        client
+    }
+
     #[tokio::test]
     async fn tampered_cached_bytes_are_downloaded_again_instead_of_served() {
         let original = vec![7_u8; 4 * 1024];
@@ -4867,6 +4919,103 @@ mod tests {
             "a publication that ended after an expired wait must not cost a second body"
         );
         assert_eq!(counters.body_bytes.load(Ordering::SeqCst), original.len());
+    }
+
+    /// The second post-admission read — the one answered after a publication of
+    /// the key was seen alive and has ended — must not hold the transfer
+    /// admission either. It re-hashes a whole published original (up to 250 MiB),
+    /// so a warm hit would otherwise refuse the play of another track with
+    /// `PREPARE_BUSY`, exactly the symptom the round-2 correction removed from
+    /// the wait.
+    #[tokio::test]
+    async fn the_warm_reread_after_an_expired_wait_does_not_hold_the_admission() {
+        let original = vec![67_u8; 64 * 1024];
+        let other_original = vec![68_u8; 32 * 1024];
+        let counters = Arc::new(StreamCounters::default());
+        let other_counters = Arc::new(StreamCounters::default());
+        let router = tracked_streams(&[
+            (TRACK_ID.to_owned(), original.clone(), counters.clone()),
+            (
+                OTHER_TRACK_ID.to_owned(),
+                other_original.clone(),
+                other_counters.clone(),
+            ),
+        ]);
+        let http = HttpFixture::start(with_login(router)).await;
+        let temporary = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let pause = PublicationPause::new();
+        let miss = CacheMissBarrier::new();
+        let recheck = CacheMissBarrier::new();
+        let ended = CacheMissBarrier::new();
+        let mut client = fixture_client_with_ended_read_barrier(
+            &http, &temporary, &cache, &pause, &miss, &recheck, &ended,
+        )
+        .await;
+        {
+            let inner = Arc::get_mut(&mut client.inner).unwrap();
+            inner.publication_wait = Duration::from_millis(200);
+        }
+        let track = sample_track_with(TRACK_ID, original.len());
+        let other = sample_track_with(OTHER_TRACK_ID, other_original.len());
+        let key = cache_key(&http.origin, USER_ID, TRACK_ID);
+
+        // The first prepare transfers the body and starts the cache publication,
+        // which stays held.
+        let first = client
+            .prepare(&track, CancellationToken::new(), progress().0)
+            .await
+            .unwrap();
+        drop(first);
+        eventually(|| pause.entered.load(Ordering::SeqCst) == 1).await;
+
+        // The second prepare misses, runs out of its 200 ms wait and reaches the
+        // post-admission miss, where it is held.
+        recheck.arm();
+        ended.arm();
+        let second = {
+            let client = client.clone();
+            let track = track.clone();
+            tokio::spawn(async move {
+                client
+                    .prepare(&track, CancellationToken::new(), progress().0)
+                    .await
+            })
+        };
+        eventually(|| recheck.reached() >= 1).await;
+
+        // The publication ends inside that read, so the second read answers a
+        // warm hit — and that read is now held.
+        pause.release();
+        await_publication(&client, &key).await;
+        recheck.release();
+        eventually(|| ended.reached() >= 1).await;
+
+        // While the warm re-read runs, the play of another track must not be
+        // refused as busy. The admission gives up after one second, so a held
+        // admission fails this assertion instead of merely slowing it down.
+        let other_lease = tokio::time::timeout(
+            Duration::from_secs(10),
+            client.prepare(&other, CancellationToken::new(), progress().0),
+        )
+        .await
+        .expect("the play of another track must not wait for the warm re-read")
+        .expect("the play of another track must not be refused as busy");
+        assert_eq!(std::fs::read(other_lease.path()).unwrap(), other_original);
+        assert_eq!(other_counters.gets.load(Ordering::SeqCst), 1);
+
+        ended.release();
+        let second = tokio::time::timeout(Duration::from_secs(10), second)
+            .await
+            .expect("the second prepare did not finish")
+            .unwrap()
+            .unwrap();
+        assert_eq!(std::fs::read(second.path()).unwrap(), original);
+        assert_eq!(
+            counters.gets.load(Ordering::SeqCst),
+            1,
+            "the warm re-read must not cost a second body"
+        );
     }
 
     /// An expired wait must not start a second publisher: the running

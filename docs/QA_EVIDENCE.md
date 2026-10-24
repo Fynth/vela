@@ -1,5 +1,104 @@
 # Verified0.12.0 package and preserved runtime checkpoint
 
+## TL-01 step 1 round 4 — the warm re-read leaves the admission (native) — 2026-10-24
+
+Round 4 closes the two documentary P2s and three P3s of the round-3 reviews, and
+one of them was a real defect rather than a wording defect: the *warm re-read*
+in `recheck_cache` still ran under the transfer admission, although ADR0026
+declared that read free of it. The fix and the evidence are below.
+
+### The defect and its fix
+
+`recheck_cache` takes the transfer admission, reads the cache, and — when the
+single-flight slot was observed alive before that read and has **ended** since —
+reads the cache a second time to answer a warm hit. That second read re-hashes the
+whole published original (up to 250 MiB) and it ran *with the admission held*: the
+`*admission = None` release only existed on the wait path below. A held warm
+re-read therefore refused the play of another track with
+`PREPARE_BUSY` ("Busy: another track is preparing. Cancel it first.") after the
+one-second admission timeout — the exact symptom the round-2 correction removed
+from the *wait*, reintroduced on the re-read.
+
+`client.rs` now releases the admission before that read, exactly as it does
+before the wait; the transfer takes the admission again if the re-read misses
+(`let permit = match admission { Some(permit) => permit, None => self.admit().await? }`
+already handles that). Measured: with the release removed, the new regression
+fails with that message; with it, the other track is leased and transferred once
+while the re-read is held.
+
+The second code change is in the **test layer**: `media_cache::copy_gate::Installed`
+restored the *previous* gate unconditionally, so a guard whose gate had already
+been replaced by another test (the suite runs with two threads) would remove that
+other gate and leave its copy unheld. The guard now restores only the gate it
+installed (`restore_owned`, `Arc::ptr_eq`), and `media_cache` gained two test-only
+observers (`installed`, `clear`) for that assertion.
+
+### The commands and their real output
+
+| Command | Result |
+| --- | --- |
+| `cargo fmt --all -- --check` | exit 0 |
+| `cargo clippy --locked --workspace --all-targets -- -D warnings` | exit 0, no warnings |
+| `cargo test --locked -p vela-desktop -- --test-threads=2` | **`142 passed; 0 failed; 3 ignored`** |
+| `cargo test --locked --workspace -- --test-threads=2` | **all green, `0 failed`** (desktop 142, web 57, server 63 + 33 + …, `vela-desktop` bin/doc 0) |
+| `cargo build --locked -p vela-web --target wasm32-unknown-unknown --release` | exit 0 |
+| `cargo build --locked -p vela-server` | exit 0 |
+| `cargo build --locked -p vela-desktop --example native-ui-qa --features native-qa` | exit 0 |
+| `DISPLAY=:99 python3 scripts/verify_native_client.py --backend x11 --server target/debug/vela-server --test-preparation --evidence target/checks/tl01-r4-native` | **exit 0** — `report.json` `result.ok=true`, **314 checks**, **24 screenshots**, `temporary_originals_after_exit=0`, engine `Rodio/CPAL, owned isolated null sink`; reduced-motion window `reduced_motion.ok=true` (8 checks, 1 PNG) |
+
+The native run above was generated **after** the final edit of both changed Rust
+files on this tree, so — unlike the round-3 artifact, which was produced before
+the commit and could not be tied to it by `mtime` — it belongs to this slice.
+It is still the *native window* evidence class: a real WebKitGTK window on the
+`:99` Xvfb display with one output stream on the QA-owned null sink. It is not a
+browser render and not hardware audio.
+
+No web file, CSS, asset, server file, migration, manifest or lock file changed:
+`apps/web/**`, `Cargo.toml` and `Cargo.lock` are byte-identical, so no browser
+suite was run. The web crate was exercised only by `cargo test -p vela-web`
+(57 passed) and the wasm release build.
+
+### The new and changed tests
+
+| Test | What it proves |
+| --- | --- |
+| `the_warm_reread_after_an_expired_wait_does_not_hold_the_admission` (new) | While the warm re-read of a just-published original is held, the play of another track is **leased, not refused as busy**, and that track is transferred exactly once; the warm re-read itself costs no second body (`1 GET`). Removing `*admission = None` from that branch makes it fail with `the play of another track must not be refused as busy: "Busy: another track is preparing. Cancel it first."`. |
+| `media_cache::tests::a_copy_gate_guard_restores_only_the_gate_it_installed` (new) | A gate guard removes only the gate it installed: an inner guard restores the outer gate, and an outer guard whose slot was taken by another gate leaves that gate in place. Restoring unconditionally fails it on `the foreign gate must survive`. |
+
+### The failure proofs, run by me on this host
+
+Both proofs were produced by mutating this tree, running the test, and restoring
+it. The tree is byte-identical to the committed slice again (`cargo fmt --all --
+--check` exit 0, full suite green).
+
+```
+# (a) the admission release removed from the warm re-read:
+thread 'client::tests::the_warm_reread_after_an_expired_wait_does_not_hold_the_admission' panicked:
+the play of another track must not be refused as busy: "Busy: another track is preparing. Cancel it first."
+test result: FAILED. 0 passed; 1 failed
+
+# (b) the gate guard restoring the previous gate unconditionally:
+thread 'media_cache::tests::a_copy_gate_guard_restores_only_the_gate_it_installed' panicked:
+the foreign gate must survive
+test result: FAILED. 0 passed; 1 failed
+```
+
+### Documentation corrected in this round
+
+- `docs/PROGRESS.md` claimed the decoder "still receives … unnamed private
+  `0600`, `nlink() == 0` on Linux". That is true for a **cold** transfer only: a
+  warm hit leases the *published* cache file, which keeps its single name and
+  reports `nlink() == 1`, as `client.rs` itself asserts. Both statements are now
+  named separately. The same flattening in decision 3 of ADR0026 is corrected the
+  same way.
+- ADR0026 said "only the first of the two post-admission reads runs under the
+  admission"; the warm re-read now really is free of it, and the ADR says so as a
+  round-4 correction instead of describing the pre-fix code.
+- ADR0026's consequence "an expired wait costs one ordinary transfer" was
+  unconditional; it now names the `ended` case, which costs none.
+- ADR0026's Verification section gained the round-3 and round-4 regression lines
+  (it previously listed round 2 only).
+
 ## TL-01 step 1 round 3 — the post-admission read observes the slot first (native) — 2026-10-24
 
 Round 3 closes the one remaining coordination P1 of round 2 and the test-layer
