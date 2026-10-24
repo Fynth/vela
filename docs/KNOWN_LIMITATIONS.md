@@ -10,12 +10,17 @@ entry. What is **not** covered by that increment is here.
   re-reads the record and the cached original immediately before its rename and
   drops itself when either changed, but the window between that check and the
   rename is not closed and is not covered by a lock. A publication of the same
-  key that lands in that window is overwritten by the mark: the entry stays
-  usable, but its `saved_at` can move back to the older value. The reverse
-  order leaves the publication's fresh `saved_at` in place. The mark is not
-  run at all while a publication of the same key is live
-  (`in_flight_publication`), so the common case is covered — the *rare* one is
-  not.
+  key that lands in that window is overwritten by the mark. The entry stays
+  usable **only while the republished representation is byte-for-byte the same
+  one** (the same ETag): if the origin changed the representation in the
+  meantime, the older sidecar now describes bytes that are not there, every hit
+  of that entry misses and the entry is fetched again once. The integrity
+  check still holds in that case, the cache simply does not serve that entry
+  any more. The label itself cannot move *back* through this race — a mark
+  always writes the current clock — and the reverse order leaves the
+  publication's fresh `saved_at` in place. The mark is not run at all while a
+  publication of the same key is live (`in_flight_publication`), so the common
+  case is covered — the *rare* one is not.
 - **The multiprocess case is not exercised.** Two `vela-desktop` processes on
   one cache root, or a process against a second instance, were not run. The
   staging name is unique per process and per operation, so the files cannot
@@ -25,17 +30,24 @@ entry. What is **not** covered by that increment is here.
   be evicted.** The eviction reads the candidates once; an entry that was played
   again in that window goes first. The cost is one re-download, and the bytes
   are re-verified before they are used.
-- **The recency is a one-second clock with a strict increment.** The value is
-  `max(now, previous + 1)`, so a mark inside the same second still orders the
-  entry after an entry that was never played again, and a burst of marks can
-  push the value slightly ahead of the wall clock. It is a recency marker, not
-  a timestamp of the exact moment.
+- **The recency is a one-second wall clock, without a strict increment.** The
+  label of a confirmed hit is the clock of the moment of the mark, so a burst
+  of hits can never push one track past a track that was really played later.
+  Two hits inside the same second therefore carry the *same* label, and the
+  order between them is the tie-break on `track_id` — stable and reproducible,
+  but not a strict "last hit wins". The label is a recency marker, not a
+  timestamp of the exact moment, and a system clock that moves back moves the
+  label back with it.
+- **A dropped mark is a lost recency label.** At most four marks of one client
+  run at the same time; a mark that cannot take a slot is dropped, not queued.
+  The lease is never delayed by that, but the recency of that one entry keeps
+  the value it had, and the entry can be evicted earlier than a user expects.
+  The bound was not measured against a real disk: the tests hold the marks in
+  memory, and a real `fsync` storm was not run.
 - **A mark costs one sidecar write with an `fsync`, per confirmed hit.** It runs
   on a blocking worker and never on the path to the first sound, but it is disk
   I/O: a user who replays the same track in a loop writes and flushes a few
-  hundred bytes each time. The mark is one background blocking task per
-  confirmed hit and is not pooled or bounded beyond the runtime's blocking
-  pool.
+  hundred bytes each time.
 - **ENOSPC, a full cache and the production budget were not exercised.** The
   refused path is asserted with a cache root that cannot be created, not with a
   real full disk. Real-process eviction at 200 entries/2GiB per account and the

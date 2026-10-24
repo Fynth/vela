@@ -246,7 +246,13 @@ the least recently played pairs; pinned offline copies live elsewhere and are
 never evicted. A confirmed hit refreshes the recency of its entry in the
 background: only the sidecar's `saved_at` is replaced, the cached original is
 not touched, and the mark is bound to the client lifetime, not to the
-per-selection cancel token. ADR
+per-selection cancel token. The recency label is the wall clock of the moment
+of the mark — never a value that runs ahead of it, so the labels of two tracks
+stay comparable — and two hits inside the same second share the label, with
+the tie-break on the track id deciding their order. The marks are bounded: at
+most four run at the same time for one client, a mark that cannot take a slot
+is dropped instead of queued, and the prepared lease never waits for a mark.
+ADR
 [DECISIONS/0022](DECISIONS/0022-native-media-cache.md). Real-process body
 counters, ENOSPC and production-budget eviction remain NOT_RUN.
 

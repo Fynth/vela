@@ -1,5 +1,98 @@
 # Verified progress
 
+## TL-02 round 2 — the recency label is the wall clock, and the marks are bounded (native) — 2026-10-24
+
+Round 2 closes the two P2 defects of the round-1 review and corrects the
+evidence base of round 1. No web file, CSS, asset, route, DTO, migration or
+manifest changed: the slice is `apps/desktop/src/media_cache.rs` and
+`apps/desktop/src/client.rs` plus the documents of this round.
+
+**Defect 1 — the label ran ahead of the wall clock.** `next_saved_at` returned
+`max(now, previous + 1)`: eight hits of one track inside one second wrote
+`now + 7`, so a track that was really played later (`now + 2`) looked *older*
+and was evicted first — the exact inversion the slice was supposed to remove.
+The label of a confirmed hit is now the **wall clock of the moment of the
+mark** and never a value from the future (`clock().min(saved_at_now())`);
+`next_saved_at` is gone. Two hits inside the same second carry the same label,
+and the order between them is the tie-break on `track_id` that `published()`
+already applies — stable and reproducible, and the same for every run. The
+clock is a parameter of the internal `touch_with_clock`, so a test can pin it
+and the result never depends on the wall clock of the run.
+
+**Defect 2 — the marks were not bounded.** Every confirmed hit spawned a
+`tokio::spawn` + `spawn_blocking` with no limit, so held marks delayed the
+next transfer on the blocking pool. The client owns a semaphore of
+`MAX_CONCURRENT_MARKS` (4) slots: the slot is taken **before** the task
+starts and without waiting (`try_acquire_owned`), a mark that cannot take a
+slot is **dropped silently** (the mark is an optimization, the prepared lease
+must never wait for it), and the slot lives as long as the spawned task, so it
+is released when the task ends, is aborted or panics. `prepare` never waits
+for a mark under any condition.
+
+**What was deliberately not changed.** The trust model: a hit still requires
+the sidecar to match the response and the cached descriptor to re-hash to the
+origin ETag, from the very descriptor the decoder receives. The mark reads and
+returns no byte, makes no network request and consults no session. The sidecar
+schema is unchanged (`VERSION` stays 1, the same fields), the budgets
+(200 entries / 2GiB), the atomic publication, the staging discipline, the
+`preparing` admission and the whole-file verification are untouched.
+
+**The tests.** Four new regressions: the label of ten hits in a row never
+leaves the wall clock; the eviction compares the labels of two entries against
+one clock (A at `T`, B at `T + 1`, eight hits of A inside one second: the
+newcomer evicts **A**, and on the round-1 code it evicted **B**); a saturated
+client drops the mark and still returns the verified lease; and the slots are
+released when the held marks end, so the package does not lose the recency of
+an entry forever. Four round-1 regressions were **adapted to the new contract,
+not weakened**: the label of a confirmed hit is the current clock, so a
+refresh inside the same second is not observable — those tests age the label of
+the entry before the hit and observe the refresh without a sleep. The
+sign-out test, whose assertion "a stopped mark writes nothing" was vacuous
+under the old contract, now really proves it. No test was removed, renamed or
+skipped: 151 → 155.
+
+**Measured.** `cargo fmt --all -- --check` exit 0; `cargo clippy --locked
+--workspace --all-targets -- -D warnings` exit 0; `cargo test --locked
+-p vela-desktop -- --test-threads=2` **155 passed / 0 failed / 3 ignored** (151
+before this round, all kept); `cargo test --locked -p vela-web` 57 passed;
+`cargo build --locked -p vela-web --target wasm32-unknown-unknown --release`
+exit 0; the native X11 window (`scripts/verify_native_client.py --backend x11
+--test-preparation`) **exit 0, 314 checks, 24 PNG, `result.ok=true`,
+`temporary_originals_after_exit=0`**, reduced-motion window 8 checks — evidence
+in `target/checks/tl02-r2-native/`, produced at **07:27:04** on the final tree
+(driver rebuilt at 07:25:52, the two Rust files last edited at 07:23:42 /
+07:25:00). An earlier run of the same code is preserved under
+`target/checks/tl02-r2-native-071703/` (**07:17:03**); the verification script
+refuses to write into a non-empty evidence directory, so the final run went
+into a fresh directory and the earlier one was moved aside, not overwritten.
+Five consecutive full-suite runs: 0 failures. The mutations are
+proven, not asserted: a label that runs ahead of the clock fails 2 of the 155
+tests, a mark that does nothing fails 7, a client that does not mark fails 6,
+and a removed bound on the concurrent marks fails 2.
+
+**The evidence base of round 1 was corrected.** The round-1 native artifact
+`target/checks/tl02-recency-native/` (06:22:45) is *older* than the round-1
+sources (06:23:42 / 06:24:07): the claim that it came "after the last edit of
+the two changed Rust files" is withdrawn, and the artifact belongs to an
+intermediate revision, not to the tree it was quoted for. The round-1 mutation
+counts were re-measured on the round-1 tree itself (`c956f95`): a mark that
+does nothing fails **5** of the 8 round-1 tests (not 4), and the mutation of
+the strict increment fails **3** growth assertions (not 2) — the missing test
+in both lists is
+`client::tests::a_confirmed_hit_is_marked_in_the_background_and_never_delays_the_lease`.
+ADR 0022 and KNOWN_LIMITATIONS no longer describe an impossible failure mode:
+a mark can no longer move the label "back to the older value" (it always
+writes the current clock — only a system clock that moves back does that), and
+the republished entry stays usable only while the representation is
+byte-for-byte the same one (the same ETag).
+
+**Not covered.** The multiprocess mark↔publication race, a real ENOSPC, a real
+`fsync` storm under the new bound, the production 200-entry/2GiB budget
+eviction and every non-Linux target are still NOT_RUN; the browser surfaces
+were not re-rendered because `apps/web/**` is byte-identical. The details are
+in
+[KNOWN_LIMITATIONS](KNOWN_LIMITATIONS.md#tl-02--the-cache-evicts-by-the-last-confirmed-hit-native--2026-10-24).
+
 ## TL-02 — the cache evicts by the last confirmed hit, not by the insertion (native) — 2026-10-24
 
 The A→B→A body transfer was already closed and proven
@@ -68,9 +161,17 @@ exit 0; the native X11 window (`scripts/verify_native_client.py --backend x11
 `temporary_originals_after_exit=0`**, reduced-motion window 8 checks — evidence
 in `target/checks/tl02-recency-native/`, produced at 06:22 on the sources of
 this slice. Five consecutive full-suite runs: 0 failures. The mutations are
-proven, not asserted: a `touch` that does nothing fails 4 of the 8 new tests,
-a client that does not mark fails exactly the 4 new client tests, and a
-recency value that is not strictly newer fails the two growth assertions.
+proven, not asserted: a `touch` that does nothing fails **5** of the 8 new
+tests, a client that does not mark fails exactly the 4 new client tests, and
+a recency value that is not strictly newer fails the **three** growth
+assertions. *(The counts of this paragraph were corrected on 2026-10-24 in
+round 2: the round-1 text said 4 and 2, the real numbers are 5 and 3 — the
+missing test in both lists is
+`client::tests::a_confirmed_hit_is_marked_in_the_background_and_never_delays_the_lease`.
+The native artifact of this round is **older** than the two Rust files it was
+quoted for (06:22:45 against 06:23:42 / 06:24:07), so it belongs to an
+intermediate revision; the artifact of the final tree is the round-2 run
+`target/checks/tl02-r2-native/`.)*
 
 **Not covered.** The multiprocess mark↔publication race, a real ENOSPC, the
 production 200-entry/2GiB budget eviction and every non-Linux target are still

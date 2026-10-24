@@ -43,6 +43,14 @@ const REVALIDATE_TIMEOUT: Duration = Duration::from_secs(20);
 /// prepare keeps the previous synchronous publication instead of accumulating an
 /// unbounded number of local copies.
 const MAX_IN_FLIGHT_PUBLICATIONS: usize = 32;
+/// Background recency marks that may run at the same time. A mark is one small
+/// sidecar rewrite of a few hundred bytes, and a confirmed hit produces one mark
+/// at a time: four of them are already more than a playback can produce. The
+/// bound keeps the blocking pool of the runtime free for the transfers and the
+/// publications the first sound depends on. A mark that cannot take a slot is
+/// dropped, never queued: the mark is an optimization, and the lease must never
+/// wait for it.
+const MAX_CONCURRENT_MARKS: usize = 4;
 /// How long a prepare waits for a running publication of the same key before it
 /// continues with an ordinary verified transfer.
 const PUBLICATION_WAIT: Duration = Duration::from_secs(60);
@@ -259,6 +267,10 @@ struct Inner {
     /// always uses `PUBLICATION_WAIT`; the tests shorten it to keep the suite
     /// fast.
     publication_wait: Duration,
+    /// The background recency marks that may run at the same time. A mark that
+    /// cannot take a slot is dropped: the mark is an optimization and the
+    /// prepared lease must never wait for it.
+    marks: Arc<Semaphore>,
     #[cfg(test)]
     temporary_directory: Option<PathBuf>,
     #[cfg(test)]
@@ -269,6 +281,11 @@ struct Inner {
     /// that a confirmed cache hit scheduled.
     #[cfg(test)]
     recency_pause: Mutex<Option<Arc<RecencyPause>>>,
+    /// How many recency marks were dropped because the bound of concurrent
+    /// marks was reached. A test-only counter: a dropped mark is a lost
+    /// optimization, not a user-visible event.
+    #[cfg(test)]
+    dropped_marks: AtomicUsize,
     #[cfg(test)]
     cache_miss_barrier: Mutex<Option<Arc<CacheMissBarrier>>>,
     /// The barrier of the post-admission cache read. It is a separate instance
@@ -368,6 +385,7 @@ impl VelaClient {
                     preparing: Arc::new(Semaphore::new(1)),
                     publications: Mutex::new(HashMap::new()),
                     publication_wait: PUBLICATION_WAIT,
+                    marks: Arc::new(Semaphore::new(MAX_CONCURRENT_MARKS)),
                     #[cfg(test)]
                     temporary_directory: None,
                     #[cfg(test)]
@@ -376,6 +394,8 @@ impl VelaClient {
                     publication_pause: Mutex::new(None),
                     #[cfg(test)]
                     recency_pause: Mutex::new(None),
+                    #[cfg(test)]
+                    dropped_marks: AtomicUsize::new(0),
                     #[cfg(test)]
                     cache_miss_barrier: Mutex::new(None),
                     #[cfg(test)]
@@ -456,6 +476,7 @@ impl VelaClient {
                     preparing: Arc::new(Semaphore::new(1)),
                     publications: Mutex::new(HashMap::new()),
                     publication_wait: PUBLICATION_WAIT,
+                    marks: Arc::new(Semaphore::new(MAX_CONCURRENT_MARKS)),
                     #[cfg(test)]
                     temporary_directory: None,
                     #[cfg(test)]
@@ -464,6 +485,8 @@ impl VelaClient {
                     publication_pause: Mutex::new(None),
                     #[cfg(test)]
                     recency_pause: Mutex::new(None),
+                    #[cfg(test)]
+                    dropped_marks: AtomicUsize::new(0),
                     #[cfg(test)]
                     cache_miss_barrier: Mutex::new(None),
                     #[cfg(test)]
@@ -2006,10 +2029,24 @@ impl VelaClient {
     ///
     /// A live publication of the same key is never marked: the publication
     /// writes a fresh `saved_at` of its own.
+    ///
+    /// The number of marks that run at the same time is bounded. The slot is
+    /// taken **before** the task starts and without waiting: a mark that cannot
+    /// take a slot is dropped, because the mark is an optimization and a
+    /// dropped mark costs one recency label, while a queued mark would delay
+    /// the next transfer on the blocking pool. The slot lives as long as the
+    /// task, so it is released when the task ends, is aborted or panics.
     fn mark_recency(&self, scope: &CacheScope, expected: u64, etag: &str) {
         if self.in_flight_publication(&scope.key).is_some() {
             return;
         }
+        let Ok(permit) = Arc::clone(&self.inner.marks).try_acquire_owned() else {
+            // The bound is reached: the mark is dropped, and the lease that is
+            // already on its way to the decoder is not delayed by it.
+            #[cfg(test)]
+            self.inner.dropped_marks.fetch_add(1, Ordering::SeqCst);
+            return;
+        };
         let root = scope.root.clone();
         let key = scope.key.clone();
         let etag = etag.to_owned();
@@ -2022,6 +2059,9 @@ impl VelaClient {
             .ok()
             .and_then(|slot| slot.clone());
         tokio::spawn(async move {
+            // The slot is held for the whole run of the task and is released
+            // with it, also when the task is aborted or panics.
+            let _permit = permit;
             #[cfg(test)]
             if let Some(pause) = &pause {
                 pause.enter().await;
@@ -2876,6 +2916,10 @@ mod tests {
     const USER_ID: &str = "10000000-0000-4000-8000-000000000001";
     const TRACK_ID: &str = "20000000-0000-4000-8000-000000000001";
     const OTHER_TRACK_ID: &str = "20000000-0000-4000-8000-000000000002";
+    /// A recency label of the past: an entry that was published long ago, so a
+    /// confirmed hit is observed to move the label to the current clock
+    /// without a sleep.
+    const AGED_RECENCY: u64 = 1_000_000;
 
     struct HttpFixture {
         origin: String,
@@ -4271,6 +4315,21 @@ mod tests {
             .expect("the recency of a published entry")
     }
 
+    /// Age the recency label of one published entry.
+    ///
+    /// The label of a confirmed hit is the wall clock of the moment of the
+    /// mark, so a refresh inside the same second is not observable. An entry
+    /// whose label was written in the past makes the refresh observable
+    /// without a sleep, and the test still asserts the real contract: the
+    /// label moves to the current clock and never to a value from the future.
+    fn age_sidecar_recency(cache: &std::path::Path, key: &media_cache::CacheKey, value: u64) {
+        let path = media_cache::sidecar_path(cache, key);
+        let mut record: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        record["saved_at"] = serde_json::Value::from(value);
+        std::fs::write(&path, serde_json::to_vec(&record).unwrap()).unwrap();
+    }
+
     /// A fixture client with the background publication gate and the cold-cache
     /// barrier: a test can end a running publication exactly between the cache
     /// miss and the single-flight decision.
@@ -4487,6 +4546,15 @@ mod tests {
         }
         let first_recency = sidecar_saved_at(cache.path(), &first_key);
         let second_recency = sidecar_saved_at(cache.path(), &second_key);
+        assert!(
+            first_recency > AGED_RECENCY,
+            "a publication writes the current clock as the recency of the entry"
+        );
+        // The entry of A is aged: the label of a confirmed hit is the current
+        // clock, and a refresh inside the same second is not observable. An
+        // entry whose label was written in the past makes the refresh
+        // observable without a sleep.
+        age_sidecar_recency(cache.path(), &first_key, AGED_RECENCY);
 
         // A again: the confirmed hit refreshes the recency of A alone.
         let warm = client
@@ -4495,7 +4563,11 @@ mod tests {
             .unwrap();
         assert_eq!(std::fs::read(warm.path()).unwrap(), first_bytes);
         drop(warm);
-        eventually(|| sidecar_saved_at(cache.path(), &first_key) > first_recency).await;
+        eventually(|| sidecar_saved_at(cache.path(), &first_key) > AGED_RECENCY).await;
+        assert!(
+            sidecar_saved_at(cache.path(), &first_key) <= media_cache::saved_at_now(),
+            "the recency of a confirmed hit is the current clock, never a value from the future"
+        );
         assert_eq!(
             sidecar_saved_at(cache.path(), &second_key),
             second_recency,
@@ -4533,6 +4605,13 @@ mod tests {
         drop(prepared);
         await_publication(&client, &key).await;
         let published = sidecar_saved_at(cache.path(), &key);
+        assert!(
+            published > AGED_RECENCY,
+            "a publication writes the current clock as the recency of the entry"
+        );
+        // The entry is aged, so the refresh of the recency is observable
+        // without a sleep: the label of a confirmed hit is the current clock.
+        age_sidecar_recency(cache.path(), &key, AGED_RECENCY);
 
         // Warm: the lease is returned while the mark of the hit is still held.
         let warm = client
@@ -4553,14 +4632,18 @@ mod tests {
         );
         assert_eq!(
             sidecar_saved_at(cache.path(), &key),
-            published,
+            AGED_RECENCY,
             "the held mark has written nothing yet"
         );
 
         // Releasing the mark refreshes the recency of the entry.
         pause.release();
         eventually(|| pause.finished.load(Ordering::SeqCst) == 1).await;
-        eventually(|| sidecar_saved_at(cache.path(), &key) > published).await;
+        eventually(|| sidecar_saved_at(cache.path(), &key) > AGED_RECENCY).await;
+        assert!(
+            sidecar_saved_at(cache.path(), &key) <= media_cache::saved_at_now(),
+            "the recency of a confirmed hit is the current clock, never a value from the future"
+        );
     }
 
     /// A mark that cannot be applied changes nothing: the prepared lease stays
@@ -4628,6 +4711,12 @@ mod tests {
         drop(prepared);
         await_publication(&client, &key).await;
         let published = sidecar_saved_at(cache.path(), &key);
+        assert!(
+            published > AGED_RECENCY,
+            "a publication writes the current clock as the recency of the entry"
+        );
+        // The entry is aged, so a mark that had written would be visible.
+        age_sidecar_recency(cache.path(), &key, AGED_RECENCY);
 
         let warm = client
             .prepare(&track, CancellationToken::new(), progress().0)
@@ -4642,13 +4731,144 @@ mod tests {
         eventually(|| pause.finished.load(Ordering::SeqCst) == 1).await;
         assert_eq!(
             sidecar_saved_at(cache.path(), &key),
-            published,
+            AGED_RECENCY,
             "a stopped mark writes nothing"
         );
         assert_eq!(
             staging_files(&media_cache::account_root(cache.path(), &key)),
             0,
             "a stopped mark leaves no staging file"
+        );
+    }
+
+    /// The background recency marks are bounded: when the bound is reached the
+    /// next mark is dropped, and the prepared lease is neither delayed nor
+    /// changed.
+    ///
+    /// A mark is an optimization and the recency of an entry is a cache fact,
+    /// not a grant: a dropped mark costs one recency label, while a queued
+    /// mark would occupy the blocking pool that the next transfer needs.
+    #[tokio::test]
+    async fn a_saturated_recency_mark_is_dropped_and_the_lease_is_not_delayed() {
+        let original = vec![71_u8; 16 * 1024];
+        let counters = Arc::new(StreamCounters::default());
+        let router = tracked_streams(&[(TRACK_ID.to_owned(), original.clone(), counters.clone())]);
+        let http = HttpFixture::start(with_login(router)).await;
+        let temporary = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let pause = RecencyPause::new();
+        let client = fixture_client_with_recency_pause(&http, &temporary, &cache, &pause).await;
+        let track = sample_track_with(TRACK_ID, original.len());
+        let key = cache_key(&http.origin, USER_ID, TRACK_ID);
+
+        // Cold: the entry is published in the background.
+        let prepared = client
+            .prepare(&track, CancellationToken::new(), progress().0)
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(prepared.path()).unwrap(), original);
+        drop(prepared);
+        await_publication(&client, &key).await;
+
+        // Every confirmed hit takes a mark slot, and the gate holds the marks.
+        for _ in 0..MAX_CONCURRENT_MARKS {
+            let warm = client
+                .prepare(&track, CancellationToken::new(), progress().0)
+                .await
+                .unwrap();
+            assert_eq!(std::fs::read(warm.path()).unwrap(), original);
+        }
+        eventually(|| pause.entered.load(Ordering::SeqCst) == MAX_CONCURRENT_MARKS).await;
+        assert_eq!(
+            client.inner.marks.available_permits(),
+            0,
+            "every mark slot is taken by a held mark"
+        );
+
+        // The next confirmed hit cannot take a slot: its mark is dropped and
+        // the lease is returned anyway.
+        let warm = client
+            .prepare(&track, CancellationToken::new(), progress().0)
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(warm.path()).unwrap(), original);
+        assert_eq!(
+            client.inner.dropped_marks.load(Ordering::SeqCst),
+            1,
+            "the mark of a saturated client is dropped"
+        );
+        assert_eq!(
+            pause.entered.load(Ordering::SeqCst),
+            MAX_CONCURRENT_MARKS,
+            "the dropped mark never started"
+        );
+        assert_eq!(
+            counters.gets.load(Ordering::SeqCst),
+            1,
+            "a warm hit transfers no body"
+        );
+    }
+
+    /// A mark slot is not leaked: a held mark that ended gives its slot back,
+    /// and the next confirmed hit is marked again.
+    #[tokio::test]
+    async fn a_recency_mark_slot_is_released_when_the_held_marks_end() {
+        let original = vec![72_u8; 16 * 1024];
+        let counters = Arc::new(StreamCounters::default());
+        let router = tracked_streams(&[(TRACK_ID.to_owned(), original.clone(), counters.clone())]);
+        let http = HttpFixture::start(with_login(router)).await;
+        let temporary = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let pause = RecencyPause::new();
+        let client = fixture_client_with_recency_pause(&http, &temporary, &cache, &pause).await;
+        let track = sample_track_with(TRACK_ID, original.len());
+        let key = cache_key(&http.origin, USER_ID, TRACK_ID);
+
+        let prepared = client
+            .prepare(&track, CancellationToken::new(), progress().0)
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(prepared.path()).unwrap(), original);
+        drop(prepared);
+        await_publication(&client, &key).await;
+
+        // The bound is reached and the next mark is dropped.
+        for _ in 0..MAX_CONCURRENT_MARKS {
+            let warm = client
+                .prepare(&track, CancellationToken::new(), progress().0)
+                .await
+                .unwrap();
+            assert_eq!(std::fs::read(warm.path()).unwrap(), original);
+        }
+        eventually(|| pause.entered.load(Ordering::SeqCst) == MAX_CONCURRENT_MARKS).await;
+        let warm = client
+            .prepare(&track, CancellationToken::new(), progress().0)
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(warm.path()).unwrap(), original);
+        assert_eq!(client.inner.dropped_marks.load(Ordering::SeqCst), 1);
+
+        // The held marks end: every slot is free again.
+        pause.release();
+        eventually(|| client.inner.marks.available_permits() == MAX_CONCURRENT_MARKS).await;
+
+        // The next confirmed hit is marked again: the package does not lose the
+        // recency of an entry forever.
+        let warm = client
+            .prepare(&track, CancellationToken::new(), progress().0)
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(warm.path()).unwrap(), original);
+        eventually(|| pause.entered.load(Ordering::SeqCst) == MAX_CONCURRENT_MARKS + 1).await;
+        assert_eq!(
+            client.inner.dropped_marks.load(Ordering::SeqCst),
+            1,
+            "no mark was dropped after the slots were free again"
+        );
+        assert_eq!(
+            counters.gets.load(Ordering::SeqCst),
+            1,
+            "a warm hit transfers no body"
         );
     }
 

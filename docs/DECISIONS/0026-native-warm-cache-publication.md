@@ -125,6 +125,13 @@ live publications to be reachable.
   publication keeps the single-flight slot of its key.
 - Eviction remains insertion-age FIFO; this ADR changes neither budgets nor
   integrity checks.
+  - *Amended 2026-10-24 (TL-02, ADR 0022):* the eviction no longer follows
+    the insertion. The recency of a published entry is the time of its last
+    **confirmed hit**, and the label of that hit is the wall clock of the
+    moment of the mark — never a value that runs ahead of it, so the labels of
+    two tracks stay comparable. Two hits inside the same second share the
+    label and the tie-break on `track_id` decides their order. This ADR still
+    changes neither budgets nor integrity checks.
 - Progressive playback stays a follow-up with its own ADR and its own evidence.
 
 ## Verification

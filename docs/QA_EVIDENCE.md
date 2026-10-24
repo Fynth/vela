@@ -1,5 +1,119 @@
 # Verified0.12.0 package and preserved runtime checkpoint
 
+## TL-02 round 2 — the recency label is the wall clock, and the marks are bounded (native) — 2026-10-24
+
+Round 2 closes the two P2 defects of the round-1 review and corrects the
+evidence base of round 1. The change is confined to
+`apps/desktop/src/media_cache.rs` and `apps/desktop/src/client.rs`; no web
+file, CSS, asset, route, DTO, migration or manifest changed. The sidecar
+schema is unchanged (`VERSION` stays 1, the same fields), the budgets, the
+atomic publication, the staging discipline and the whole-file verification
+(`open_verified` still re-hashes the file and compares the ETag) are
+untouched.
+
+### The two defects and their fixes
+
+- **P2 — the label ran ahead of the wall clock.** `next_saved_at` returned
+  `max(now, previous + 1)`, so eight hits of one track inside one second wrote
+  `now + 7`. A track that was really played later (`now + 2`) was then
+  **older** than that track and was evicted first — the very inversion the
+  slice was supposed to remove. The label of a confirmed hit is now the **wall
+  clock of the moment of the mark**, never a value from the future:
+  `media_cache::touch` writes `clock().min(saved_at_now())`, and the
+  `next_saved_at` helper is gone. Two hits inside the same second therefore
+  carry the same label, and the order between them is the tie-break on
+  `track_id` that `published()` already applies — the same order for every
+  run. The clock is a parameter of the internal `touch_with_clock`, so a test
+  can pin it and the result does not depend on the wall clock of the run.
+- **P2 — the marks were not bounded.** Every confirmed hit spawned a
+  `tokio::spawn` + `spawn_blocking` with no limit and no coalescing, so held
+  marks delayed the next transfer on the blocking pool. The client now owns a
+  semaphore of `MAX_CONCURRENT_MARKS` (4) slots. The slot is taken **before**
+  the task starts and without waiting (`try_acquire_owned`); a mark that
+  cannot take a slot is **dropped silently**, because the mark is an
+  optimization and the prepared lease must never wait for it. The slot lives
+  as long as the spawned task, so it is released when the task ends, is
+  aborted or panics. `prepare` never waits for a mark under any condition.
+
+### The commands and their real output
+
+| Command | Result |
+| --- | --- |
+| `cargo fmt --all -- --check` | exit 0 |
+| `cargo clippy --locked --workspace --all-targets -- -D warnings` | exit 0, no warnings |
+| `cargo test --locked -p vela-desktop -- --test-threads=2` | **`155 passed; 0 failed; 3 ignored`** (151 before this round, all kept) |
+| `cargo test --locked -p vela-web` | **57 passed; 0 failed** |
+| `cargo build --locked -p vela-web --target wasm32-unknown-unknown --release` | exit 0 (nothing to rebuild: `apps/web/**` is byte-identical) |
+| the whole desktop suite, 5 consecutive runs with `--test-threads=2` | **5 × `155 passed; 0 failed; 3 ignored`** |
+| `cargo build --locked -p vela-desktop --example native-ui-qa --features native-qa` | exit 0 (the example needs the `native-qa` feature; without it the build fails with "requires the features: `native-qa`") |
+| `DISPLAY=:99 python3 scripts/verify_native_client.py --backend x11 --server target/debug/vela-server --driver target/debug/examples/native-ui-qa --evidence target/checks/tl02-r2-native --test-preparation` | **exit 0** — `report.json` `result.ok=true`, **314 checks**, **24 PNG**, `temporary_originals_after_exit=0`, engine `Rodio/CPAL, owned isolated null sink`, reduced-motion window `reduced_motion.ok=true` (8 checks), including "Native preparation: real 65536-byte partial transfer canceled on socket, generation 3→4, no late load and successful Play retry" — run on the final tree at **07:27:04**; the earlier run of the same code is preserved under `target/checks/tl02-r2-native-071703/` (**07:17:03**) |
+
+The round-2 artifact `target/checks/tl02-r2-native/` was produced at
+**07:27:04** on the final tree: the driver binary it ran was rebuilt from the
+final sources at **07:25:52**, and the last edit of the two changed Rust files
+is **07:23:42** (`media_cache.rs`) and **07:25:00** (`client.rs`) — the
+artifact is later than the code it exercises. (`target/debug/vela-server` is
+from 01:28:44: no file of the server crate changed in this slice, and
+`cargo build --locked -p vela-server` reports it up to date against the
+current sources.)
+
+An earlier round-2 run of the same code is preserved under
+`target/checks/tl02-r2-native-071703/` (**07:17:03**). The sources it
+exercised are byte-identical to the final ones, but it is not the artifact of
+the final tree: the two Rust files were rewritten afterwards by the mutation
+experiments of the verification pass, so their `mtime` is later than that
+run. `scripts/verify_native_client.py` refuses to write into a non-empty
+evidence directory, so the final run went into a fresh directory and the
+earlier run was moved aside under its own name — nothing was overwritten. The
+scope of both runs is the native window class only: one run each, not repeated
+runs, and **not** a browser render — no web file changed in this slice.
+
+The round-1 artifact `target/checks/tl02-recency-native/` (**06:22:45**) is
+*older* than the round-1 sources (06:23:42 / 06:24:07) and belongs to an
+intermediate revision: it is **not** evidence for the round-1 tree either, and
+the round-1 claim that it came "after the last edit" is withdrawn in the
+round-1 section below.
+
+### The new regressions, and what they fail on
+
+| Test | Asserts |
+| --- | --- |
+| `media_cache::tests::a_recency_mark_never_writes_a_value_from_the_future` | ten confirmed hits in a row leave the label at or before the wall clock and never below the value the publication wrote; on the round-1 code the label is `now + 9` and the test fails |
+| `media_cache::tests::the_eviction_order_compares_two_entries_by_one_clock` | A published at `T`, B at `T + 1`, eight hits of A inside one second: the label of A stays `T`, the newcomer evicts **A** and B keeps its place; on the round-1 code the label of A is `T + 8` and **B** is evicted, so the test fails |
+| `client::tests::a_saturated_recency_mark_is_dropped_and_the_lease_is_not_delayed` | four held marks take every slot, the next confirmed hit is marked nowhere (`dropped_marks == 1`, the gate was never entered), and the lease is returned with the verified bytes and without a body transfer |
+| `client::tests::a_recency_mark_slot_is_released_when_the_held_marks_end` | after the held marks end, every slot is free again and the next confirmed hit is marked again — the package does not lose the recency of an entry forever |
+
+Four round-1 regressions were **adapted to the new contract, not weakened**:
+the label of a confirmed hit is the current clock, so a refresh inside the same
+second is not observable. `a_confirmed_hit_refreshes_the_recency_without_touching_the_audio`
+(now also asserts that the label is never from the future),
+`a_confirmed_hit_refreshes_the_recency_of_the_entry_it_played`,
+`a_confirmed_hit_is_marked_in_the_background_and_never_delays_the_lease` and
+`a_sign_out_stops_a_running_recency_mark` age the label of the entry before the
+hit, so the refresh is observed without a sleep — and the sign-out test, whose
+assertion "a stopped mark writes nothing" was vacuous under the old contract,
+now really proves it. No test was removed, renamed or skipped.
+
+The mutations below were applied to the final tree and reverted afterwards; the
+numbers are the real output of the runs, not an expectation. They were
+**re-measured in the round-2 verification pass**, one mutation at a time, with
+the failing test names read out of the run:
+
+| Mutation | Result |
+| --- | --- |
+| the label runs ahead of the clock again (`clock().max(previous + 1)`, the round-1 semantics) | **2 of the 155 tests fail** (153 passed / 2 failed): `media_cache::tests::a_recency_mark_never_writes_a_value_from_the_future`, `media_cache::tests::the_eviction_order_compares_two_entries_by_one_clock`; the other 153 stay green |
+| `touch` returns `Ok(false)` immediately (the mark does nothing) | **7 of the 155 tests fail** (148 passed / 7 failed): `media_cache::tests::a_confirmed_hit_refreshes_the_recency_without_touching_the_audio`, `media_cache::tests::the_eviction_follows_the_confirmed_playback_and_not_the_insertion`, `media_cache::tests::a_canceled_recency_mark_leaves_no_staging_file`, `media_cache::tests::a_recency_mark_never_writes_a_value_from_the_future`, `media_cache::tests::the_eviction_order_compares_two_entries_by_one_clock`, `client::tests::a_confirmed_hit_refreshes_the_recency_of_the_entry_it_played`, `client::tests::a_confirmed_hit_is_marked_in_the_background_and_never_delays_the_lease` |
+| the client stops calling `mark_recency` | **6 of the 155 tests fail** (149 passed / 6 failed): the 4 round-1 client recency regressions and the 2 new bound regressions; every pre-existing desktop test stays green |
+| the bound on the concurrent marks is removed (the permit pool is made effectively unbounded, so every mark is scheduled) | **2 of the 155 tests fail** (153 passed / 2 failed): `client::tests::a_saturated_recency_mark_is_dropped_and_the_lease_is_not_delayed`, `client::tests::a_recency_mark_slot_is_released_when_the_held_marks_end` |
+
+### Not run
+
+A real ENOSPC, the production 200-entry/2GiB eviction, two processes on one
+cache root, a real `fsync` storm under the new bound, every non-Linux target, a
+Wayland session, screen readers and physical media keys are NOT_RUN. The
+browser surfaces were not re-rendered: `apps/web/**` is byte-identical, so only
+`cargo test -p vela-web` and the wasm build were executed for the web crate.
+
 ## TL-02 — the cache evicts by the last confirmed hit, not by the insertion (native) — 2026-10-24
 
 The native media cache evicted by the age of the **insertion**
@@ -45,8 +159,14 @@ migration or manifest changed.
 | the whole desktop suite, 5 consecutive runs with `--test-threads=2` | **5 × `151 passed; 0 failed; 3 ignored`** |
 | `DISPLAY=:99 python3 scripts/verify_native_client.py --backend x11 --server target/debug/vela-server --driver target/debug/examples/native-ui-qa --evidence target/checks/tl02-recency-native --test-preparation` | **exit 0** — `report.json` `result.ok=true`, **314 checks**, **24 PNG**, `temporary_originals_after_exit=0`, engine `Rodio/CPAL, owned isolated null sink`, reduced-motion window `reduced_motion.ok=true` (8 checks), including "Native preparation: real 65536-byte partial transfer canceled on socket, generation 3→4, no late load and successful Play retry" |
 
-The native artifact was produced at **06:22**, after the last edit of the two
-changed Rust files (06:20), and `git status` is clean for them. It is one run
+The native artifact of this round (`target/checks/tl02-recency-native/`) was
+produced at **06:22**, while the two changed Rust files carry an `mtime` of
+**06:23:42** and **06:24:07** — *later* than the artifact. The round-1 claim
+that the artifact came "after the last edit of the two changed Rust files
+(06:20)" was therefore **not provable and is withdrawn**: the artifact belongs
+to an **intermediate revision** of the two files, not to the tree this section
+describes. The artifact of the **final** tree is the round-2 run
+(`target/checks/tl02-r2-native/`), see the round-2 section below. It is one run
 of the native window class, not repeated runs, and **not** a browser render: no
 web file changed in this slice.
 
@@ -64,13 +184,19 @@ web file changed in this slice.
 | `client::tests::a_sign_out_stops_a_running_recency_mark` | a sign-out stops a running mark: it writes nothing and leaves no staging file |
 
 The mutations below were applied to the final tree and reverted afterwards; the
-numbers are the real output of the runs, not an expectation:
+numbers are the real output of the runs, not an expectation. **The counts of
+this table were corrected on 2026-10-24 (TL-02 round 2)**: the round-1 text
+said "4 of the 8 new tests fail" and "the two growth assertions fail", and the
+real numbers are **5** and **3** — `a_confirmed_hit_is_marked_in_the_background_and_never_delays_the_lease`
+was missing from both lists, although it asserts a growth of the recency and
+fails with a mark that does nothing. The three counts below were re-measured
+on the round-1 tree itself (`c956f95`, 146/147/148 passed of 151).
 
 | Mutation | Result |
 | --- | --- |
-| `touch` returns `Ok(false)` immediately (the mark does nothing) | **4 of the 8 new tests fail**: `a_confirmed_hit_refreshes_the_recency_without_touching_the_audio`, `the_eviction_follows_the_confirmed_playback_and_not_the_insertion`, `a_canceled_recency_mark_leaves_no_staging_file`, `a_confirmed_hit_refreshes_the_recency_of_the_entry_it_played`; the other 143 desktop tests stay green |
-| the client stops calling `mark_recency` | **exactly the 4 new client tests fail**; every pre-existing desktop test stays green |
-| `next_saved_at` returns the clock without the strict increment | the two growth assertions fail (`a_confirmed_hit_refreshes_the_recency_without_touching_the_audio`, `a_confirmed_hit_refreshes_the_recency_of_the_entry_it_played`) — the one-second clock alone does not order two hits of the same second |
+| `touch` returns `Ok(false)` immediately (the mark does nothing) | **5 of the 8 new tests fail** (146 passed / 5 failed of 151): `a_confirmed_hit_refreshes_the_recency_without_touching_the_audio`, `the_eviction_follows_the_confirmed_playback_and_not_the_insertion`, `a_canceled_recency_mark_leaves_no_staging_file`, `a_confirmed_hit_refreshes_the_recency_of_the_entry_it_played`, `a_confirmed_hit_is_marked_in_the_background_and_never_delays_the_lease`; the other 143 desktop tests stay green |
+| the client stops calling `mark_recency` | **exactly the 4 new client tests fail** (147 passed / 4 failed of 151); every pre-existing desktop test stays green |
+| `next_saved_at` returns the clock without the strict increment | the **three** growth assertions fail (148 passed / 3 failed of 151): `a_confirmed_hit_refreshes_the_recency_without_touching_the_audio`, `a_confirmed_hit_refreshes_the_recency_of_the_entry_it_played`, `a_confirmed_hit_is_marked_in_the_background_and_never_delays_the_lease` — the one-second clock alone does not order two hits of the same second |
 
 ### Not run
 

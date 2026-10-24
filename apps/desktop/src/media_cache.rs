@@ -43,6 +43,13 @@ pub(crate) const BLOCK_BYTES: usize = 64 * 1024;
 /// Sidecar schema version. A sidecar of another version is never reinterpreted.
 const VERSION: u8 = 1;
 
+/// The wall clock of the recency label: whole seconds since the Unix epoch.
+///
+/// The label of a confirmed hit is the clock of the moment of the mark, so two
+/// tracks are always compared against the same clock. A test may pin the clock
+/// to make the recorded value deterministic.
+type Clock<'a> = &'a dyn Fn() -> u64;
+
 pub(crate) const CANCELED: &str = "The media cache operation was canceled.";
 const UNAVAILABLE: &str = "The prepared original could not be cached.";
 const INTEGRITY: &str = "The cached audio copy failed its BLAKE3 fingerprint check.";
@@ -303,7 +310,8 @@ pub(crate) fn open_verified(
 ///   still re-hashed from the very descriptor the decoder receives;
 /// - it makes no network request and consults no session.
 ///
-/// `Ok(true)` — the sidecar now describes a newer confirmed hit.
+/// `Ok(true)` — the sidecar now records this confirmed hit at the current
+/// clock.
 /// `Ok(false)` — the sidecar is absent, is of another version or describes
 /// another representation: nothing was written at all.
 /// `Err` — cancellation only.
@@ -312,6 +320,33 @@ pub(crate) fn touch(
     key: &CacheKey,
     expected_size: u64,
     expected_etag: &str,
+    canceled: &dyn Fn() -> bool,
+) -> Result<bool, String> {
+    touch_with_clock(
+        root,
+        key,
+        expected_size,
+        expected_etag,
+        &saved_at_now,
+        canceled,
+    )
+}
+
+/// The mark of a confirmed hit, with the clock that records its label.
+///
+/// The label of a confirmed hit is the **wall clock of the moment of the
+/// mark**, in whole seconds. It is never a value from the future: a label that
+/// ran ahead of the clock would make one track look older than a track that
+/// was really played later, and the eviction would drop exactly the entry
+/// that was played most recently. Two confirmed hits inside the same second
+/// therefore record the same label, and the order between them is resolved by
+/// the tie-break on `track_id` that [`published`] already applies.
+fn touch_with_clock(
+    root: &Path,
+    key: &CacheKey,
+    expected_size: u64,
+    expected_etag: &str,
+    clock: Clock<'_>,
     canceled: &dyn Fn() -> bool,
 ) -> Result<bool, String> {
     if canceled() {
@@ -361,7 +396,10 @@ pub(crate) fn touch(
     let suffix = unique_suffix();
     let staged = account.join(format!(".{}.{suffix}.json.tmp", key.track_id));
     let mut updated = sidecar.clone();
-    updated.saved_at = next_saved_at(sidecar.saved_at);
+    // The label of a confirmed hit is the clock of the moment of the mark, and
+    // never a value from the future: the eviction compares the labels of two
+    // tracks against the same wall clock.
+    updated.saved_at = clock().min(saved_at_now());
     if let Err(error) = stage_sidecar(&staged, &updated) {
         let _ = fs::remove_file(&staged);
         return Err(error);
@@ -396,15 +434,6 @@ fn intact(root: &Path, key: &CacheKey, size_bytes: u64) -> bool {
         return false;
     };
     !link.file_type().is_symlink() && link.is_file() && link.len() == size_bytes
-}
-
-/// The recency of a confirmed hit.
-///
-/// The clock has a one-second resolution, so the value is also strictly newer
-/// than the one it replaces: two confirmed hits inside the same second still
-/// order the entry after an entry that was never played again.
-fn next_saved_at(previous: u64) -> u64 {
-    saved_at_now().max(previous.saturating_add(1))
 }
 
 /// Copy one already verified prepared original into this namespace. Best effort by
@@ -814,6 +843,11 @@ fn make_room(
 }
 
 /// Every `<uuid>.json` sidecar in this namespace with its audio size, oldest first.
+///
+/// The order is the recency label of the entry, then its track id. The
+/// tie-break matters because the label of a confirmed hit is a one-second
+/// clock: two entries confirmed inside the same second carry the same label,
+/// and the track id keeps their order stable and reproducible.
 fn published(account: &Path) -> Result<Vec<Entry>, String> {
     let entries = match fs::read_dir(account) {
         Ok(entries) => entries,
@@ -1018,7 +1052,12 @@ fn unique_suffix() -> String {
     format!("{}-{}", std::process::id(), uuid::Uuid::new_v4().simple())
 }
 
-fn saved_at_now() -> u64 {
+/// The wall clock of the recency label, in whole seconds since the Unix epoch.
+///
+/// The label of a confirmed hit is this clock, read at the moment of the mark.
+/// It is never a value from the future: a label that ran ahead of the clock
+/// would make one track look older than a track that was really played later.
+pub(crate) fn saved_at_now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs())
@@ -1039,6 +1078,10 @@ mod tests {
     const OTHER_ACCOUNT: &str = "10000000-0000-4000-8000-000000000002";
     const TRACK: &str = "20000000-0000-4000-8000-000000000001";
     const OTHER_TRACK: &str = "20000000-0000-4000-8000-000000000002";
+    /// A recency label of the past: an entry that was published long ago, so a
+    /// confirmed hit is observed to move the label to the current clock
+    /// without a sleep.
+    const AGED_RECENCY: u64 = 1_000_000;
 
     fn key(origin: &str, account: &str, track: &str) -> CacheKey {
         CacheKey::new(origin, account, track).unwrap()
@@ -1670,9 +1713,10 @@ mod tests {
         let bytes = b"recency-refresh-fixture".to_vec();
         let etag = digest(&bytes);
         let key = key(ORIGIN, ACCOUNT, TRACK);
-        // The entry was published with the current clock: the recency of a
-        // confirmed hit must grow even inside the same second.
-        publish_bytes(cache.path(), &key, &bytes, saved_at_now()).unwrap();
+        // The entry was published with an older clock: a confirmed hit moves
+        // the recency to the current clock, so the value grows by
+        // construction and the growth is observed without a sleep.
+        publish_bytes(cache.path(), &key, &bytes, AGED_RECENCY).unwrap();
         let audio = audio_path(cache.path(), &key);
         let before = identity(&audio);
         let recency = sidecar_saved_at(cache.path(), &key);
@@ -1690,6 +1734,10 @@ mod tests {
         assert!(
             sidecar_saved_at(cache.path(), &key) > recency,
             "the recency of a confirmed hit must grow"
+        );
+        assert!(
+            sidecar_saved_at(cache.path(), &key) <= saved_at_now(),
+            "the recency of a confirmed hit is the current clock, never a value from the future"
         );
         // The record still describes the very same representation.
         let record = read_sidecar(&sidecar_path(cache.path(), &key)).unwrap();
@@ -1711,6 +1759,112 @@ mod tests {
         assert_eq!(mode(&account_root(cache.path(), &key)), 0o700);
         assert_eq!(mode(&sidecar_path(cache.path(), &key)), 0o600);
         assert_eq!(mode(&audio), 0o600);
+    }
+
+    /// A confirmed hit never writes a label from the future.
+    ///
+    /// The label of a confirmed hit is the wall clock of the moment of the
+    /// mark. A label that ran ahead of the clock would make one track look
+    /// older than a track that was really played later, and the eviction would
+    /// drop exactly the entry that was played most recently.
+    #[test]
+    fn a_recency_mark_never_writes_a_value_from_the_future() {
+        let cache = tempfile::tempdir().unwrap();
+        let bytes = b"recency-clock-fixture".to_vec();
+        let etag = digest(&bytes);
+        let key = key(ORIGIN, ACCOUNT, TRACK);
+        let published = saved_at_now();
+        publish_bytes(cache.path(), &key, &bytes, published).unwrap();
+
+        // Ten confirmed hits in a row: the label may never leave the clock.
+        for _ in 0..10 {
+            assert!(
+                touch(cache.path(), &key, bytes.len() as u64, &etag, &never()).unwrap(),
+                "a confirmed hit must refresh the recency of the entry"
+            );
+        }
+        let recency = sidecar_saved_at(cache.path(), &key);
+        assert!(
+            recency <= saved_at_now(),
+            "the recency of a confirmed hit is the current clock, never a value from the future"
+        );
+        assert!(
+            recency >= published,
+            "the recency of a confirmed hit never moves backwards"
+        );
+    }
+
+    /// The eviction compares the labels of two entries against one clock.
+    ///
+    /// A burst of confirmed hits of one track must not push its label past a
+    /// track that was really played later: the label of a confirmed hit is the
+    /// clock of the moment of the hit, so two tracks stay comparable. The
+    /// clock is pinned here, so the burst of hits is the one-second burst the
+    /// review described and the result does not depend on the wall clock of
+    /// the test run.
+    #[test]
+    fn the_eviction_order_compares_two_entries_by_one_clock() {
+        let cache = tempfile::tempdir().unwrap();
+        let first = key(ORIGIN, ACCOUNT, "20000000-0000-4000-8000-00000000000a");
+        let second = key(ORIGIN, ACCOUNT, "20000000-0000-4000-8000-00000000000b");
+        let newcomer = key(ORIGIN, ACCOUNT, "20000000-0000-4000-8000-00000000000c");
+        let body = b"one-clock-original";
+        let (_directory, source) = original(body);
+        let budget = Budget {
+            entries: 2,
+            bytes: MAX_BYTES,
+        };
+        let clock = saved_at_now();
+
+        // A was published at `clock`, B one second later.
+        publish_bytes(cache.path(), &first, body, clock).unwrap();
+        publish_bytes(cache.path(), &second, body, clock + 1).unwrap();
+
+        // A is played again, several times inside the same second: the label
+        // of A stays the clock of that second and does not run past the label
+        // of B.
+        for _ in 0..8 {
+            assert!(
+                touch_with_clock(
+                    cache.path(),
+                    &first,
+                    body.len() as u64,
+                    &digest(body),
+                    &|| clock,
+                    &never()
+                )
+                .unwrap(),
+                "a confirmed hit must refresh the recency of the entry"
+            );
+        }
+        assert_eq!(
+            sidecar_saved_at(cache.path(), &first),
+            clock,
+            "the label of a confirmed hit is the clock of the hit, not a value that runs ahead of it"
+        );
+
+        // C is published into a namespace of two entries: the older label goes
+        // first, so A is evicted and B keeps its place.
+        store_at(
+            cache.path(),
+            &newcomer,
+            &source,
+            body.len() as u64,
+            &digest(body),
+            clock + 2,
+            budget,
+            &never(),
+        )
+        .unwrap();
+        assert!(
+            !audio_path(cache.path(), &first).exists(),
+            "the entry with the older label is evicted first"
+        );
+        assert!(
+            audio_path(cache.path(), &second).exists(),
+            "the entry that was played later keeps its place"
+        );
+        assert!(audio_path(cache.path(), &newcomer).exists());
     }
 
     /// The eviction order follows the last confirmed playback, not the
