@@ -1,5 +1,46 @@
 # Unsupported and unverified functionality
 
+## TL-01 step 1 round 5 — the test gate is serialized (native) — 2026-10-24
+
+Round 5 closed the round-4 review's test-layer defect (the global `copy_gate`
+slot could be emptied by another test) and one false documentary claim. What is
+**not** covered by that increment is here.
+
+- **The gate slot is still process-global, and the section only protects the
+  tests that use it.** `copy_gate::exclusive()` serializes the tests that take
+  the section, but nothing detects a *future* test that installs a gate without
+  taking it: such a test would disarm the running one exactly as round 4 did.
+  The section is a convention enforced by review, not a type-level guarantee.
+- **The section is a `std::sync::Mutex` held across `.await`.** That is only
+  sound because `#[tokio::test]` runs on the `current_thread` flavor by
+  default. A multi-thread flavor would need `tokio::sync::Mutex` or a different
+  design; the guard is deliberately not `Send`.
+- **The round-4 limitation "the gate guard's regression is single-threaded …
+  and it cannot: the gate slot is process-global by design" is closed** by the
+  section and by the new two-thread test
+  (`a_copy_gate_section_admits_one_test_at_a_time`), which runs two real
+  threads and asserts that the second one cannot enter a held section. What
+  that test does **not** prove is that no *other* code path writes the slot:
+  `install()` and `install_scoped()` remain callable inside a section only.
+- **The race was measured with a timing perturbation, not by luck.** 200 runs of
+  the two tests together on the unmodified tree failed 0 times, because the
+  window (~2 ms) does not open in the standard schedule; the failures only
+  appear when the second test is delayed by 3–5 ms (12 of 20 each). The
+  deterministic evidence is the new section test, not the loop.
+- **The native window was re-run on this tree, and it is one run.** 314 checks /
+  24 PNG, `result.ok=true`, `temporary_originals_after_exit=0`, produced at
+  04:44:37 on the sources of `e7da338` (04:43:00), and again at 05:17:29 on the
+  final tree after the reviewer's rename (`target/checks/tl01-r5-native-final/`,
+  same 314/24/ok numbers). The final artifact is later than both changed Rust
+  files, so it is tied by `mtime` as well as by content. `mtime` alone is not a
+  source of code identity — reverting a review mutation rewrites a file without
+  changing a byte, which is why the round-4 artifact is tied by content instead.
+  Each is still one run of the native window class, not repeated runs, and not a
+  browser render.
+- **The browser surfaces were not re-rendered.** No web file, CSS or asset
+  changed in this increment; `apps/web/**` is byte-identical and only
+  `cargo test -p vela-web` and the wasm build were executed for the web crate.
+
 ## TL-01 step 1 round 4 — the warm re-read leaves the transfer admission (native) — 2026-10-24
 
 Round 4 closed the round-3 reviews' two P2s and three P3s. What this increment
@@ -20,9 +61,13 @@ still does **not** cover is here.
   one test and asserts which one the slot keeps. It does not prove that two *test
   threads* installing gates concurrently never interfere, and it cannot: the gate
   slot is process-global by design.
-- **The native artifact belongs to this slice but is one run.** 314 checks / 24
-  PNG were produced after the last code edit on this tree; it is one run of the
-  native window class, not repeated runs, and not a browser render.
+- **The native artifact is one run and is not tied to the commit by `mtime`.**
+  314 checks / 24 PNG were produced between 02:50:04 and 02:50:53 on 2026-10-24
+  on a tree whose two changed Rust files are byte-identical to this commit; the
+  files were then rewritten byte-identically at 02:55:18 while the mutations of
+  the review proofs were reverted, so the artifact cannot be tied to the commit
+  by `mtime`. It is one run of the native window class, not repeated runs, and
+  not a browser render.
 - **The second `admit()` after an expired wait can still end as `PREPARE_BUSY`**
   (unchanged from round 3): the publication wait is bounded at 60 s; when it runs
   out, `prepare` continues to the transfer and takes the admission again with a

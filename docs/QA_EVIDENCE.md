@@ -1,5 +1,152 @@
 # Verified0.12.0 package and preserved runtime checkpoint
 
+## TL-01 step 1 round 5 — the test gate is serialized (native) — 2026-10-24
+
+Round 5 closes a defect in the **test layer** of round 4 and corrects a false
+claim about the round-4 native artifact. The change is confined to `#[cfg(test)]`
+code: `git diff` touches no line of `prepare`, `cached_lease`, `recheck_cache`,
+the publication registry or `copy_verified`.
+
+### The defect and its fix
+
+`media_cache::copy_gate` is a process-global slot. Two tests install it, and
+the second one began with an unconditional `copy_gate::clear()`: a `clear()`
+that lands between the first test's installation and the arrival of its copy
+empties the slot, the copy runs **unheld**, `gate.entered()` stays `0` and
+`a_sign_out_stops_a_running_publication` dies on its 3 s timeout. The mirror
+mode breaks the second test instead: the guard restores a gate that is no
+longer owned.
+
+`copy_gate` now owns an **exclusive section**. `exclusive()` takes a
+process-wide `std::sync::Mutex<()>`, saves the slot value and empties the slot;
+dropping the guard restores the saved value before the lock is released, also
+when the test panics. `clear()` is removed, both gate tests take the section as
+their first statement, and a new deterministic test proves that a second thread
+cannot enter a held section and never observes the first section's gate.
+
+### The commands and their real output
+
+| Command | Result |
+| --- | --- |
+| `cargo fmt --all -- --check` | exit 0 |
+| `cargo clippy --locked --workspace --all-targets -- -D warnings` | exit 0, no warnings |
+| `cargo test --locked -p vela-desktop -- --test-threads=2` | **`143 passed; 0 failed; 3 ignored`** (142 before this round) |
+| `cargo test --locked -p vela-web` | **57 passed; 0 failed** |
+| `cargo build --locked -p vela-web --target wasm32-unknown-unknown --release` | exit 0 |
+| `cargo test --locked -p vela-desktop -- --test-threads=2 a_sign_out_stops_a_running_publication a_copy_gate_guard_restores_only_the_gate_it_installed a_copy_gate_section_admits_one_test_at_a_time` × 10 | **10 × `3 passed; 0 failed`** |
+| the same pair, 200 consecutive runs of the test binary with `--test-threads=2` | **200 runs ok; 0 failed** |
+| the whole desktop suite, 10 consecutive runs with `--test-threads=2` | **10 × `143 passed; 0 failed; 3 ignored`** |
+| `DISPLAY=:99 python3 scripts/verify_native_client.py --backend x11 --server target/debug/vela-server --test-preparation --evidence target/checks/tl01-r5-native` | **exit 0** — `report.json` `result.ok=true`, **314 checks**, **24 screenshots**, `temporary_originals_after_exit=0`, engine `Rodio/CPAL, owned isolated null sink`; reduced-motion window `reduced_motion.ok=true` (8 checks) |
+| the same command, re-run on the final tree with `--evidence target/checks/tl01-r5-native-final` (after the P3-4 rename) | **exit 0** — `result.ok=true`, **314 checks**, **24 screenshots**, `temporary_originals_after_exit=0`, same engine, reduced-motion 8 checks |
+
+The native run of this round was re-executed on the **final** tree at
+**05:17:29** (`target/checks/tl01-r5-native-final/`), after the last code edit of
+both changed Rust files (05:15:43 and 05:08:12) and with `git status` clean for
+them, so it is tied to this slice both by `mtime` and by byte identity. The
+earlier run of this round (04:44:37, `target/checks/tl01-r5-native/`) was produced
+on the sources of the interim commit `e7da338` (04:43:00) — byte-identical to the
+first submitted version `730ca09` but **not** to the final commit, whose only
+further change is the test-variable rename of the reviewer's P3-4; that run is
+evidence for the copy-gate code, not for the renamed line. `mtime` alone is not a
+source of code identity: reverting a review mutation rewrites a file without
+changing a byte, which is exactly what invalidated the round-4 claim below.
+
+### The race, measured
+
+The unmodified tree does **not** fail on its own: 200 runs of the two tests
+together produced **0 failures**. An instrumented run (timestamps only, reverted
+afterwards) shows the window — the second test's `clear()` at T+0 ms, the first
+test's `install_scoped` at T+2 ms, the copy's arrival at the gate at T+4 ms — so
+the standard schedule never opens it. A timing perturbation does:
+
+| Injected delay before the second test's `clear()` | Runs | Failed |
+| --- | --- | --- |
+| 0 ms | 20 | 0 |
+| 1 ms | 20 | 0 |
+| 2 ms | 20 | 0 |
+| 3 ms | 20 | **12** |
+| 5 ms | 20 | **12** |
+| 10 ms | 20 | 0 (the copy has already parked) |
+
+Those counts are **one sample, not a reproducible number**: they depend on the
+scheduler and on the host load. The review of this round re-measured the same
+sweep independently on this host (the pre-round-5 sources of `91249d3` checked
+out in place, the delay injected before the second test's `clear()`, the tree
+restored afterwards) and got **5 of 20** at 3 ms and **18 of 20** at 5 ms — the
+same phenomenon, a different count. What the sweep proves is the *existence* of
+the window (0 failures up to 2 ms, failures from 3 ms on, none again at 10 ms
+because the copy has already parked at the gate), not a specific rate. The
+fixed tree survives the same sweep at 0, 3, 5, 10 and 20 ms with **0 failures
+in 100 runs**.
+
+The failing line is always the same:
+
+```
+thread 'client::tests::a_sign_out_stops_a_running_publication' panicked at apps/desktop/src/client.rs:2985:10:
+isolated cleanup condition timed out: Elapsed(())
+test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 143 filtered out; finished in 3.01s
+```
+
+### The mutation proofs, run by me on this host
+
+Both proofs were produced by mutating this tree, running the tests and
+restoring it. The tree is byte-identical to the committed slice again
+(`cargo fmt --all -- --check` exit 0, strict clippy exit 0, the full desktop
+suite green).
+
+```
+# (a) the slot restore removed from Exclusive::drop:
+thread 'media_cache::tests::a_copy_gate_section_admits_one_test_at_a_time' panicked at apps/desktop/src/media_cache.rs:1832:17:
+the second section observes a clean slot: "a section must not leave a gate behind"
+test result: FAILED. 0 passed; 1 failed          (10 of 10 standalone runs)
+
+thread 'media_cache::tests::a_copy_gate_guard_restores_only_the_gate_it_installed' panicked at apps/desktop/src/media_cache.rs:1729:9:
+a section must not leave a gate behind
+test result: FAILED. 0 passed; 1 failed
+
+# (b) exclusive() removed from a_sign_out_stops_a_running_publication:
+#     the same 5 ms perturbation that the fixed tree survives 20/20:
+[mutation-b] hold_ms=5 iterations=20 runs_ok=12 runs_failed=8
+thread 'client::tests::a_sign_out_stops_a_running_publication' panicked at apps/desktop/src/client.rs:2985:10:
+isolated cleanup condition timed out: Elapsed(())
+#     the fixed tree, same perturbation:
+[fixed-with-section] hold_ms=0  iterations=20 runs_ok=20 runs_failed=0
+[fixed-with-section] hold_ms=5  iterations=20 runs_ok=20 runs_failed=0
+[fixed-with-section] hold_ms=10 iterations=20 runs_ok=20 runs_failed=0
+[fixed-with-section] hold_ms=20 iterations=20 runs_ok=20 runs_failed=0
+```
+
+When mutation (a) is combined with the guard test in one binary, the first
+panic can mask the second one, because the panicking test's own cleanup empties
+the slot. Each test fails deterministically on its own (10 of 10), and the suite
+as a whole is red.
+
+### The new and changed tests
+
+| Test | What it proves |
+| --- | --- |
+| `media_cache::tests::a_copy_gate_section_admits_one_test_at_a_time` (new) | While the first thread holds the section and has installed its gate, the second thread does not enter (atomic entry counter stays `0`) and finds the section held when it tries; when it enters, the slot is empty and the baseline is `None`, so the first section's gate is never observed by a later one and no section leaves a gate behind. Removing the restore from `Exclusive::drop` fails it with `the second section observes a clean slot: "a section must not leave a gate behind"`. |
+| `media_cache::tests::a_copy_gate_guard_restores_only_the_gate_it_installed` (changed) | The guard still restores only the gate it installed (`the foreign gate must survive`), and the section that owns the slot hands it back when it ends (`a section must not leave a gate behind`). `copy_gate::clear()` is gone. |
+| `client::tests::a_sign_out_stops_a_running_publication` (changed) | The test takes the section as its first statement, so no other test can empty the slot while its copy is expected to be held. |
+
+### The documentary correction
+
+The round-4 section of this file claimed that the native run "was generated
+**after** the final edit of both changed Rust files on this tree … so it belongs
+to this slice". The files on disk contradict the ordering: the artifact is from
+02:50:04–02:50:53 (`report.json` written at 02:50:56) and the two Rust files
+are from 02:55:18 — later. The artifact was produced on a tree whose two
+changed files are byte-identical to the commit (`git status` clean for
+`apps/desktop/src/client.rs` and `apps/desktop/src/media_cache.rs`), but it
+cannot be tied to the commit by `mtime`, and this document no longer claims that
+it can. The same wording is corrected in `docs/PROGRESS.md` and
+`docs/KNOWN_LIMITATIONS.md`.
+
+No web file, CSS, asset, server file, migration, manifest or lock file changed:
+`apps/web/**`, `Cargo.toml` and `Cargo.lock` are byte-identical, so no browser
+suite was run. The web crate was exercised only by `cargo test -p vela-web`
+(57 passed) and the wasm release build.
+
 ## TL-01 step 1 round 4 — the warm re-read leaves the admission (native) — 2026-10-24
 
 Round 4 closes the two documentary P2s and three P3s of the round-3 reviews, and
@@ -46,12 +193,16 @@ observers (`installed`, `clear`) for that assertion.
 | `cargo build --locked -p vela-desktop --example native-ui-qa --features native-qa` | exit 0 |
 | `DISPLAY=:99 python3 scripts/verify_native_client.py --backend x11 --server target/debug/vela-server --test-preparation --evidence target/checks/tl01-r4-native` | **exit 0** — `report.json` `result.ok=true`, **314 checks**, **24 screenshots**, `temporary_originals_after_exit=0`, engine `Rodio/CPAL, owned isolated null sink`; reduced-motion window `reduced_motion.ok=true` (8 checks, 1 PNG) |
 
-The native run above was generated **after** the final edit of both changed Rust
-files on this tree, so — unlike the round-3 artifact, which was produced before
-the commit and could not be tied to it by `mtime` — it belongs to this slice.
-It is still the *native window* evidence class: a real WebKitGTK window on the
-`:99` Xvfb display with one output stream on the QA-owned null sink. It is not a
-browser render and not hardware audio.
+The native run above was produced between 02:50:04 and 02:50:53 on 2026-10-24
+(`target/checks/tl01-r4-native/report.json` written at 02:50:56) on a tree whose
+two changed Rust files are byte-identical to this commit (`git status` clean for
+`apps/desktop/src/client.rs` and `apps/desktop/src/media_cache.rs`); the files
+were then rewritten byte-identically at 02:55:18 while the mutations of the
+review proofs were reverted, so the artifact cannot be tied to the commit by
+`mtime` and this document does not claim it can. It is still the *native window*
+evidence class: a real WebKitGTK window on the `:99` Xvfb display with one output
+stream on the QA-owned null sink. It is not a browser render and not hardware
+audio.
 
 No web file, CSS, asset, server file, migration, manifest or lock file changed:
 `apps/web/**`, `Cargo.toml` and `Cargo.lock` are byte-identical, so no browser

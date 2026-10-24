@@ -448,15 +448,16 @@ pub(crate) mod copy_gate {
     use std::{
         path::{Path, PathBuf},
         sync::{
-            Arc, Condvar, Mutex, OnceLock,
+            Arc, Condvar, LazyLock, Mutex, MutexGuard,
             atomic::{AtomicUsize, Ordering},
         },
     };
 
     /// One installed gate. It is global because `copy_verified` runs on a
-    /// blocking worker without a client handle; one test at a time installs it.
-    /// The gate only holds copies below `root`, so tests that run in parallel
-    /// with their own private cache root are never held.
+    /// blocking worker without a client handle; one test at a time installs it,
+    /// which the section (`exclusive`) enforces. The gate only holds copies
+    /// below `root`, so tests that run in parallel with their own private cache
+    /// root are never held.
     pub(crate) struct CopyGate {
         root: PathBuf,
         entered: AtomicUsize,
@@ -486,15 +487,84 @@ pub(crate) mod copy_gate {
         }
     }
 
-    static INSTALLED: OnceLock<Mutex<Option<Arc<CopyGate>>>> = OnceLock::new();
+    static INSTALLED: LazyLock<Mutex<Option<Arc<CopyGate>>>> = LazyLock::new(|| Mutex::new(None));
 
-    fn slot() -> &'static Mutex<Option<Arc<CopyGate>>> {
-        INSTALLED.get_or_init(|| Mutex::new(None))
+    /// The section lock. The gate slot is global because `copy_verified` runs
+    /// on a blocking worker without a client handle, so the tests that install
+    /// a gate must never hold it at the same time.
+    static SECTION: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+    /// The exclusive right to install the global gate.
+    ///
+    /// Entering the section takes the process-wide section lock, saves the
+    /// current slot value and empties the slot, so the test inside the section
+    /// starts from a clean state. Dropping the guard restores the saved value
+    /// and releases the lock — also when the test panics, so a red test never
+    /// leaves the slot or the lock behind.
+    pub(crate) struct Exclusive {
+        saved: Option<Arc<CopyGate>>,
+        _section: MutexGuard<'static, ()>,
+    }
+
+    impl Exclusive {
+        /// The slot value observed when this section was entered.
+        ///
+        /// A section that ends restores this value, so the baseline of the next
+        /// section is `None` unless a section leaked a gate.
+        pub(crate) fn baseline(&self) -> Option<Arc<CopyGate>> {
+            self.saved.clone()
+        }
+    }
+
+    impl Drop for Exclusive {
+        fn drop(&mut self) {
+            // The slot is restored *before* the section lock is released: the
+            // next section observes the restored slot, not a foreign one.
+            if let Ok(mut slot) = INSTALLED.lock() {
+                *slot = self.saved.take();
+            }
+        }
+    }
+
+    /// Take the exclusive right to install the global gate.
+    ///
+    /// A poisoned section lock is recovered instead of propagated: the lock
+    /// guards no state of its own, and the slot it protects is restored by
+    /// `Drop` even when the test panics. The section is not re-entrant: a
+    /// second call in the same thread blocks forever, so one guard per test.
+    pub(crate) fn exclusive() -> Exclusive {
+        let section = SECTION
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let saved = INSTALLED.lock().ok().and_then(|mut slot| slot.take());
+        Exclusive {
+            saved,
+            _section: section,
+        }
+    }
+
+    /// Whether a section is held right now.
+    ///
+    /// A test uses it to prove that the section it found was really taken
+    /// instead of merely free.
+    pub(crate) fn section_is_held() -> bool {
+        match SECTION.try_lock() {
+            Ok(_) => false,
+            Err(std::sync::TryLockError::WouldBlock) => true,
+            Err(std::sync::TryLockError::Poisoned(_)) => true,
+        }
     }
 
     /// Install a gate for the current test and return the previous one.
-    pub(crate) fn install(gate: Arc<CopyGate>) -> Option<Arc<CopyGate>> {
-        slot().lock().ok().and_then(|mut slot| slot.replace(gate))
+    ///
+    /// Only this module and its sibling tests install gates directly; a test
+    /// outside them uses `install_scoped`, and all of them are meant to run
+    /// inside a section.
+    pub(super) fn install(gate: Arc<CopyGate>) -> Option<Arc<CopyGate>> {
+        INSTALLED
+            .lock()
+            .ok()
+            .and_then(|mut slot| slot.replace(gate))
     }
 
     /// Remove *this* gate only if the slot still holds it, restoring the
@@ -502,7 +572,7 @@ pub(crate) mod copy_gate {
     /// (the suite runs with more than one thread) must not steal the slot of a
     /// gate it does not own.
     fn restore_owned(gate: &Arc<CopyGate>, previous: Option<Arc<CopyGate>>) {
-        if let Ok(mut slot) = slot().lock() {
+        if let Ok(mut slot) = INSTALLED.lock() {
             let owned = slot
                 .as_ref()
                 .is_some_and(|current| Arc::ptr_eq(current, gate));
@@ -544,22 +614,18 @@ pub(crate) mod copy_gate {
 
     /// The installed gate, for a test that asserts which gate owns the slot.
     pub(crate) fn installed() -> Option<Arc<CopyGate>> {
-        slot().lock().ok().and_then(|slot| slot.clone())
-    }
-
-    /// Remove whatever gate is installed. Only the tests that install a gate
-    /// outside a guard need it.
-    pub(crate) fn clear() {
-        if let Ok(mut slot) = slot().lock() {
-            *slot = None;
-        }
+        INSTALLED.lock().ok().and_then(|slot| slot.clone())
     }
 
     /// Hold the running copy until the gate is released. Called with the first
     /// copied block already written to the staging file, so the staging file
     /// really exists while the test cancels the copy.
     pub(crate) fn hold_after_first_block(staged: &Path) {
-        let Some(gate) = slot().lock().ok().and_then(|slot| slot.as_ref().cloned()) else {
+        let Some(gate) = INSTALLED
+            .lock()
+            .ok()
+            .and_then(|slot| slot.as_ref().cloned())
+        else {
             return;
         };
         if !staged.starts_with(&gate.root) {
@@ -834,6 +900,7 @@ mod tests {
     use super::*;
     use std::cell::Cell;
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     const ORIGIN: &str = "https://music.example.org/";
     const OTHER_ORIGIN: &str = "https://other.example.org/";
@@ -1625,7 +1692,8 @@ mod tests {
     #[test]
     fn a_copy_gate_guard_restores_only_the_gate_it_installed() {
         let root = tempfile::tempdir().unwrap();
-        copy_gate::clear();
+        // The gate slot is global: only one test may hold it at a time.
+        let section = copy_gate::exclusive();
         let first = copy_gate::CopyGate::new(root.path());
         let second = copy_gate::CopyGate::new(root.path());
         let outer = copy_gate::install_scoped(first.clone());
@@ -1655,7 +1723,114 @@ mod tests {
             ),
             "a guard must not remove a gate it does not own"
         );
-        copy_gate::clear();
-        assert!(copy_gate::installed().is_none());
+        // The section owns the slot: it hands it back when it ends. The next
+        // section observes the state the previous one left.
+        drop(section);
+        let next = copy_gate::exclusive();
+        assert!(
+            next.baseline().is_none(),
+            "a section must not leave a gate behind"
+        );
+    }
+
+    /// The global gate is installed by tests that must not run at the same
+    /// time: `copy_verified` runs on a blocking worker without a client
+    /// handle, so the slot cannot be scoped to one client.
+    ///
+    /// The second thread must not enter the section while the first one holds
+    /// it, and it must find the slot empty when it does: the gate of the first
+    /// section is never observed by a later one, and a section never leaves a
+    /// gate behind.
+    #[test]
+    fn a_copy_gate_section_admits_one_test_at_a_time() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let root = tempfile::tempdir().unwrap();
+        let first_gate = copy_gate::CopyGate::new(root.path());
+        let second_gate = copy_gate::CopyGate::new(root.path());
+        let second_entered = Arc::new(AtomicUsize::new(0));
+
+        let (attempted_tx, attempted_rx) = mpsc::channel::<()>();
+        let (held_tx, held_rx) = mpsc::channel::<bool>();
+        let (outcome_tx, outcome_rx) = mpsc::channel::<Result<(), String>>();
+
+        // The first test holds the section and installs its own gate.
+        let section = copy_gate::exclusive();
+        let _previous = copy_gate::install(first_gate.clone());
+        assert!(Arc::ptr_eq(
+            &copy_gate::installed().expect("the first gate is installed"),
+            &first_gate
+        ));
+
+        let worker = {
+            let second_entered = second_entered.clone();
+            let second_gate = second_gate.clone();
+            std::thread::spawn(move || {
+                attempted_tx
+                    .send(())
+                    .expect("the first thread receives the attempt");
+                let held = copy_gate::section_is_held();
+                held_tx
+                    .send(held)
+                    .expect("the first thread receives the section state");
+                let section = copy_gate::exclusive();
+                second_entered.fetch_add(1, Ordering::SeqCst);
+                let outcome = (|| {
+                    if section.baseline().is_some() {
+                        return Err("a section must not leave a gate behind".to_owned());
+                    }
+                    if copy_gate::installed().is_some() {
+                        return Err("a section must start with an empty slot".to_owned());
+                    }
+                    let _gate = copy_gate::install_scoped(second_gate.clone());
+                    let installed = copy_gate::installed().expect("the second gate is installed");
+                    if !Arc::ptr_eq(&installed, &second_gate) {
+                        return Err("the second section must own the slot".to_owned());
+                    }
+                    Ok(())
+                })();
+                drop(section);
+                outcome_tx
+                    .send(outcome)
+                    .expect("the first thread receives the outcome");
+            })
+        };
+
+        attempted_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("the second thread attempts the section");
+        assert_eq!(
+            second_entered.load(Ordering::SeqCst),
+            0,
+            "the second thread must not enter while the section is held"
+        );
+        assert!(
+            held_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("the second thread reports the section state"),
+            "the second thread must find the section held"
+        );
+        assert_eq!(
+            second_entered.load(Ordering::SeqCst),
+            0,
+            "the second thread must not enter while the section is held"
+        );
+
+        // The first section ends: the slot is handed back before the lock is
+        // released, so the second thread finds an empty slot. `_previous` is the
+        // slot value saved by `install` (always `None` here) and is not a guard.
+        drop(section);
+
+        let outcome = outcome_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("the second thread enters the section");
+        assert_eq!(
+            second_entered.load(Ordering::SeqCst),
+            1,
+            "the second thread enters after the first section ended"
+        );
+        outcome.expect("the second section observes a clean slot");
+        worker.join().expect("the second thread finishes");
     }
 }

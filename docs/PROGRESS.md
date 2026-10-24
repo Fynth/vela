@@ -1,5 +1,96 @@
 # Verified progress
 
+## TL-01 step 1 round 5 — the test gate is serialized (native) — 2026-10-24
+
+Round 5 closes a real defect of the **test layer** of the round-4 slice and one
+false documentary claim. No production line changed: `prepare`, `cached_lease`,
+`recheck_cache`, the publication registry and `copy_verified` are byte-identical
+to `91249d3` (`git diff` touches only `#[cfg(test)]` code), and the trust model
+is untouched.
+
+**The defect.** `media_cache::copy_gate` is a process-global slot
+(`copy_verified` runs on a blocking worker without a client handle, so the gate
+cannot be scoped to one client). Two tests install that slot:
+`client.rs::tests::a_sign_out_stops_a_running_publication` holds a copy *inside*
+`copy_verified` and waits for `gate.entered() == 1`, and
+`media_cache::tests::a_copy_gate_guard_restores_only_the_gate_it_installed`
+began with an unconditional `copy_gate::clear()`. A `clear()` that lands between
+the first test's installation and the arrival of its copy empties the slot: the
+copy then runs **unheld**, `entered()` stays `0` and the first test dies on its
+3 s `eventually` timeout. The second failure mode is the mirror image: a
+`clear()` between the two guards of the second test makes the first guard
+restore a gate that is no longer owned, and the assertion "the foreign gate must
+survive" fails.
+
+**How the race was measured.** 200 runs of the two tests together on the
+unmodified tree (`--test-threads=2`) produced **0 failures** — the standard
+schedule never opens the window. An instrumented run (timestamps only, reverted
+afterwards) shows why: the second test's `clear()` runs at T+0 ms, the first
+test installs its gate at T+2 ms and the copy reaches the gate at T+4 ms, so the
+window is ~2 ms wide and the second test is finished before it opens. A timing
+perturbation does open it: with a 3 ms delay injected before the second test's
+`clear()`, **12 of 20** runs fail; with 5 ms, **12 of 20**; with 10 ms, **0 of
+20** (the copy has already parked). The failing line is always
+`apps/desktop/src/client.rs:2985`: `isolated cleanup condition timed out:
+Elapsed(())`.
+
+**The fix.** `copy_gate` now owns an **exclusive section**: `exclusive()` takes
+a process-wide `std::sync::Mutex<()>`, saves the slot value and empties the
+slot, so the test inside the section starts from a clean state; dropping the
+guard restores the saved value **before** the lock is released, also when the
+test panics. `clear()` is gone — the section is the only way to take the slot,
+and no test can empty a slot it does not own. Both gate tests take the section
+as their first statement. A new deterministic test,
+`media_cache::tests::a_copy_gate_section_admits_one_test_at_a_time`, runs two
+threads: while the first holds the section and has installed its gate, the
+second must not enter (an atomic counter stays `0`, and the second thread finds
+the section held when it tries), and when it does enter, it observes an empty
+slot and a `None` baseline — the gate of the first section is never visible to a
+later one.
+
+**The mutations.** Removing the slot restore from `Exclusive::drop` fails the
+new test deterministically (`the second section observes a clean slot: "a
+section must not leave a gate behind"`, 10/10 standalone runs) and the guard
+test as well (`a section must not leave a gate behind`). Removing
+`exclusive()` from the client test brings the race back: with the same 5 ms
+perturbation **8 of 20** runs fail with the 3 s timeout, while the fixed tree
+passes **20 of 20** at 0, 5, 10 and 20 ms.
+
+**The false claim.** `docs/QA_EVIDENCE.md` and this file stated that the round-4
+native artifact was "generated after the final edit of both changed Rust files
+… so it belongs to this slice". The files on disk say otherwise:
+`target/checks/tl01-r4-native/report.json` is from 02:50:56 and the two Rust
+files are from 02:55:18 — later. The artifact was produced on a tree whose two
+changed files are byte-identical to the commit (`git status` clean), but it
+**cannot be tied to the commit by `mtime`**, and the documents no longer claim
+that it can.
+
+**Checks on the final tree.** `cargo fmt --all -- --check` exit 0; `cargo
+clippy --locked --workspace --all-targets -- -D warnings` exit 0; `cargo test
+--locked -p vela-desktop -- --test-threads=2` **143 passed / 0 failed / 3
+ignored** (142 before this round, all kept); `cargo test --locked -p vela-web`
+57 passed; `cargo build --locked -p vela-web --target wasm32-unknown-unknown
+--release` exit 0; ten consecutive runs of the three gate tests with
+`--test-threads=2` → 0 failures; 200 runs of the pair → 0 failures; ten full
+desktop suite runs → 0 failures. The native X11 window was re-run on this
+tree: **314 checks / 24 PNG / exit 0**, `result.ok=true`,
+`temporary_originals_after_exit=0`, engine `Rodio/CPAL, owned isolated null
+sink`, reduced-motion window `reduced_motion.ok=true` (8 checks) — evidence in
+`target/checks/tl01-r5-native/`, produced at 04:44:37 on the sources of the
+interim commit `e7da338` (04:43:00). The final tree was re-run separately:
+`target/checks/tl01-r5-native-final/`, produced at 05:17:29 — after the last code
+edit (05:15:43) — with the same result (314 checks, 24 PNG, `result.ok=true`,
+`temporary_originals_after_exit=0`), so the final slice has an artifact of its own
+and the earlier one is evidence for the copy-gate code only. `mtime` alone is not
+a source of code identity: reverting a review mutation rewrites a file without
+changing a byte, which is why the round-4 artifact is tied by content instead.
+Both are one run of the native window class, not repeated runs, and not a browser
+render. No browser surface changed: `apps/web/**` is byte-identical, so only the
+web unit tests and the wasm build were run for the web crate.
+
+Only `apps/desktop/src/client.rs` and `apps/desktop/src/media_cache.rs`
+changed. Progressive decode and Range remain unapproved.
+
 ## TL-01 step 1 round 4 — the warm re-read leaves the transfer admission (native) — 2026-10-24
 
 Round 4 closes the two documentary P2s and three P3s of the round-3 reviews. One
@@ -25,8 +116,14 @@ as busy`; restoring the previous gate unconditionally fails with `the foreign ga
 must survive`. Full gate on the final tree: fmt exit 0, strict workspace clippy
 exit 0, `cargo test --locked --workspace` all green (`vela-desktop` **142 passed
 / 0 failed / 3 ignored**, `vela-web` 57), wasm release exit 0, and the native X11
-window **314 checks / 24 PNG / exit 0** with `temporary_originals_after_exit=0`,
-regenerated after the last code edit so it belongs to this slice.
+window **314 checks / 24 PNG / exit 0** with `temporary_originals_after_exit=0`.
+The native run was produced between 02:50:04 and 02:50:53 on 2026-10-24
+(`target/checks/tl01-r4-native/report.json` written at 02:50:56) on a tree whose
+two changed Rust files are byte-identical to this commit (`git status` clean for
+`apps/desktop/src/client.rs` and `apps/desktop/src/media_cache.rs`); the files
+were then rewritten byte-identically at 02:55:18 while the mutations of the
+review proofs were reverted, so the artifact cannot be tied to the commit by
+`mtime` and this document does not claim it can.
 
 Only `apps/desktop/src/client.rs` and `apps/desktop/src/media_cache.rs` changed.
 The trust model is untouched: the decoder still receives one complete verified

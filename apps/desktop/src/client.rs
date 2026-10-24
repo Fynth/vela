@@ -4414,6 +4414,9 @@ mod tests {
     /// began leaves nothing behind.
     #[tokio::test]
     async fn a_sign_out_stops_a_running_publication() {
+        // The copy gate is a process-global slot: only one test may install a
+        // gate at a time, or the copy of this test would run unheld.
+        let _section = media_cache::copy_gate::exclusive();
         let original = vec![44_u8; 3 * media_cache::BLOCK_BYTES];
         let counters = Arc::new(StreamCounters::default());
         let router = tracked_streams(&[(TRACK_ID.to_owned(), original.clone(), counters.clone())]);

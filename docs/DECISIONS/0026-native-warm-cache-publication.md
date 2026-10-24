@@ -151,5 +151,8 @@ the transfer admission — a held re-read does not refuse the play of another
 track with `PREPARE_BUSY`, and the track is still transferred once. The test
 gate also restores only the gate it installed, so two tests installing it
 concurrently cannot steal each other's slot.
+Round 5 adds: the test gate is serialized by an exclusive section — the global
+slot cannot be emptied by another test, every test that installs a gate holds
+the section, and a section restores the slot it found when it ends.
 Existing desktop suite (129 passed / 0 failed / 3 ignored at baseline) must stay
 green.
