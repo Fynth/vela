@@ -59,12 +59,11 @@ before this round, all kept); `cargo test --locked -p vela-web` 57 passed;
 exit 0; the native X11 window (`scripts/verify_native_client.py --backend x11
 --test-preparation`) **exit 0, 314 checks, 24 PNG, `result.ok=true`,
 `temporary_originals_after_exit=0`**, reduced-motion window 8 checks — evidence
-in `target/checks/tl02-r2-native/`, produced at **07:27:04** on the final tree
-(driver rebuilt at 07:25:52, the two Rust files last edited at 07:23:42 /
-07:25:00). An earlier run of the same code is preserved under
-`target/checks/tl02-r2-native-071703/` (**07:17:03**); the verification script
-refuses to write into a non-empty evidence directory, so the final run went
-into a fresh directory and the earlier one was moved aside, not overwritten.
+in `target/checks/tl02-final-native/`, produced at **07:53:39** on the
+committed tree (driver rebuilt at 07:52:43 from sources byte-identical to the
+commit). Two earlier runs of the same code are preserved under
+`target/checks/tl02-r2-native/` (**07:27:04**) and
+`target/checks/tl02-r2-native-071703/` (**07:17:03**).
 Five consecutive full-suite runs: 0 failures. The mutations are
 proven, not asserted: a label that runs ahead of the clock fails 2 of the 155
 tests, a mark that does nothing fails 7, a client that does not mark fails 6,
@@ -170,8 +169,8 @@ missing test in both lists is
 `client::tests::a_confirmed_hit_is_marked_in_the_background_and_never_delays_the_lease`.
 The native artifact of this round is **older** than the two Rust files it was
 quoted for (06:22:45 against 06:23:42 / 06:24:07), so it belongs to an
-intermediate revision; the artifact of the final tree is the round-2 run
-`target/checks/tl02-r2-native/`.)*
+intermediate revision; the artifact of the committed tree is the round-2 run
+`target/checks/tl02-final-native/`.)*
 
 **Not covered.** The multiprocess mark↔publication race, a real ENOSPC, the
 production 200-entry/2GiB budget eviction and every non-Linux target are still

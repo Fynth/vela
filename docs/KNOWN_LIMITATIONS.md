@@ -16,11 +16,13 @@ entry. What is **not** covered by that increment is here.
   meantime, the older sidecar now describes bytes that are not there, every hit
   of that entry misses and the entry is fetched again once. The integrity
   check still holds in that case, the cache simply does not serve that entry
-  any more. The label itself cannot move *back* through this race — a mark
-  always writes the current clock — and the reverse order leaves the
-  publication's fresh `saved_at` in place. The mark is not run at all while a
-  publication of the same key is live (`in_flight_publication`), so the common
-  case is covered — the *rare* one is not.
+  any more. The label is computed *before* the rename, so a mark that is
+  delayed past a later publication writes the older label over it — the label
+  of an entry can go back without any clock moving, and the entry is evicted
+  earlier than its last playback warrants (one re-download, nothing else). The
+  reverse order leaves the publication's fresh `saved_at` in place. The mark
+  is not run at all while a publication of the same key is live
+  (`in_flight_publication`), so the common case is covered — the *rare* one is not.
 - **The multiprocess case is not exercised.** Two `vela-desktop` processes on
   one cache root, or a process against a second instance, were not run. The
   staging name is unique per process and per operation, so the files cannot

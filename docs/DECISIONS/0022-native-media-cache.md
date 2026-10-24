@@ -79,10 +79,13 @@ representation in the meantime, the older sidecar now describes bytes that are
 not there, every hit of that entry misses and the entry is fetched again once
 — the integrity check still holds, the cache simply does not serve that entry
 any more. The reverse order leaves the publication's fresh `saved_at` in place.
-The label of a mark is the current clock, so the race cannot move it *back* to
-an older value: the only way the label of an entry goes back is a system clock
-that moves back. A mark that lands after the eviction pass computed its
-candidates can still be evicted, which costs one re-download and nothing else.
+The label of a mark is computed before its rename, so a mark that is delayed past
+a later publication writes the *older* label over it: the label of an entry can
+go back without any system clock moving, and the entry is then evicted earlier
+than its last playback warrants — one re-download and nothing else. The reverse
+order leaves the publication's fresh `saved_at` in place. A mark that lands
+after the eviction pass computed its candidates can still be evicted, which
+costs one re-download and nothing else.
 The mark does not run against a live publication of the same key in the first
 place.
 

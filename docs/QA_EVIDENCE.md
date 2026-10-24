@@ -46,16 +46,23 @@ untouched.
 | `cargo build --locked -p vela-web --target wasm32-unknown-unknown --release` | exit 0 (nothing to rebuild: `apps/web/**` is byte-identical) |
 | the whole desktop suite, 5 consecutive runs with `--test-threads=2` | **5 × `155 passed; 0 failed; 3 ignored`** |
 | `cargo build --locked -p vela-desktop --example native-ui-qa --features native-qa` | exit 0 (the example needs the `native-qa` feature; without it the build fails with "requires the features: `native-qa`") |
-| `DISPLAY=:99 python3 scripts/verify_native_client.py --backend x11 --server target/debug/vela-server --driver target/debug/examples/native-ui-qa --evidence target/checks/tl02-r2-native --test-preparation` | **exit 0** — `report.json` `result.ok=true`, **314 checks**, **24 PNG**, `temporary_originals_after_exit=0`, engine `Rodio/CPAL, owned isolated null sink`, reduced-motion window `reduced_motion.ok=true` (8 checks), including "Native preparation: real 65536-byte partial transfer canceled on socket, generation 3→4, no late load and successful Play retry" — run on the final tree at **07:27:04**; the earlier run of the same code is preserved under `target/checks/tl02-r2-native-071703/` (**07:17:03**) |
+| `DISPLAY=:99 python3 scripts/verify_native_client.py --backend x11 --server target/debug/vela-server --driver target/debug/examples/native-ui-qa --evidence target/checks/tl02-final-native --test-preparation` | **exit 0** — `report.json` `result.ok=true`, **314 checks**, **24 PNG**, `temporary_originals_after_exit=0`, engine `Rodio/CPAL, owned isolated null sink`, the reduced-motion sub-window reported `result.ok=true` in `reduced-report.json` (8 checks merged into those 314, 1 PNG; the merged `report.json` keeps only its `checks`/`screenshots`), including "Native preparation: real 65536-byte partial transfer canceled on socket, generation 3→4, no late load and successful Play retry" — run by the team lead at **07:53:39** on the tree whose two Rust sources are byte-identical to this commit; the only later writes are documentation, which cannot change the driver binary; two earlier runs of the same code are preserved under `target/checks/tl02-r2-native/` (**07:27:04**) and `target/checks/tl02-r2-native-071703/` (**07:17:03**) |
 
-The round-2 artifact `target/checks/tl02-r2-native/` was produced at
-**07:27:04** on the final tree: the driver binary it ran was rebuilt from the
-final sources at **07:25:52**, and the last edit of the two changed Rust files
-is **07:23:42** (`media_cache.rs`) and **07:25:00** (`client.rs`) — the
-artifact is later than the code it exercises. (`target/debug/vela-server` is
-from 01:28:44: no file of the server crate changed in this slice, and
-`cargo build --locked -p vela-server` reports it up to date against the
-current sources.)
+The artifact of the committed tree is `target/checks/tl02-final-native/`,
+produced at **07:53:39** by the team lead on `caab449`: the driver binary it ran
+was rebuilt from those sources at **07:52:43**, and the two changed Rust files
+are byte-identical to `caab449`
+(`git diff --quiet HEAD -- apps/desktop/src/*.rs` is empty). Their `mtime` is
+**07:52:12** / **07:49:32** — later than the round-2 run below, because the
+mutation and probe experiments of the review passes rewrote them. That is why
+the mtime of an artifact is never cited as proof here: the claim is the byte
+identity of the sources plus a run made afterwards. The last Rust write is
+**07:52:12** and the driver was built at **07:52:43**, i.e. after it; every later
+write is documentation, which cannot change the binary.
+(`target/debug/vela-server` is from **01:23:38** in that run: no file of the
+server crate changed in this slice, and the team lead rebuilt it on this tree at
+**08:42:43** — `cargo build --locked -p vela-server` exit 0 — so the older
+binary it ran and the current one are the same code.)
 
 An earlier round-2 run of the same code is preserved under
 `target/checks/tl02-r2-native-071703/` (**07:17:03**). The sources it
@@ -165,8 +172,8 @@ produced at **06:22**, while the two changed Rust files carry an `mtime` of
 that the artifact came "after the last edit of the two changed Rust files
 (06:20)" was therefore **not provable and is withdrawn**: the artifact belongs
 to an **intermediate revision** of the two files, not to the tree this section
-describes. The artifact of the **final** tree is the round-2 run
-(`target/checks/tl02-r2-native/`), see the round-2 section below. It is one run
+describes. The artifact of the **committed** tree is the round-2 run
+(`target/checks/tl02-final-native/`), see the round-2 section below. It is one run
 of the native window class, not repeated runs, and **not** a browser render: no
 web file changed in this slice.
 
