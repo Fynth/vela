@@ -28,6 +28,15 @@ def main() -> None:
                AR_aarch64_linux_android=str(ndk / 'llvm-ar'),
                CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=str(ndk / 'aarch64-linux-android26-clang'))
     env['PATH'] = str(ndk) + os.pathsep + env['PATH']
+    # The NDK names its compilers after the API level, while the crates that
+    # compile C code look for the plain target name. The plain name is created
+    # here as well, so a build outside the workflow finds the same tools.
+    for prefix in ('aarch64-linux-android', 'armv7a-linux-androideabi', 'x86_64-linux-android'):
+        for suffix in ('clang', 'clang++'):
+            plain = ndk / f'{prefix}-{suffix}'
+            versioned = ndk / f'{prefix}26-{suffix}'
+            if not plain.exists() and versioned.exists():
+                plain.symlink_to(versioned)
     names = ('ANDROID_KEYSTORE_BASE64', 'ANDROID_KEYSTORE_PASSWORD', 'ANDROID_KEY_ALIAS', 'ANDROID_KEY_PASSWORD')
     supplied = [bool(os.environ.get(name)) for name in names]
     if any(supplied) and not all(supplied):

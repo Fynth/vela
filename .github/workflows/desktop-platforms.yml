@@ -13,6 +13,10 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The release scripts read the commit, the version and the tag from
+          # the history, so a shallow copy is not enough.
+          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.99.0
@@ -99,6 +103,10 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The release scripts read the commit, the version and the tag from
+          # the history, so a shallow copy is not enough.
+          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.99.0
@@ -125,6 +133,10 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The release scripts read the commit, the version and the tag from
+          # the history, so a shallow copy is not enough.
+          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.99.0
@@ -147,6 +159,15 @@ jobs:
         run: |
           sdkmanager 'platforms;android-35' 'build-tools;35.0.0' 'ndk;26.3.11579264'
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/26.3.11579264" >> "$GITHUB_ENV"
+          # The NDK names its compilers after the API level. The crates that
+          # compile C code look for the plain target name, so it is provided,
+          # and the toolchain directory is on the path for the following steps.
+          ndk_bin="$ANDROID_HOME/ndk/26.3.11579264/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          for prefix in aarch64-linux-android armv7a-linux-androideabi x86_64-linux-android; do
+            ln -sf "${prefix}26-clang" "$ndk_bin/${prefix}-clang"
+            ln -sf "${prefix}26-clang++" "$ndk_bin/${prefix}-clang++"
+          done
+          echo "$ndk_bin" >> "$GITHUB_PATH"
           mkdir -p "$RUNNER_TEMP/dioxus"
           gh release download v0.7.10 --repo DioxusLabs/dioxus --pattern dx-x86_64-unknown-linux-gnu.tar.gz --pattern dx-x86_64-unknown-linux-gnu.sha256 --dir "$RUNNER_TEMP/dioxus"
           cd "$RUNNER_TEMP/dioxus"

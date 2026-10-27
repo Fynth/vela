@@ -11,6 +11,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The release scripts read the commit, the version and the tag from
+          # the history, so a shallow copy is not enough.
+          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.99.0
@@ -74,6 +78,10 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The release scripts read the commit, the version and the tag from
+          # the history, so a shallow copy is not enough.
+          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.99.0
@@ -109,6 +117,10 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The release scripts read the commit, the version and the tag from
+          # the history, so a shallow copy is not enough.
+          fetch-depth: 0
       - uses: docker/setup-buildx-action@v3
       - uses: docker/build-push-action@v6
         with:
