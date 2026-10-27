@@ -1,10 +1,13 @@
-# Distribution (0.12.9)
+# Distribution (0.12.10)
 
+0.12.10 is the release candidate. It is tagged and builds through the same
+workflow as 0.12.9, which is the last fully published set:
 [Public v0.12.9](https://github.com/Fynth/vela/releases/tag/v0.12.9) and
-[AUR vela-music-bin 0.12.9-1](https://aur.archlinux.org/packages/vela-music-bin)
-are published; `yay -Si vela-music-bin` resolves the package. All release jobs passed.
-The nine published artifacts were re-downloaded and every SHA-256 in
-`SHA256SUMS` verified against them.
+[AUR vela-music-bin 0.12.9-1](https://aur.archlinux.org/packages/vela-music-bin),
+where `yay -Si vela-music-bin` resolves the package. The nine published 0.12.9
+artifacts were re-downloaded and every SHA-256 in `SHA256SUMS` verified against
+them, and the published APK was checked for its v1, v2 and v3 signatures and
+its certificate.
 Exact source, hashes and evidence: [release ledger](RELEASE_LEDGER_0.12.9.md).
 
 The release workflow runs on main pushes, pull requests, version tags and manual

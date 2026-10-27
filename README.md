@@ -1,6 +1,6 @@
 # Vela Music
 
-Downloads: [v0.12.9](https://github.com/Fynth/vela/releases/tag/v0.12.9) — Windows EXE, Linux AppImage/DEB/tar.gz and signed Android arm64 APK.
+Downloads: [v0.12.9](https://github.com/Fynth/vela/releases/tag/v0.12.9) — Windows EXE, Linux AppImage/DEB/tar.gz and signed Android arm64 APK. 0.12.10 is the release candidate and builds through the same workflow.
 Arch: `yay -S vela-music-bin` ([AUR](https://aur.archlinux.org/packages/vela-music-bin)) — 0.12.9-1.
 See [requirements, CI and signing](docs/DISTRIBUTION.md) and [verified release evidence](docs/RELEASE_LEDGER_0.12.9.md).
 
